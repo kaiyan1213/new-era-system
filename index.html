@@ -171,9 +171,57 @@
 
   /* SQL modal */
   .sql-block { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-family: var(--mono); font-size: 11px; color: #94a3b8; line-height: 1.7; white-space: pre; overflow-x: auto; max-height: 300px; overflow-y: auto; }
+
+  /* LOGIN SCREEN */
+  .login-screen { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 9999; }
+  .login-box { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 40px; width: 380px; }
+  .login-logo { width: 44px; height: 44px; background: linear-gradient(135deg, var(--accent), var(--accent2)); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 16px; color: #fff; margin-bottom: 20px; }
+  .login-title { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+  .login-sub { font-size: 13px; color: var(--muted); margin-bottom: 28px; }
+  .login-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+  .login-label { font-size: 12px; color: var(--muted); font-weight: 500; }
+  .login-input { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 10px 14px; font-size: 14px; font-family: 'Inter', sans-serif; outline: none; transition: border 0.15s; width: 100%; }
+  .login-input:focus { border-color: var(--accent); }
+  .login-btn { width: 100%; padding: 11px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 6px; transition: background 0.15s; font-family: 'Inter', sans-serif; }
+  .login-btn:hover { background: #3d6aef; }
+  .login-error { color: var(--red); font-size: 12px; margin-top: 8px; min-height: 16px; }
+
+  /* USER CHIP IN NAV */
+  .nav-user { display: flex; align-items: center; gap: 8px; }
+  .user-chip { display: flex; align-items: center; gap: 6px; background: var(--surface2); border: 1px solid var(--border); border-radius: 20px; padding: 4px 12px 4px 6px; }
+  .user-avatar { width: 22px; height: 22px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent2)); display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff; }
+  .user-name { font-size: 12px; font-weight: 500; color: var(--text); }
+  .user-role { font-size: 10px; color: var(--muted); }
+  .logout-btn { padding: 5px 10px; border-radius: 6px; background: transparent; border: 1px solid var(--border); color: var(--muted); font-size: 11px; cursor: pointer; font-family: 'Inter', sans-serif; transition: all 0.15s; }
+  .logout-btn:hover { color: var(--red); border-color: rgba(239,68,68,0.3); }
+
+  /* AUDIT LOG */
+  .audit-action { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius: 3px; }
+  .audit-create { background: rgba(34,197,94,0.1); color: var(--green); }
+  .audit-update { background: rgba(245,158,11,0.1); color: var(--yellow); }
+  .audit-delete { background: rgba(239,68,68,0.1); color: var(--red); }
 </style>
 </head>
 <body>
+
+<!-- LOGIN SCREEN -->
+<div class="login-screen" id="loginScreen">
+  <div class="login-box">
+    <div class="login-logo">NE</div>
+    <div class="login-title">New Era System</div>
+    <div class="login-sub">New Era Consulting Enterprise — Internal</div>
+    <div class="login-field">
+      <label class="login-label">Username</label>
+      <input type="text" id="loginUser" class="login-input" placeholder="e.g. kaiyan" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <div class="login-field">
+      <label class="login-label">Password</label>
+      <input type="password" id="loginPass" class="login-input" placeholder="enter password" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <button class="login-btn" onclick="doLogin()">Sign In</button>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
 
 <nav class="nav">
   <div class="nav-brand">
@@ -183,13 +231,26 @@
       <div class="nav-sub">Internal Management System</div>
     </div>
   </div>
-  <div class="nav-links">
-    <a class="nav-link active" onclick="showPage('proxy')">Proxy Inv</a>
-    <a class="nav-link" onclick="showPage('payroll')">Payroll</a>
-    <a class="nav-link" onclick="showPage('manager')">Manager Sharing</a>
-    <a class="nav-link" onclick="showPage('pl')">P&L</a>
-    <a class="nav-link" onclick="showPage('export')">Export</a>
-    <a class="nav-link" onclick="showPage('setup')">Setup</a>
+  <div style="display:flex;align-items:center;gap:8px">
+    <div class="nav-links">
+      <a class="nav-link active" onclick="showPage('proxy')">Proxy Inv</a>
+      <a class="nav-link" onclick="showPage('payroll')">Payroll</a>
+      <a class="nav-link" onclick="showPage('manager')">Manager Sharing</a>
+      <a class="nav-link" onclick="showPage('pl')">P&amp;L</a>
+      <a class="nav-link" onclick="showPage('export')">Export</a>
+      <a class="nav-link" id="auditNavLink" onclick="showPage('audit')" style="display:none">Audit Log</a>
+      <a class="nav-link" onclick="showPage('setup')">Setup</a>
+    </div>
+    <div class="nav-user">
+      <div class="user-chip" id="userChip" style="display:none">
+        <div class="user-avatar" id="userAvatar">?</div>
+        <div>
+          <div class="user-name" id="userNameDisplay">-</div>
+          <div class="user-role" id="userRoleDisplay">-</div>
+        </div>
+      </div>
+      <button class="logout-btn" id="logoutBtn" style="display:none" onclick="doLogout()">Logout</button>
+    </div>
   </div>
 </nav>
 
@@ -611,6 +672,61 @@
     </div>
   </div>
 
+  <!-- ========== AUDIT LOG PAGE ========== -->
+  <div id="page-audit" class="hidden">
+    <div class="page-header">
+      <div>
+        <div class="page-title">Audit Log</div>
+        <div class="page-sub">All changes made by all users — only visible to Kai Yan</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="loadAuditLog()">↻ Refresh</button>
+    </div>
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <select id="auditUser" onchange="loadAuditLog()">
+          <option value="">All Users</option>
+          <option value="kaiyan">Kai Yan</option>
+          <option value="chloe">Chloe</option>
+          <option value="carine">Carine</option>
+          <option value="jess">Jess</option>
+          <option value="zehao">Zehao</option>
+          <option value="admin">Admin</option>
+        </select>
+        <select id="auditAction" onchange="loadAuditLog()">
+          <option value="">All Actions</option>
+          <option value="CREATE">Create</option>
+          <option value="UPDATE">Update</option>
+          <option value="DELETE">Delete</option>
+        </select>
+        <select id="auditTable" onchange="loadAuditLog()">
+          <option value="">All Tables</option>
+          <option value="proxy_accounts">Proxy Accounts</option>
+          <option value="proxy_invoices">Proxy Invoices</option>
+          <option value="nec_staff">Staff</option>
+          <option value="nec_payroll">Payroll</option>
+          <option value="nec_manager_sharing">Manager Sharing</option>
+          <option value="nec_pl_costs">P&amp;L Costs</option>
+        </select>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>User</th>
+            <th>Action</th>
+            <th>Table</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody id="auditTableBody">
+          <tr><td colspan="5"><div class="empty"><div class="empty-icon">📋</div><div class="empty-text">Loading audit log...</div></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
 </div>
 
 <!-- ===== MODALS ===== -->
@@ -964,6 +1080,131 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const MONTHS = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const MONTH_FULL = ['','January','February','March','April','May','June','July','August','September','October','November','December'];
 
+// ============ AUTH ============
+
+const ACCOUNTS = {
+  kaiyan: { password: 'kaiyan+nec2025', displayName: 'Kai Yan', role: 'owner' },
+  chloe:   { password: 'chloe+nec2025',   displayName: 'Chloe',    role: 'manager' },
+  carine:  { password: 'carine+nec2025',  displayName: 'Carine',   role: 'manager' },
+  jess:    { password: 'jess+nec2025',    displayName: 'Jess',     role: 'manager' },
+  zehao:   { password: 'zehao+nec2025',   displayName: 'Zehao',    role: 'manager' },
+  admin:   { password: 'admin+nec2025',   displayName: 'Admin',    role: 'admin' },
+};
+
+let currentUser = null;
+
+function doLogin() {
+  const username = document.getElementById('loginUser').value.trim().toLowerCase();
+  const password = document.getElementById('loginPass').value;
+  const acc = ACCOUNTS[username];
+  if (!acc || acc.password !== password) {
+    document.getElementById('loginError').textContent = 'Invalid username or password';
+    return;
+  }
+  currentUser = { username, ...acc };
+  sessionStorage.setItem('nec_user', JSON.stringify(currentUser));
+  document.getElementById('loginScreen').style.display = 'none';
+  initUserUI();
+}
+
+function doLogout() {
+  sessionStorage.removeItem('nec_user');
+  currentUser = null;
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('userChip').style.display = 'none';
+  document.getElementById('logoutBtn').style.display = 'none';
+  document.getElementById('loginUser').value = '';
+  document.getElementById('loginPass').value = '';
+  document.getElementById('loginError').textContent = '';
+}
+
+function initUserUI() {
+  if (!currentUser) return;
+  document.getElementById('userChip').style.display = 'flex';
+  document.getElementById('logoutBtn').style.display = 'block';
+  document.getElementById('userAvatar').textContent = currentUser.displayName.charAt(0).toUpperCase();
+  document.getElementById('userNameDisplay').textContent = currentUser.displayName;
+  document.getElementById('userRoleDisplay').textContent = currentUser.role;
+  // Show audit log only for owner
+  if (currentUser.role === 'owner') {
+    document.getElementById('auditNavLink').style.display = 'inline-flex';
+  }
+}
+
+function getCurrentUser() {
+  return currentUser ? currentUser.username : 'unknown';
+}
+
+// ============ AUDIT LOG ============
+
+async function logAudit(action, tableName, details) {
+  try {
+    await sb('nec_audit_log', {
+      method: 'POST',
+      body: {
+        username: getCurrentUser(),
+        display_name: currentUser?.displayName || 'Unknown',
+        action,
+        table_name: tableName,
+        details,
+        created_at: new Date().toISOString()
+      }
+    });
+  } catch(e) {
+    // Silently fail — don't block main action if audit log fails
+    console.warn('Audit log failed:', e.message);
+  }
+}
+
+async function loadAuditLog() {
+  const user = document.getElementById('auditUser').value;
+  const action = document.getElementById('auditAction').value;
+  const table = document.getElementById('auditTable').value;
+
+  let filter = '';
+  const filters = [];
+  if (user) filters.push(`username=eq.${user}`);
+  if (action) filters.push(`action=eq.${action}`);
+  if (table) filters.push(`table_name=eq.${table}`);
+  filter = filters.join('&');
+
+  try {
+    const logs = await sb('nec_audit_log', {
+      filter,
+      select: 'username,display_name,action,table_name,details,created_at',
+      limit: 200
+    });
+    // Sort newest first
+    logs.sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+
+    const tbody = document.getElementById('auditTableBody');
+    if (logs.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5"><div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No audit records found</div></div></td></tr>`;
+      return;
+    }
+    tbody.innerHTML = logs.map(l => {
+      const dt = new Date(l.created_at);
+      const timeStr = dt.toLocaleDateString('en-MY') + ' ' + dt.toLocaleTimeString('en-MY', {hour:'2-digit',minute:'2-digit'});
+      const actionCls = l.action === 'CREATE' ? 'audit-create' : l.action === 'DELETE' ? 'audit-delete' : 'audit-update';
+      const tableLabel = {
+        proxy_accounts:'Proxy Accounts', proxy_invoices:'Proxy Invoices',
+        nec_staff:'Staff', nec_payroll:'Payroll',
+        nec_manager_sharing:'Mgr Sharing', nec_pl_costs:'P&L Costs',
+        nec_managers:'Managers'
+      }[l.table_name] || l.table_name;
+      return `<tr>
+        <td style="color:var(--muted);font-size:12px;font-family:var(--mono)">${timeStr}</td>
+        <td><span style="font-weight:500">${l.display_name}</span> <span style="color:var(--muted);font-size:11px">(${l.username})</span></td>
+        <td><span class="audit-action ${actionCls}">${l.action}</span></td>
+        <td style="font-size:12px;color:var(--muted)">${tableLabel}</td>
+        <td style="font-size:12px;color:var(--text);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${l.details||''}">${l.details || '—'}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    document.getElementById('auditTableBody').innerHTML = `<tr><td colspan="5"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Audit log table not set up yet. Run the updated SQL in Setup.</div></div></td></tr>`;
+  }
+}
+
 async function sb(table, opts = {}) {
   const { method = 'GET', filter = '', body, select = '*', limit = 2000 } = opts;
   let url = `${SUPABASE_URL}/rest/v1/${table}?select=${select}&limit=${limit}`;
@@ -999,16 +1240,19 @@ function fmt(n) { return 'RM ' + parseFloat(n || 0).toLocaleString('en-MY', {min
 function fmtNum(n) { return parseFloat(n || 0).toLocaleString('en-MY', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 
 function showPage(page) {
-  ['proxy','payroll','manager','pl','export','setup'].forEach(p => {
-    document.getElementById(`page-${p}`).classList.add('hidden');
+  ['proxy','payroll','manager','pl','export','audit','setup'].forEach(p => {
+    const el = document.getElementById(`page-${p}`);
+    if (el) el.classList.add('hidden');
   });
   document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
-  document.getElementById(`page-${page}`).classList.remove('hidden');
+  const pageEl = document.getElementById(`page-${page}`);
+  if (pageEl) pageEl.classList.remove('hidden');
   event?.target?.classList.add('active');
   if (page === 'proxy') loadInvoices();
   if (page === 'payroll') loadPayroll();
   if (page === 'manager') loadManagerSharing();
   if (page === 'pl') loadPL();
+  if (page === 'audit') loadAuditLog();
   if (page === 'setup') loadSetup();
 }
 
@@ -1148,6 +1392,7 @@ async function saveProxy() {
     await sb('proxy_accounts', { method: 'POST', body });
     closeModal('modalAddProxy');
     showToast(`Proxy "${body.name}" added`);
+    await logAudit('CREATE', 'proxy_accounts', `Added proxy: ${body.name} (${body.channel})`);
     await loadProxies();
     loadInvoices();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
@@ -1220,6 +1465,8 @@ async function saveInvoice() {
     await sb('proxy_invoices', { method: 'POST', body });
     closeModal('modalNewInvoice');
     showToast('Invoice saved');
+    const proxyName = proxyList.find(p => p.id === body.proxy_id)?.name || body.proxy_id;
+    await logAudit('CREATE', 'proxy_invoices', `Invoice ${body.invoice_number || 'draft'} for ${proxyName} — ${MONTHS[body.month]} ${body.year} — RM${body.invoice_amount}`);
     loadInvoices();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
@@ -1233,6 +1480,7 @@ async function markPaid(id) {
       body: JSON.stringify({ status: 'paid' })
     });
     showToast('Marked as paid');
+    await logAudit('UPDATE', 'proxy_invoices', `Marked invoice ${id} as paid`);
     loadInvoices();
   } catch(e) { showToast('Error', 'error'); }
 }
@@ -1241,6 +1489,7 @@ async function deleteInvoice(id) {
   if (!confirm('Delete this invoice entry?')) return;
   await sbDelete('proxy_invoices', `id=eq.${id}`);
   showToast('Deleted');
+  await logAudit('DELETE', 'proxy_invoices', `Deleted invoice id: ${id}`);
   loadInvoices();
 }
 
@@ -1399,6 +1648,7 @@ async function saveStaff() {
     await sb('nec_staff', { method: 'POST', body });
     closeModal('modalAddStaff');
     showToast(`${body.name} added`);
+    await logAudit('CREATE', 'nec_staff', `Added staff: ${body.name} (${body.staff_type}, ${body.channel})`);
     loadPayroll();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
@@ -1455,6 +1705,8 @@ async function savePayroll() {
     await sb('nec_payroll', { method: 'POST', body });
     closeModal('modalPayrollEntry');
     showToast('Payroll saved');
+    const staffName = staffList.find(s => s.id === body.staff_id)?.name || body.staff_id;
+    await logAudit('CREATE', 'nec_payroll', `Payroll for ${staffName} — ${MONTHS[body.month]} ${body.year} — RM${(body.commission_earned + body.base_salary + body.bonus - body.deductions).toFixed(2)}`);
     loadPayroll();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
@@ -1514,6 +1766,7 @@ async function saveManagerSharing() {
     }
     closeModal('modalManagerEntry');
     showToast('Manager sharing saved');
+    await logAudit('CREATE', 'nec_manager_sharing', `Recorded manager sharing for ${MONTHS[month]} ${year}`);
     loadManagerSharing();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
@@ -1658,6 +1911,7 @@ async function saveCostEntry() {
     await sb('nec_pl_costs', { method: 'POST', body });
     closeModal('modalCostEntry');
     showToast('Cost entry saved');
+    await logAudit('CREATE', 'nec_pl_costs', `Cost: ${body.category} — ${body.channel} — RM${body.amount} (${MONTHS[body.month]} ${body.year})`);
     loadPL();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
@@ -1840,6 +2094,16 @@ CREATE TABLE IF NOT EXISTS nec_pl_costs (
   description text,
   amount numeric(10,2) NOT NULL,
   created_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS nec_audit_log (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  username text NOT NULL,
+  display_name text NOT NULL,
+  action text NOT NULL,
+  table_name text NOT NULL,
+  details text,
+  created_at timestamptz DEFAULT now()
 );`;
 
 const DEFAULT_MANAGERS = [
@@ -1896,7 +2160,7 @@ async function saveManagers() {
 async function testConnection() {
   const result = document.getElementById('connTestResult');
   result.textContent = 'Testing...';
-  const tables = ['proxy_accounts','proxy_invoices','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_pl_costs'];
+  const tables = ['proxy_accounts','proxy_invoices','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_pl_costs','nec_audit_log'];
   const results = [];
   for (const t of tables) {
     try {
@@ -1913,9 +2177,20 @@ function copySQL() {
   navigator.clipboard.writeText(SETUP_SQL).then(() => showToast('SQL copied to clipboard'));
 }
 
-// Init
+// Init — check session on load
 window.addEventListener('DOMContentLoaded', () => {
-  loadInvoices();
+  const saved = sessionStorage.getItem('nec_user');
+  if (saved) {
+    try {
+      currentUser = JSON.parse(saved);
+      document.getElementById('loginScreen').style.display = 'none';
+      initUserUI();
+      loadInvoices();
+    } catch(e) {
+      sessionStorage.removeItem('nec_user');
+    }
+  }
+  // Login screen is visible by default, no need to show it
 });
 </script>
 </body>
