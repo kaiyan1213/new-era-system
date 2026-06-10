@@ -761,16 +761,6 @@
           </select>
         </div>
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Bank Name</label>
-          <input type="text" id="newProxyBank" class="form-input" placeholder="Maybank">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Bank Account No</label>
-          <input type="text" id="newProxyBankAcc" class="form-input" placeholder="1234567890">
-        </div>
-      </div>
     </div>
     <div class="form-actions">
       <button class="btn btn-ghost" onclick="closeModal('modalAddProxy')">Cancel</button>
@@ -1384,8 +1374,6 @@ async function saveProxy() {
     ic_number: document.getElementById('newProxyIC').value,
     coway_id: document.getElementById('newProxyCoway').value,
     channel: document.getElementById('newProxyChannel').value,
-    bank_name: document.getElementById('newProxyBank').value,
-    bank_account: document.getElementById('newProxyBankAcc').value,
   };
   if (!body.name) return showToast('Name is required', 'error');
   try {
@@ -1531,8 +1519,10 @@ async function previewInvoice(id) {
           </div>
         </div>
         <div class="inv-footer">
-          Payment Method: Bank Transfer<br>
-          Bank: — | Account: —<br><br>
+          <strong>Payment Information</strong><br>
+          Bank: Public Bank Berhad<br>
+          Account Name: New Era Consulting Enterprise<br>
+          Account No: 3243542608<br><br>
           This invoice is issued by New Era Consulting Enterprise for marketing services rendered.
         </div>
       </div>`;
