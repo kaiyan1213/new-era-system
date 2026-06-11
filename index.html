@@ -894,16 +894,7 @@
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Coway Agent ID</label>
-          <input type="text" id="newProxyCoway" class="form-input" placeholder="CW-XXXXXX">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Channel</label>
-          <select id="newProxyChannel" class="form-input">
-            <option value="DM">DM (Digital Marketing)</option>
-            <option value="TM">TM (Tele Marketing)</option>
-            <option value="XHS">XHS (小红书)</option>
-            <option value="OTHER">Other</option>
-          </select>
+          <input type="text" id="newProxyCoway" class="form-input" placeholder="718676">
         </div>
       </div>
     </div>
@@ -1519,7 +1510,7 @@ async function saveProxy() {
     name: document.getElementById('newProxyName').value,
     ic_number: document.getElementById('newProxyIC').value,
     coway_id: document.getElementById('newProxyCoway').value,
-    channel: document.getElementById('newProxyChannel').value,
+    channel: 'OTHER',
   };
   if (!body.name) return showToast('Name is required', 'error');
   try {
