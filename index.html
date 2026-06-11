@@ -2415,29 +2415,17 @@ function renderParseResult(result) {
   const container = document.getElementById('uploadResults');
   const statusCls = result.matched ? 'matched' : 'unmatched';
   const statusText = result.matched ? `✓ Matched: ${result.proxy?.name}` : '✗ No match found in system';
+  const matchColor = result._match ? 'var(--green)' : 'var(--yellow)';
+  const matchIcon = result._match ? '✓' : '⚠';
 
-  const catRows = (result.categories || []).map(cat => {
-    const newCount = (cat.new_orders || []).length;
-    const trailingNote = cat.trailing_total > 0 ? ` <span style="color:var(--muted)">(+RM${fmtNum(cat.trailing_total)} trailing)</span>` : '';
-    const matchIcon = cat._match === false ? ` <span style="color:var(--red)" title="Sum mismatch: computed RM${fmtNum(cat._computed_sum)} vs reported RM${fmtNum(cat.subtotal)}">⚠</span>` : (cat._match === true ? ` <span style="color:var(--green)">✓</span>` : '');
-    return `<div class="parse-cat-row">
-      <span class="parse-cat-label">${cat.name} ${newCount > 0 ? `· ${newCount} new orders` : ''}${trailingNote}${matchIcon}</span>
-      <span class="parse-cat-amount" style="color:var(--text)">RM ${fmtNum(cat.subtotal)}</span>
-    </div>`;
-  }).join('');
-
-  const tbcRow = result.team_building_total > 0 ? `
-    <div class="parse-cat-row">
-      <span class="parse-cat-label">Team Building Commission</span>
-      <span class="parse-cat-amount" style="color:var(--yellow)">RM ${fmtNum(result.team_building_total)}</span>
-    </div>` : '';
-
-  const allowRows = (result.allowances || []).map(a =>
-    `<div class="parse-cat-row">
-      <span class="parse-cat-label">${a.description}</span>
-      <span class="parse-cat-amount" style="color:var(--yellow)">RM ${fmtNum(a.amount)}</span>
-    </div>`
-  ).join('');
+  const orderRows = (result.new_orders || []).map(o =>
+    `<div class="order-row">
+      <span style="color:var(--muted);font-family:var(--mono);font-size:10px">${o.order_no}</span>
+      <span>${o.customer_name}</span>
+      <span style="font-family:var(--mono)">${fmtNum(o.com_from_payslip)}</span>
+      <span style="font-family:var(--mono);color:var(--yellow)">${fmtNum(o.allowance_portion)}</span>
+      <span style="font-family:var(--mono);font-weight:700;color:var(--green)">${fmtNum(o.total_com)}</span>
+    </div>`).join('');
 
   container.innerHTML += `
     <div class="parse-result-card">
@@ -2451,8 +2439,28 @@ function renderParseResult(result) {
           <div class="parse-result-amount">RM ${fmtNum(result.total_net_payable)}</div>
         </div>
       </div>
-      <div>${catRows}${tbcRow}${allowRows}</div>
-      ${result.withholding_tax ? `<div style="font-size:11px;color:var(--muted);margin-top:8px;text-align:right">WHT (2%): -RM ${fmtNum(result.withholding_tax)}</div>` : ''}
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;font-size:12px">
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px">
+          <div style="color:var(--muted);margin-bottom:4px">New Orders (${result.new_orders_count || 0} units)</div>
+          <div style="font-family:var(--mono);font-weight:700;color:var(--green)">RM ${fmtNum(result.new_orders_total)}</div>
+        </div>
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px">
+          <div style="color:var(--muted);margin-bottom:4px">Allowance (HP PI + WS)</div>
+          <div style="font-family:var(--mono);font-weight:700;color:var(--yellow)">RM ${fmtNum(result.allowance_total)}</div>
+          <div style="font-size:10px;color:var(--muted)">RM ${fmtNum(result.allowance_per_order)}/order</div>
+        </div>
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px">
+          <div style="color:var(--muted);margin-bottom:4px">Passive + TBC</div>
+          <div style="font-family:var(--mono);font-weight:700;color:var(--muted)">RM ${fmtNum(result.passive_and_tbc_total)}</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">
+        Verify: RM ${fmtNum(result._verify_total)} vs Net RM ${fmtNum(result.total_net_payable)}
+        <span style="color:${matchColor};margin-left:6px">${matchIcon}</span>
+      </div>
+      ${orderRows.length > 0 ? `
+        <div class="order-row header" style="font-size:10px"><span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span></div>
+        ${orderRows}` : ''}
       ${!result.matched ? `<div style="margin-top:10px;font-size:12px;color:var(--red)">⚠ Add "${result.distributor_name}" as proxy first, then re-upload.</div>` : ''}
     </div>`;
 }
@@ -2525,9 +2533,9 @@ async function confirmBulkSave() {
           member_level: p.member_level,
           total_net_payable: p.total_net_payable,
           withholding_tax: p.withholding_tax || 0,
-          categories_json: JSON.stringify(p.categories || []),
+          categories_json: JSON.stringify(p.new_orders || []),
           allowances_json: JSON.stringify(p.allowances || []),
-          team_building_total: p.team_building_total || 0,
+          team_building_total: p.tbc_total || 0,
           raw_filename: p.filename
         }
       });
