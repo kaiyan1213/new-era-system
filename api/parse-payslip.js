@@ -210,44 +210,34 @@ function parseCowayPayslip(text) {
     }
 
     if (sec.name === 'Bonus Commission') {
-      // Bonus section only has order_no + customer_name
-      // The actual bonus amounts are in "Sales Commission (Rental & 1st Installment Month)"
-      // Format there: "1 pv bonus_pct amount amount" e.g. "1 1,230 9 110.70 110.70"
-      // We already extracted bonusOrders above. Amounts will be paired in 1st Install section below.
-      continue;
-    }
-
-    if (sec.name === 'Sales Commission (Rental & 1st Installment Month)' ||
-        sec.name === 'Sales Overidding Commission ( HM Rental & 1st Installment Month)') {
-      // This section has bonus amounts paired with bonus orders
-      // Num row format: "1 pv bonus_pct amount amount" - last column = bonus amount
-      // Also regular "1 pv amount" rows
+      // Bonus num rows appear INSIDE this section, format: "1 pv bonus_pct amount amount"
+      // e.g. "1 1,230 9 110.70 110.70" - last column = bonus amount per order
+      // These rows appear AFTER the order rows in the PDF text
       const bonusAmounts = [];
       for (const l of sLines) {
-        // "1 1,230 9 110.70 110.70" -> last amount = bonus
+        // "1 1,230 9 110.70 110.70" -> last amount = bonus com
         const bm = l.match(/^(\d{1,2})\s+([\d,]+)\s+(\d{1,2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})$/);
         if (bm) { bonusAmounts.push(pn(bm[5])); continue; }
-        // "1 1,230 73.80" -> regular 1st install
-        const nm = l.match(/^(\d{1,2})\s+([\d,]+)\s+([\d,]+\.\d{2})$/);
-        if (nm && parseInt(nm[1]) === 1) bonusAmounts.push(pn(nm[3]));
       }
-      // Find subtotal
-      let subtotal = 0;
-      for (let j = sLines.length-1; j >= 0; j--) {
-        const m = sLines[j].match(/^([\d,]+\.\d{2})$/);
-        if (m) { subtotal = pn(m[1]); break; }
-      }
-      // Pair bonus amounts with bonus orders
+      // Pair bonus amounts with bonus orders positionally
       bonusOrders.forEach((o, idx) => {
         if (idx < bonusAmounts.length) {
           orderAmounts[o.order_no] = r2((orderAmounts[o.order_no] || 0) + bonusAmounts[idx]);
         }
       });
-      // Any 1st install amounts beyond bonus order count are also new order income
-      // but we'll add them to passive since we can't match them
-      if (bonusAmounts.length > bonusOrders.length) {
-        for (let k = bonusOrders.length; k < bonusAmounts.length; k++) {
-          passive_and_tbc_total = r2(passive_and_tbc_total + bonusAmounts[k]);
+      continue;
+    }
+
+    if (sec.name === 'Sales Commission (Rental & 1st Installment Month)' ||
+        sec.name === 'Sales Overidding Commission ( HM Rental & 1st Installment Month)') {
+      // 1st Install section - contains: subtotal, regular "1 pv amount" rows, and order rows
+      // Regular rows (month=1, no bonus_pct) go to passive (already counted in 70% section)
+      // Just add subtotal to passive
+      for (let j = sLines.length-1; j >= 0; j--) {
+        const m = sLines[j].match(/^([\d,]+\.\d{2})$/);
+        if (m && pn(m[1]) < 500) { // subtotal should be modest
+          passive_and_tbc_total = r2(passive_and_tbc_total + pn(m[1]));
+          break;
         }
       }
       continue;
