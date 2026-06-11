@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -23,7 +22,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
-        max_tokens: 2000,
+        max_tokens: 4000,
         messages: [{
           role: 'user',
           content: [
@@ -33,7 +32,16 @@ export default async function handler(req, res) {
             },
             {
               type: 'text',
-              text: `Extract from this Coway Commission Statement payslip and return ONLY a JSON object (no markdown, no explanation):
+              text: `Extract from this Coway Commission Statement. Return ONLY valid JSON, no markdown.
+
+RULES:
+1. For each commission category section, calculate subtotal of ALL orders in that section.
+2. For orders with amount >= 30: include order_no, customer_name, amount in "significant_orders" array.
+3. For orders with amount < 30: just add to "passive_total" (do NOT list individually).
+4. For Team Building Commission: only record the section total, no individual rows.
+5. Allowances (CASH INCENTIVE, HP NEW PI, SPECIAL WS, etc): record each description + amount.
+
+Return this exact structure:
 {
   "distributor_code": "string",
   "distributor_name": "string",
@@ -43,26 +51,22 @@ export default async function handler(req, res) {
   "withholding_tax": number,
   "categories": [
     {
-      "name": "category name",
+      "name": "exact category name",
       "subtotal": number,
-      "orders": [
-        {
-          "order_no": "string or null",
-          "customer_name": "string or null",
-          "app_type": "string or null",
-          "months": number or null,
-          "pv": number or null,
-          "percentage": number or null,
-          "amount": number
-        }
+      "passive_total": number,
+      "significant_orders": [
+        { "order_no": "string", "customer_name": "string", "months": number, "pv": number, "amount": number }
       ]
     }
   ],
+  "team_building_total": number,
   "allowances": [
     { "description": "string", "amount": number }
   ]
 }
-Return only the JSON. If a field is not found, use null or 0.`
+
+Note: team_building_total = total of Team Building Commission section. Do not include TBC orders in categories[].
+Return ONLY the JSON object.`
             }
           ]
         }]
