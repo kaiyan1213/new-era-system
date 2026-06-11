@@ -2410,10 +2410,10 @@ function renderParseResult(result) {
   const statusText = result.matched ? `✓ Matched: ${result.proxy?.name}` : '✗ No match found in system';
 
   const catRows = (result.categories || []).map(cat => {
-    const sigCount = (cat.significant_orders || []).length;
-    const passiveNote = cat.passive_total > 0 ? ` <span style="color:var(--muted)">(+RM${fmtNum(cat.passive_total)} passive)</span>` : '';
+    const newCount = (cat.new_orders || []).length;
+    const trailingNote = cat.trailing_total > 0 ? ` <span style="color:var(--muted)">(+RM${fmtNum(cat.trailing_total)} trailing)</span>` : '';
     return `<div class="parse-cat-row">
-      <span class="parse-cat-label">${cat.name} ${sigCount > 0 ? `· ${sigCount} orders` : ''}${passiveNote}</span>
+      <span class="parse-cat-label">${cat.name} ${newCount > 0 ? `· ${newCount} new orders` : ''}${trailingNote}</span>
       <span class="parse-cat-amount" style="color:var(--text)">RM ${fmtNum(cat.subtotal)}</span>
     </div>`;
   }).join('');
@@ -2562,8 +2562,8 @@ async function showBreakdown(id) {
     const tbc = parseFloat(b.team_building_total || 0);
 
     const catHTML = cats.map(cat => {
-      const sigOrders = (cat.significant_orders || []);
-      const orderRows = sigOrders.map(o => `
+      const newOrders = (cat.new_orders || []);
+      const orderRows = newOrders.map(o => `
         <div class="order-row">
           <span style="color:var(--muted);font-family:var(--mono)">${o.order_no || '—'}</span>
           <span>${o.customer_name || '—'}</span>
@@ -2572,12 +2572,12 @@ async function showBreakdown(id) {
           <span style="font-family:var(--mono);font-weight:600;color:var(--text)">${fmtNum(o.amount)}</span>
         </div>`).join('');
 
-      const passiveRow = cat.passive_total > 0 ? `
+      const trailingRow = cat.trailing_total > 0 ? `
         <div class="order-row" style="opacity:0.5">
           <span style="color:var(--muted)">—</span>
-          <span style="color:var(--muted);font-style:italic">Passive income (multiple small orders)</span>
+          <span style="color:var(--muted);font-style:italic">Trailing months (30% payout)</span>
           <span>—</span><span>—</span>
-          <span style="font-family:var(--mono);color:var(--muted)">${fmtNum(cat.passive_total)}</span>
+          <span style="font-family:var(--mono);color:var(--muted)">${fmtNum(cat.trailing_total)}</span>
         </div>` : '';
 
       return `<div class="cat-section">
@@ -2585,10 +2585,10 @@ async function showBreakdown(id) {
           <span>${cat.name}</span>
           <span style="color:var(--green)">RM ${fmtNum(cat.subtotal)}</span>
         </div>
-        ${sigOrders.length > 0 ? `<div class="order-row header">
+        ${newOrders.length > 0 ? `<div class="order-row header">
           <span>Order No</span><span>Customer</span><span>Months</span><span>PV</span><span>Amount</span>
         </div>` : ''}
-        ${orderRows}${passiveRow}
+        ${orderRows}${trailingRow}
       </div>`;
     }).join('');
 
