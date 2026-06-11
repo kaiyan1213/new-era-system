@@ -1,4 +1,4 @@
-import { createRequire } from 'module';
+import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -9,119 +9,225 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { base64 } = req.body;
-  if (!base64) return res.status(400).json({ error: 'No PDF data provided' });
-
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'API key not configured' });
+  if (!base64) return res.status(400).json({ error: 'No PDF data' });
 
   try {
-    // Use Claude with a very strict structured extraction prompt
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
-        max_tokens: 4000,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'document',
-              source: { type: 'base64', media_type: 'application/pdf', data: base64 }
-            },
-            {
-              type: 'text',
-              text: `You are a precise data extractor for Coway Malaysia Commission Statements.
+    const buffer = Buffer.from(base64, 'base64');
+    const pdfData = await pdfParse(buffer);
+    const text = pdfData.text;
 
-Extract the following and return ONLY a JSON object with no markdown:
-
-STEP 1 - Header info:
-- distributor_code: the number after "Distributor Code :"
-- distributor_name: the name after "Distributor Name :"
-- period_date: the value after "Date :"
-- member_level: the value after "Member Level :"
-
-STEP 2 - For each commission category section (e.g. "Sales Commission (Rental - 100% Payout)", "Sales Commission (Rental - 70% Payout)", "Bonus Commission", etc):
-- name: exact section title
-- subtotal: the standalone number that appears at the END of the section (before the next section title). This is the section total.
-- For each order row in the section:
-  - If the row has "Months" column and months > 1: it is a trailing payment, add to trailing_total only
-  - If months = 1 OR there is no Months column: it is a new order, add to new_orders
-  - new_orders fields: order_no, customer_name, months (null if no months column), pv, amount
-
-STEP 3 - Team Building Commission:
-- team_building_total: the total shown at the end of the TBC section (the large subtotal number)
-
-STEP 4 - Allowances section (Description / Amount table near the end):
-- Each row: description, amount
-
-STEP 5 - Final totals from last page:
-- total_net_payable: value after "TOTAL NET PAYABLE :"
-- withholding_tax: absolute value after "Withholding Tax Deduction (2%) :"
-
-IMPORTANT: subtotal for each category MUST equal sum of all new_orders amounts PLUS trailing_total. Double-check this before returning.
-
-Return this structure:
-{
-  "distributor_code": "string",
-  "distributor_name": "string", 
-  "period_date": "string",
-  "member_level": "string",
-  "total_net_payable": number,
-  "withholding_tax": number,
-  "categories": [
-    {
-      "name": "string",
-      "subtotal": number,
-      "trailing_total": number,
-      "new_orders": [
-        {"order_no": "string", "customer_name": "string", "months": number|null, "pv": number, "amount": number}
-      ]
-    }
-  ],
-  "team_building_total": number,
-  "allowances": [{"description": "string", "amount": number}]
-}`
-            }
-          ]
-        }]
-      })
-    });
-
-    if (!response.ok) {
-      const err = await response.text();
-      return res.status(500).json({ error: `Anthropic API error: ${err}` });
-    }
-
-    const data = await response.json();
-    const text = data.content?.find(c => c.type === 'text')?.text || '';
-    const clean = text.replace(/```json|```/g, '').trim();
-
-    let parsed;
-    try {
-      parsed = JSON.parse(clean);
-    } catch(e) {
-      return res.status(500).json({ error: 'JSON parse failed', raw: text.substring(0, 500) });
-    }
-
-    // Server-side validation: check subtotals add up
-    for (const cat of (parsed.categories || [])) {
-      const newSum = (cat.new_orders || []).reduce((s, o) => s + (o.amount || 0), 0);
-      const trailing = cat.trailing_total || 0;
-      const computed = Math.round((newSum + trailing) * 100) / 100;
-      const reported = Math.round((cat.subtotal || 0) * 100) / 100;
-      // Add computed sum to response for debugging
-      cat._computed_sum = computed;
-      cat._match = Math.abs(computed - reported) < 0.10;
-    }
-
-    return res.status(200).json({ success: true, data: parsed });
-
-  } catch (e) {
+    const result = parseCowayPayslip(text);
+    return res.status(200).json({ success: true, data: result });
+  } catch(e) {
     return res.status(500).json({ error: e.message });
   }
+}
+
+function parseCowayPayslip(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+  // ── Header ──────────────────────────────────────────────
+  const get = (label) => {
+    for (const line of lines) {
+      const m = line.match(new RegExp(label + '\\s*[:\\s]\\s*(.+)'));
+      if (m) return m[1].trim();
+    }
+    return null;
+  };
+
+  const distributor_code = get('Distributor Code') || extractAfterColon(lines, 'Distributor Code');
+  const distributor_name = get('Distributor Name') || extractAfterColon(lines, 'Distributor Name');
+  const period_date      = get('Date') || extractAfterColon(lines, 'Date');
+  const member_level     = get('Member Level') || extractAfterColon(lines, 'Member Level');
+
+  // ── TOTAL NET PAYABLE ────────────────────────────────────
+  let total_net_payable = 0;
+  let withholding_tax   = 0;
+  for (const line of lines) {
+    let m = line.match(/TOTAL NET PAYABLE\s*[:\s]\s*([\d,]+\.?\d*)/);
+    if (m) total_net_payable = parseNum(m[1]);
+    m = line.match(/Withholding Tax Deduction.*?:\s*([\d,]+\.?\d*)/);
+    if (m) withholding_tax = parseNum(m[1]);
+  }
+
+  // ── Category sections ────────────────────────────────────
+  const CATEGORY_HEADERS = [
+    'Sales Commission (Rental - 100% Payout)',
+    'Sales Commission (Rental - 70% Payout)',
+    'Sales Overidding Commission ( HM Rental & 1st Installment Month)',
+    'Sales Overidding Commission ( HM Rental & Other Installment Month)',
+    'Sales Commission (Rental & 1st Installment Month)',
+    'Sales Commission (Rental & Other Installment Month)',
+    'Bonus Commission',
+    'Food Supplements Sales Commission (100%)',
+  ];
+
+  const TBC_HEADER = 'Team Building Commission';
+  const ALLOWANCE_HEADER = 'Allowance';
+
+  const categories = [];
+  let team_building_total = 0;
+  const allowances = [];
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // ── Team Building Commission ──
+    if (line.includes(TBC_HEADER)) {
+      // TBC total is a standalone number that appears after all TBC rows
+      // Scan forward until we find a standalone number followed by a non-numeric section
+      let tbcTotal = 0;
+      let j = i + 1;
+      while (j < lines.length) {
+        const tl = lines[j];
+        // Stop at next major section
+        if (CATEGORY_HEADERS.some(h => tl.includes(h)) || tl.includes('SHI Collection') || tl.includes('Total Monetary')) break;
+        // Standalone total line: just a number
+        const standaloneNum = tl.match(/^([\d,]+\.\d{2})$/);
+        if (standaloneNum) tbcTotal = parseNum(standaloneNum[1]);
+        j++;
+      }
+      team_building_total = tbcTotal;
+      i = j;
+      continue;
+    }
+
+    // ── Allowance section ──
+    if (line === ALLOWANCE_HEADER || line.startsWith('Allowance')) {
+      let j = i + 1;
+      while (j < lines.length) {
+        const al = lines[j];
+        if (al.includes('Team Building') || al.includes('SHI Collection') || al.includes('Total Monetary')) break;
+        // Match "DESCRIPTION  AMOUNT" pattern — amount is standalone number after description
+        // Lines like: "CASH INCENTIVE" followed by amount, or "CASH INCENTIVE 1200.00"
+        const inlineMatch = al.match(/^([A-Z][A-Z\s]+[A-Z])\s+([\d,]+\.\d{2})$/);
+        if (inlineMatch) {
+          allowances.push({ description: inlineMatch[1].trim(), amount: parseNum(inlineMatch[2]) });
+          j++;
+          continue;
+        }
+        // Description on one line, amount on next
+        const isDesc = al.match(/^[A-Z][A-Z\s]{3,}$/) && !al.match(/^\d/);
+        if (isDesc && j + 1 < lines.length) {
+          const nextNum = lines[j+1].match(/^([\d,]+\.\d{2})$/);
+          if (nextNum) {
+            allowances.push({ description: al, amount: parseNum(nextNum[1]) });
+            j += 2;
+            continue;
+          }
+        }
+        j++;
+      }
+      i = j;
+      continue;
+    }
+
+    // ── Commission categories ──
+    const matchedHeader = CATEGORY_HEADERS.find(h => line.includes(h));
+    if (matchedHeader) {
+      const cat = { name: matchedHeader, subtotal: 0, trailing_total: 0, new_orders: [] };
+
+      let j = i + 1;
+      // Skip header rows (SHI line, column headers)
+      while (j < lines.length && (lines[j].match(/^Individual Customer/) || lines[j].match(/^Order No/) || lines[j].match(/SHI\s*:/))) j++;
+
+      while (j < lines.length) {
+        const cl = lines[j];
+
+        // Stop conditions
+        if (CATEGORY_HEADERS.some(h => cl.includes(h)) || cl.includes(TBC_HEADER) || cl.includes(ALLOWANCE_HEADER) || cl.includes('SHI Collection Rate') || cl.includes('Total Monetary') || cl.includes('TOTAL NET PAYABLE')) break;
+
+        // Standalone subtotal: a number alone on a line that follows order rows
+        const standalone = cl.match(/^([\d,]+\.\d{2})$/);
+        if (standalone) {
+          cat.subtotal = parseNum(standalone[1]);
+          j++;
+          break;
+        }
+
+        // Order row detection
+        // Format varies: order_no customer_name [app_type] [months] pv % amount
+        // Order numbers are 8+ digits
+        const orderMatch = cl.match(/^(\d{7,})\s+(.+)/);
+        if (orderMatch) {
+          const orderNo = orderMatch[1];
+          const rest = orderMatch[2];
+          // Extract amount (last number in line)
+          const nums = rest.match(/([\d,]+\.\d{2})/g);
+          if (nums && nums.length > 0) {
+            const amount = parseNum(nums[nums.length - 1]);
+            // Extract months: look for a small integer (1-30) that appears before PV
+            // PV values are typically 600-5000, months are 1-30
+            const allNums = rest.match(/\b(\d+)\b/g) || [];
+            let months = null;
+            let pv = null;
+            // Find months: small number 1-30
+            for (const n of allNums) {
+              const v = parseInt(n);
+              if (v >= 1 && v <= 30 && months === null) { months = v; continue; }
+              if (v > 100 && pv === null) { pv = v; break; }
+            }
+            // Customer name: everything before first number sequence
+            const customerMatch = rest.match(/^([A-Za-z\s\.\(\)\/&]+?)(?=\s+(?:REN|NEW|\d))/);
+            const customer_name = customerMatch ? customerMatch[1].trim() : rest.split(/\s{2,}/)[0].trim();
+
+            if (months === 1 || months === null) {
+              cat.new_orders.push({ order_no: orderNo, customer_name, months, pv, amount });
+            } else {
+              cat.trailing_total = Math.round((cat.trailing_total + amount) * 100) / 100;
+            }
+          }
+        }
+        j++;
+      }
+
+      // If subtotal wasn't found as standalone, compute it
+      if (cat.subtotal === 0) {
+        const newSum = cat.new_orders.reduce((s, o) => s + o.amount, 0);
+        cat.subtotal = Math.round((newSum + cat.trailing_total) * 100) / 100;
+      }
+
+      // Validation
+      const computedSum = Math.round((cat.new_orders.reduce((s,o)=>s+o.amount,0) + cat.trailing_total)*100)/100;
+      cat._computed_sum = computedSum;
+      cat._match = Math.abs(computedSum - cat.subtotal) < 0.11;
+
+      categories.push(cat);
+      i = j;
+      continue;
+    }
+
+    i++;
+  }
+
+  return {
+    distributor_code,
+    distributor_name,
+    period_date,
+    member_level,
+    total_net_payable,
+    withholding_tax,
+    categories,
+    team_building_total,
+    allowances
+  };
+}
+
+function extractAfterColon(lines, label) {
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes(label) && lines[i].includes(':')) {
+      const parts = lines[i].split(':');
+      if (parts[1]) return parts[1].trim();
+    }
+    if (lines[i].includes(label) && i + 1 < lines.length) {
+      return lines[i+1].trim();
+    }
+  }
+  return null;
+}
+
+function parseNum(str) {
+  if (!str) return 0;
+  return parseFloat(String(str).replace(/,/g, '')) || 0;
 }
