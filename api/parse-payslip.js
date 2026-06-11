@@ -300,20 +300,12 @@ function parseCowayPayslip(text) {
     for (let k = 0; k < count; k++) {
       const o = orderRows[k];
       const n = numRows[k];
-      if (isOtherInstall) {
-        passive_and_tbc_total = r2(passive_and_tbc_total + n.amount);
-      } else if (o.pct === 70) {
-        // 70% new order com - accumulate into orderAmounts by order_no
-        orderAmounts[o.order_no] = r2((orderAmounts[o.order_no] || 0) + n.amount);
-      } else if (is100 || o.pct === null) {
-        // 100% or unmarked - accumulate
-        orderAmounts[o.order_no] = r2((orderAmounts[o.order_no] || 0) + n.amount);
-      } else {
-        // (30%) trailing
-        passive_and_tbc_total = r2(passive_and_tbc_total + n.amount);
-      }
+      // ALL 70%/30%/100% section amounts go to passive
+      // New order com is ONLY captured from 1st Install section (handled above)
+      // So here everything = passive
+      passive_and_tbc_total = r2(passive_and_tbc_total + n.amount);
     }
-    // Extra numRows (no matching order) = old passive
+    // Extra numRows = passive
     if (numRows.length > orderRows.length) {
       for (let k = orderRows.length; k < numRows.length; k++) {
         passive_and_tbc_total = r2(passive_and_tbc_total + numRows[k].amount);
