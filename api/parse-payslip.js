@@ -20,41 +20,85 @@ export default async function handler(req, res) {
   }
 }
 
-function parseNum(s) { return parseFloat(String(s).replace(/,/g,'')) || 0; }
+function pn(s) { return parseFloat(String(s).replace(/,/g,'')) || 0; }
+function r2(n) { return Math.round(n * 100) / 100; }
 
 function parseCowayPayslip(text) {
   const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
-  // ── Header ─────────────────────────────────────────────────
+  // ── 1. Header ──────────────────────────────────────────────
   let distributor_code = null, distributor_name = null;
   let period_date = null, member_level = null;
   let total_net_payable = 0, withholding_tax = 0;
 
-  // First 5-8 digit number = distributor code, next non-empty line = name
-  for (let i = 0; i < Math.min(lines.length, 15); i++) {
+  for (let i = 0; i < Math.min(lines.length, 20); i++) {
     if (!distributor_code && lines[i].match(/^\d{5,8}$/)) {
       distributor_code = lines[i];
-      if (lines[i+1] && !lines[i+1].match(/^\d/) && lines[i+1].length > 3) {
+      if (lines[i+1] && lines[i+1].match(/^[A-Z]/) && lines[i+1].length > 3)
         distributor_name = lines[i+1];
+    }
+    if (lines[i] === 'Date' && lines[i+1] === ':') period_date = lines[i+2];
+    if (lines[i] === 'Member Level' && lines[i+1] === ':') member_level = lines[i+2];
+  }
+  for (const l of lines) {
+    const nm = l.match(/TOTAL NET PAYABLE\s*[:\s]\s*([\d,]+\.?\d*)/);
+    if (nm) total_net_payable = pn(nm[1]);
+    const wm = l.match(/Withholding Tax Deduction.*?:\s*([\d,]+\.?\d*)/);
+    if (wm) withholding_tax = pn(wm[1]);
+  }
+
+  // ── 2. Find Bonus Commission section & extract new order numbers ──
+  // Bonus section format: order_no + customer + REN + product_desc (all on one line or split)
+  // e.g. "10892675KAM YAU SIANGRENCHP-6210N (NEON-PINK)"
+  const bonusStart = lines.findIndex(l => l === 'Bonus Commission');
+  const newOrderNos = new Set();
+  const bonusOrders = []; // { order_no, customer_name }
+
+  if (bonusStart >= 0) {
+    // Find end of bonus section
+    const bonusEnd = lines.findIndex((l, i) => i > bonusStart &&
+      (l === 'Food Supplements Sales Commission (100%)' || l.includes('Team Building') || l === 'Allowance'));
+
+    const bLines = lines.slice(bonusStart + 1, bonusEnd > 0 ? bonusEnd : bonusStart + 100);
+    for (const l of bLines) {
+      // Pattern: "10892675KAM YAU SIANGRENCHP-6210N..."
+      const m = l.match(/^(\d{7,})([A-Z].+?)REN/);
+      if (m) {
+        const orderNo = m[1];
+        const customer = m[2].trim();
+        newOrderNos.add(orderNo);
+        bonusOrders.push({ order_no: orderNo, customer_name: customer });
       }
     }
   }
-  // Date and member level from structured header
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i] === 'Date' && lines[i+1] === ':') period_date = lines[i+2];
-    if (lines[i] === 'Member Level' && lines[i+1] === ':') member_level = lines[i+2];
-    const netM = lines[i].match(/TOTAL NET PAYABLE\s*[:\s]\s*([\d,]+\.?\d*)/);
-    if (netM) total_net_payable = parseNum(netM[1]);
-    const whtM = lines[i].match(/Withholding Tax Deduction.*?:\s*([\d,]+\.?\d*)/);
-    if (whtM) withholding_tax = parseNum(whtM[1]);
-  }
 
-  // ── Strategy: find each section by its header, then find its subtotal ────
-  // The subtotal appears as a standalone decimal number just before the next section header
-  // New orders are identified by (70%) marker, trailing by (30%) marker
-  // Num rows (months pv amount) are paired with order rows in sequence within each page block
+  // ── 3. Collect ALL amount rows from entire payslip ──────────
+  // Map: order_no -> total amount across all sections
+  // Num row formats:
+  //   "months pv amount"  e.g. "1 1,230 129.15"
+  //   "months pv bonus% bonus amount"  e.g. "1 1,230 9 110.70 110.70"
+  // Order row: "ORDER_NOCustomerName15 \n (70%) or (30%)"
+  // We need to pair them positionally within each section
 
-  const SECTION_HEADERS = [
+  // Strategy: scan through ALL lines, collect (order_no, amount) pairs
+  // For sections with (70%)/(30%) markers, pair order rows with preceding num rows
+  // For bonus section, pair order rows with following num rows
+
+  const orderAmounts = {}; // order_no -> total amount
+
+  // Parse 70% section specifically - it has the bulk of data
+  // The PDF structure: num rows appear BEFORE their order rows within each page block
+  // We'll do a global scan: collect all num rows and all order rows, pair by position
+
+  // Actually the most reliable: for each order_no found anywhere, sum up all
+  // "months pv amount" rows that correspond to it.
+  // But since they're positional, we need section-by-section parsing.
+
+  // Let's do a cleaner approach:
+  // Within 70% section, pairs are: numRow[i] <-> orderRow[i]
+  // The num rows and order rows are interleaved in page chunks
+
+  const SECTION_STARTS = [
     'Sales Commission (Rental - 100% Payout)',
     'Sales Commission (Rental - 70% Payout)',
     'Sales Overidding Commission ( HM Rental & 1st Installment Month)',
@@ -63,209 +107,193 @@ function parseCowayPayslip(text) {
     'Sales Commission (Rental & Other Installment Month)',
     'Bonus Commission',
     'Food Supplements Sales Commission (100%)',
+    'Team Building Commission',
+    'Allowance',
   ];
-  const TBC_HEADER = 'Team Building Commission';
-  const ALLOWANCE_HEADER = 'Allowance';
-  const STOP_WORDS = ['SHI Collection Rate', 'Total Monetary', 'TOTAL NET PAYABLE', 'Withholding Tax'];
 
-  // Find all section start indices
-  const allSections = [];
+  // Find section boundaries
+  const secBounds = [];
   for (let i = 0; i < lines.length; i++) {
-    for (const h of SECTION_HEADERS) {
-      if (lines[i] === h || lines[i].includes(h)) {
-        allSections.push({ name: h, idx: i }); break;
+    for (const s of SECTION_STARTS) {
+      if (lines[i] === s || lines[i].includes(s)) {
+        secBounds.push({ name: s, idx: i }); break;
       }
     }
-    if (lines[i].includes(TBC_HEADER)) allSections.push({ name: TBC_HEADER, idx: i });
-    if (lines[i] === ALLOWANCE_HEADER) allSections.push({ name: ALLOWANCE_HEADER, idx: i });
   }
 
-  const categories = [];
-  let team_building_total = 0;
+  // For each section except TBC, Allowance, Food: collect numRows & orderRows
+  let passive_and_tbc_total = 0;
+  let tbc_total = 0;
   const allowances = [];
+  const new_orders_detail = []; // { order_no, customer_name, com_from_payslip }
 
-  for (let si = 0; si < allSections.length; si++) {
-    const sec = allSections[si];
-    const nextIdx = allSections[si+1]?.idx ?? lines.length;
-
-    // Slice lines for this section
+  for (let si = 0; si < secBounds.length; si++) {
+    const sec = secBounds[si];
+    const nextIdx = secBounds[si+1]?.idx ?? lines.length;
     const sLines = lines.slice(sec.idx + 1, nextIdx);
 
-    if (sec.name === ALLOWANCE_HEADER) {
-      // Parse allowances: description + standalone amount pairs
+    if (sec.name === 'Allowance') {
+      // Parse SPECIAL WS, HP NEW PI, CASH INCENTIVE
       for (let j = 0; j < sLines.length; j++) {
         const l = sLines[j];
-        if (STOP_WORDS.some(w => l.includes(w))) break;
-        // "SPECIAL WS" then "2,000.00" on next line
-        if (l.match(/^[A-Z][A-Z0-9\s\-_\/]{2,}$/) && !l.match(/^\d/)) {
-          const nextNum = sLines[j+1]?.match(/^([\d,]+\.\d{2})$/);
-          if (nextNum) { allowances.push({ description: l, amount: parseNum(nextNum[1]) }); j++; continue; }
-          // Or inline: "SPECIAL WS 2,000.00"
-          const inlineM = l.match(/^(.+?)\s+([\d,]+\.\d{2})$/);
-          if (inlineM) { allowances.push({ description: inlineM[1].trim(), amount: parseNum(inlineM[2]) }); continue; }
+        if (l === 'SPECIAL WS' || l === 'HP NEW PI' || l === 'CASH INCENTIVE') {
+          const nm = sLines[j+1]?.match(/^([\d,]+\.\d{2})$/);
+          if (nm) { allowances.push({ description: l, amount: pn(nm[1]) }); j++; }
         }
-        // Standalone number after previous description
-        const numM = l.match(/^([\d,]+\.\d{2})$/);
-        if (numM && j > 0 && !sLines[j-1].match(/^\d/)) {
-          // already handled above
-        }
+        // Also inline format
+        const inm = l.match(/^(SPECIAL WS|HP NEW PI|CASH INCENTIVE)\s+([\d,]+\.\d{2})$/);
+        if (inm) allowances.push({ description: inm[1], amount: pn(inm[2]) });
       }
       continue;
     }
 
-    if (sec.name === TBC_HEADER) {
-      // TBC total = the standalone decimal that appears at the very end of the TBC block
-      // It's the LAST standalone decimal before the next section
-      let lastNum = 0;
+    if (sec.name === 'Team Building Commission') {
+      // TBC total = last standalone decimal in section
+      for (let j = sLines.length - 1; j >= 0; j--) {
+        const m = sLines[j].match(/^([\d,]+\.\d{2})$/);
+        if (m) { tbc_total = pn(m[1]); break; }
+      }
+      continue;
+    }
+
+    if (sec.name === 'Food Supplements Sales Commission (100%)') {
+      // Food supplements: find the first standalone large decimal = subtotal
       for (const l of sLines) {
-        if (STOP_WORDS.some(w => l.includes(w))) break;
         const m = l.match(/^([\d,]+\.\d{2})$/);
-        if (m) lastNum = parseNum(m[1]);
+        if (m && pn(m[1]) > 10) {
+          // This is the food supplements total, treat as passive
+          passive_and_tbc_total = r2(passive_and_tbc_total + pn(m[1]));
+          break;
+        }
       }
-      team_building_total = lastNum;
       continue;
     }
 
-    // ── Commission category ───────────────────────────────────
-    // Find subtotal: the standalone decimal that appears as the section total
-    // It's the FIRST standalone decimal after the order rows, right before next section
-    // But there may be page numbers (single digit or "2","3" etc) in between
-    // Strategy: find all standalone decimals in section, the LAST one before next header = subtotal
-    let subtotal = 0;
-    for (let j = sLines.length - 1; j >= 0; j--) {
-      const m = sLines[j].match(/^([\d,]+\.\d{2})$/);
-      if (m) { subtotal = parseNum(m[1]); break; }
+    if (sec.name === 'Bonus Commission') {
+      // Bonus: num rows have format "1 pv bonus% bonus amount"
+      // pair with bonus order rows (already collected above)
+      const bonusNumRows = [];
+      for (const l of sLines) {
+        // "1 1,230 9 110.70 110.70" - last number is amount
+        const bm = l.match(/^(\d{1,2})\s+([\d,]+)\s+(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})$/);
+        if (bm) bonusNumRows.push(pn(bm[5])); // last amount
+        // Also "months pv amount" regular format
+        const nm = l.match(/^(\d{1,2})\s+([\d,]+)\s+([\d,]+\.\d{2})$/);
+        if (nm && parseInt(nm[1]) <= 30) bonusNumRows.push(pn(nm[3]));
+      }
+      // Pair with bonusOrders
+      bonusOrders.forEach((o, idx) => {
+        if (idx < bonusNumRows.length) {
+          orderAmounts[o.order_no] = r2((orderAmounts[o.order_no] || 0) + bonusNumRows[idx]);
+        }
+      });
+      continue;
     }
 
-    const is100pct = sec.name.includes('100%');
-    const isBonus = sec.name.includes('Bonus');
-    const is1stInstall = sec.name.includes('1st Installment');
+    // ── 100% / 70% / Install sections ──
+    const is100 = sec.name.includes('100%');
     const isOtherInstall = sec.name.includes('Other Installment');
 
-    // Collect num rows: "months pv amount" pattern
-    // Note: months 1-30, pv 600-9999, amount decimal
-    // Also Bonus has: "1 pv bonus_pct bonus_pct amount" - 5 numbers
+    // Collect num rows and order rows
     const numRows = [];
     const orderRows = [];
 
     for (let j = 0; j < sLines.length; j++) {
       const l = sLines[j];
+      // Skip noise
+      if (l.match(/^[12]?\d$/) && pn(l) < 50) continue; // page numbers
+      if (['REN','NEW','Customer Name','Order No','App Type','Months','AMOUNT','AMT','Amount'].includes(l)) continue;
+      if (l.includes('Individual Customer') || l.includes('Commission Statement')) continue;
+      if (l.includes('%PV') || l.includes('App Type')) continue;
 
-      // Skip page numbers, column headers, REN lines, SHI lines
-      if (l.match(/^\d$/) || l.match(/^\d{1,2}$/) && parseNum(l) < 100) continue;
-      if (l === 'REN' || l === 'NEW' || l.includes('Customer Name') || l.includes('Order No')
-        || l.includes('App Type') || l.includes('Individual Customer')
-        || l.includes('Commission Statement') || l.match(/^[A-Z]+%[A-Z]+/)) continue;
-
-      // Num row: "months pv amount" - 3 tokens where months<=30, pv>100, amount is decimal
-      const numM3 = l.match(/^(\d{1,2})\s+([\d,]+)\s+([\d,]+\.\d{2})$/);
-      if (numM3) {
-        const months = parseInt(numM3[1]);
-        const pv = parseNum(numM3[2]);
-        const amount = parseNum(numM3[3]);
-        if (months >= 1 && months <= 30 && pv > 100) {
-          numRows.push({ months, pv, amount }); continue;
-        }
-      }
-
-      // Bonus num row: "1 pv bonus_pct bonus_pct amount" -> "1 1,230 9 110.70 110.70"
-      const bonusM = l.match(/^(\d{1,2})\s+([\d,]+)\s+(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})$/);
-      if (bonusM) {
-        numRows.push({ months: parseInt(bonusM[1]), pv: parseNum(bonusM[2]), amount: parseNum(bonusM[5]) }); continue;
-      }
-
-      // Order row: 7-8 digit number + customer name + 15 (or other months)
-      // Pattern like: "10892675KAM YAU SIANG15"
-      const orderM = l.match(/^(\d{7,})([A-Z].+?)(\d{1,2})\s*$/);
-      if (orderM) {
-        const orderNo = orderM[1];
-        const customer = orderM[2].trim();
-        let pct = null;
-        // Next line: (70%) or (30%)
-        if (j+1 < sLines.length) {
-          const pctM = sLines[j+1].match(/^\((\d+)%\)$/);
-          if (pctM) { pct = parseInt(pctM[1]); j++; }
-        }
-        orderRows.push({ order_no: orderNo, customer_name: customer, pct });
+      // Num row: "months pv amount"
+      const nm = l.match(/^(\d{1,2})\s+([\d,]+)\s+([\d,]+\.\d{2})$/);
+      if (nm && parseInt(nm[1]) >= 1 && parseInt(nm[1]) <= 30 && pn(nm[2]) > 100) {
+        numRows.push({ months: parseInt(nm[1]), pv: pn(nm[2]), amount: pn(nm[3]) });
         continue;
       }
 
-      // For sections without pct marker (1st install, other install, bonus with no pct)
-      const orderM2 = l.match(/^(\d{7,})([A-Z].+?)(\d{1,2})$/);
-      if (orderM2 && !l.includes('REN')) {
-        const pctM = sLines[j+1]?.match(/^\((\d+)%\)$/);
-        if (!pctM) {
-          orderRows.push({ order_no: orderM2[1], customer_name: orderM2[2].trim(), pct: null });
+      // Order row: 7+ digit order no + customer + 15 (contract months)
+      const om = l.match(/^(\d{7,})([A-Z].+?)(\d{1,2})\s*$/);
+      if (om) {
+        let pct = null;
+        if (j+1 < sLines.length) {
+          const pm = sLines[j+1].match(/^\((\d+)%\)$/);
+          if (pm) { pct = parseInt(pm[1]); j++; }
         }
+        orderRows.push({ order_no: om[1], customer_name: om[2].trim(), pct });
       }
     }
 
-    // Match num rows to order rows positionally
-    let new_orders = [];
-    let trailing_total = 0;
+    // Find section subtotal
+    let subtotal = 0;
+    for (let j = sLines.length-1; j >= 0; j--) {
+      const m = sLines[j].match(/^([\d,]+\.\d{2})$/);
+      if (m) { subtotal = pn(m[1]); break; }
+    }
 
-    if (orderRows.length > 0) {
-      const count = Math.min(orderRows.length, numRows.length);
-      for (let k = 0; k < count; k++) {
-        const o = orderRows[k];
-        const n = numRows[k];
-        // 100%, 1st install, bonus: all new orders (no trailing)
-        if (is100pct || isBonus || is1stInstall || o.pct === 70 || o.pct === null) {
-          new_orders.push({ order_no: o.order_no, customer_name: o.customer_name, months: n.months, pv: n.pv, amount: n.amount });
-        } else {
-          // (30%) = trailing
-          trailing_total = Math.round((trailing_total + n.amount) * 100) / 100;
-        }
-      }
-      // Extra numRows with no matching order = old passive (no order number)
-      if (numRows.length > orderRows.length) {
-        for (let k = orderRows.length; k < numRows.length; k++) {
-          trailing_total = Math.round((trailing_total + numRows[k].amount) * 100) / 100;
-        }
-      }
-    } else if (numRows.length > 0) {
-      // No order rows found - all nums are trailing passive
-      if (is100pct || isBonus) {
-        // Shouldn't happen but treat as new
-        new_orders = numRows.map(n => ({ order_no: null, customer_name: null, months: n.months, pv: n.pv, amount: n.amount }));
+    // Pair and accumulate
+    const count = Math.min(orderRows.length, numRows.length);
+    for (let k = 0; k < count; k++) {
+      const o = orderRows[k];
+      const n = numRows[k];
+      if (isOtherInstall) {
+        // All trailing
+        passive_and_tbc_total = r2(passive_and_tbc_total + n.amount);
+      } else if (is100 || o.pct === 70 || o.pct === null) {
+        // New order - accumulate into orderAmounts
+        orderAmounts[o.order_no] = r2((orderAmounts[o.order_no] || 0) + n.amount);
       } else {
-        trailing_total = numRows.reduce((s,n) => Math.round((s+n.amount)*100)/100, 0);
+        // (30%) trailing
+        passive_and_tbc_total = r2(passive_and_tbc_total + n.amount);
       }
     }
-
-    // Other Installment: these rows don't have (70%)/(30%) markers — all are trailing
-    if (isOtherInstall) {
-      trailing_total = numRows.reduce((s,n) => Math.round((s+n.amount)*100)/100, 0);
-      new_orders = [];
+    // Extra numRows (no matching order) = old passive
+    if (numRows.length > orderRows.length) {
+      for (let k = orderRows.length; k < numRows.length; k++) {
+        passive_and_tbc_total = r2(passive_and_tbc_total + numRows[k].amount);
+      }
     }
+  }
 
-    const computed = Math.round((new_orders.reduce((s,o)=>s+o.amount,0) + trailing_total)*100)/100;
+  // ── 4. Build new orders detail ──────────────────────────────
+  // Allowance per order
+  const allowanceTotal = r2(allowances.reduce((s,a) => s + a.amount, 0));
+  const allowancePerOrder = bonusOrders.length > 0 ? r2(allowanceTotal / bonusOrders.length) : 0;
 
-    categories.push({
-      name: sec.name, subtotal, trailing_total, new_orders,
-      _computed_sum: computed,
-      _match: subtotal === 0 || Math.abs(computed - subtotal) < 0.11
+  let new_orders_total = 0;
+  for (const o of bonusOrders) {
+    const comFromPayslip = r2(orderAmounts[o.order_no] || 0);
+    const totalCom = r2(comFromPayslip + allowancePerOrder);
+    new_orders_detail.push({
+      order_no: o.order_no,
+      customer_name: o.customer_name,
+      com_from_payslip: comFromPayslip,
+      allowance_portion: allowancePerOrder,
+      total_com: totalCom
     });
+    new_orders_total = r2(new_orders_total + comFromPayslip);
   }
 
-  // ── Food Supplements / Allowance special handling ─────────
-  // Food Supplements section often has no order rows, just a subtotal
-  // The subtotal may be split: "6,100.00" then "2,000.00" then "4,100.00" = total is 6100
-  // Allowances: SPECIAL WS + HP NEW PI appear in Allowance section
-  // Let's re-parse allowances more carefully
-  const allowanceIdx = allSections.find(s => s.name === ALLOWANCE_HEADER);
-  if (allowanceIdx && allowances.length === 0) {
-    const aLines = lines.slice(allowanceIdx.idx + 1);
-    for (let j = 0; j < aLines.length; j++) {
-      const l = aLines[j];
-      if (STOP_WORDS.some(w => l.includes(w)) || l.includes('Team Building')) break;
-      if (l === 'SPECIAL WS' || l === 'HP NEW PI' || l === 'CASH INCENTIVE' || l === 'HP NEW PI') {
-        const nextM = aLines[j+1]?.match(/^([\d,]+\.\d{2})$/);
-        if (nextM) { allowances.push({ description: l, amount: parseNum(nextM[1]) }); j++; }
-      }
-    }
-  }
+  // Add TBC to passive bucket
+  passive_and_tbc_total = r2(passive_and_tbc_total + tbc_total);
 
-  return { distributor_code, distributor_name, period_date, member_level,
-    total_net_payable, withholding_tax, categories, team_building_total, allowances };
+  // ── 5. Summary ─────────────────────────────────────────────
+  const new_orders_count = bonusOrders.length;
+  const verify_total = r2(new_orders_total + allowanceTotal + passive_and_tbc_total);
+
+  return {
+    distributor_code, distributor_name, period_date, member_level,
+    total_net_payable, withholding_tax,
+    new_orders_count,
+    new_orders_total,        // com from new orders (excl allowance)
+    allowance_total: allowanceTotal,
+    allowance_per_order: allowancePerOrder,
+    passive_and_tbc_total,   // trailing + TBC + food supplements
+    tbc_total,
+    allowances,
+    new_orders: new_orders_detail,
+    _verify_total: verify_total,
+    _match: Math.abs(verify_total - total_net_payable) < 1.00
+  };
 }
