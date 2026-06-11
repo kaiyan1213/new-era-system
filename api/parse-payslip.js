@@ -1,3 +1,5 @@
+import { createRequire } from 'module';
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -6,13 +8,14 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { base64, filename } = req.body;
+  const { base64 } = req.body;
   if (!base64) return res.status(400).json({ error: 'No PDF data provided' });
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'API key not configured' });
 
   try {
+    // Use Claude with a very strict structured extraction prompt
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -32,42 +35,57 @@ export default async function handler(req, res) {
             },
             {
               type: 'text',
-              text: `Extract from this Coway Commission Statement. Return ONLY valid JSON, no markdown.
+              text: `You are a precise data extractor for Coway Malaysia Commission Statements.
 
-RULES for orders in each category:
-1. If months = 1 (first month / 70% payout): record in "new_orders" array with order_no, customer_name, months, pv, amount.
-2. If months > 1 (trailing months / 30% payout / passive): do NOT list individually, just add amount to "trailing_total".
-3. If months is not present in a section (like Sales Commission Rental 100% Payout): treat all as new_orders regardless of amount.
-4. For Team Building Commission: only record the section total as "team_building_total", no individual rows.
-5. Allowances (CASH INCENTIVE, HP NEW PI, SPECIAL WS, etc): record each description + amount.
-6. Bonus Commission: treat all as new_orders (record order_no, customer_name, amount).
+Extract the following and return ONLY a JSON object with no markdown:
 
-Return this exact structure:
+STEP 1 - Header info:
+- distributor_code: the number after "Distributor Code :"
+- distributor_name: the name after "Distributor Name :"
+- period_date: the value after "Date :"
+- member_level: the value after "Member Level :"
+
+STEP 2 - For each commission category section (e.g. "Sales Commission (Rental - 100% Payout)", "Sales Commission (Rental - 70% Payout)", "Bonus Commission", etc):
+- name: exact section title
+- subtotal: the standalone number that appears at the END of the section (before the next section title). This is the section total.
+- For each order row in the section:
+  - If the row has "Months" column and months > 1: it is a trailing payment, add to trailing_total only
+  - If months = 1 OR there is no Months column: it is a new order, add to new_orders
+  - new_orders fields: order_no, customer_name, months (null if no months column), pv, amount
+
+STEP 3 - Team Building Commission:
+- team_building_total: the total shown at the end of the TBC section (the large subtotal number)
+
+STEP 4 - Allowances section (Description / Amount table near the end):
+- Each row: description, amount
+
+STEP 5 - Final totals from last page:
+- total_net_payable: value after "TOTAL NET PAYABLE :"
+- withholding_tax: absolute value after "Withholding Tax Deduction (2%) :"
+
+IMPORTANT: subtotal for each category MUST equal sum of all new_orders amounts PLUS trailing_total. Double-check this before returning.
+
+Return this structure:
 {
   "distributor_code": "string",
-  "distributor_name": "string",
+  "distributor_name": "string", 
   "period_date": "string",
   "member_level": "string",
   "total_net_payable": number,
   "withholding_tax": number,
   "categories": [
     {
-      "name": "exact category name from PDF",
+      "name": "string",
       "subtotal": number,
       "trailing_total": number,
       "new_orders": [
-        { "order_no": "string", "customer_name": "string", "months": number, "pv": number, "amount": number }
+        {"order_no": "string", "customer_name": "string", "months": number|null, "pv": number, "amount": number}
       ]
     }
   ],
   "team_building_total": number,
-  "allowances": [
-    { "description": "string", "amount": number }
-  ]
-}
-
-Verification: for each category, new_orders sum + trailing_total should equal subtotal.
-Return ONLY the JSON object.`
+  "allowances": [{"description": "string", "amount": number}]
+}`
             }
           ]
         }]
@@ -82,7 +100,25 @@ Return ONLY the JSON object.`
     const data = await response.json();
     const text = data.content?.find(c => c.type === 'text')?.text || '';
     const clean = text.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(clean);
+
+    let parsed;
+    try {
+      parsed = JSON.parse(clean);
+    } catch(e) {
+      return res.status(500).json({ error: 'JSON parse failed', raw: text.substring(0, 500) });
+    }
+
+    // Server-side validation: check subtotals add up
+    for (const cat of (parsed.categories || [])) {
+      const newSum = (cat.new_orders || []).reduce((s, o) => s + (o.amount || 0), 0);
+      const trailing = cat.trailing_total || 0;
+      const computed = Math.round((newSum + trailing) * 100) / 100;
+      const reported = Math.round((cat.subtotal || 0) * 100) / 100;
+      // Add computed sum to response for debugging
+      cat._computed_sum = computed;
+      cat._match = Math.abs(computed - reported) < 0.10;
+    }
+
     return res.status(200).json({ success: true, data: parsed });
 
   } catch (e) {
