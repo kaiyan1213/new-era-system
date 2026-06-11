@@ -1,2672 +1,339 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NEC — Proxy Invoice Manager</title>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
-  :root {
-    --bg: #0f1117;
-    --surface: #181c27;
-    --surface2: #1e2436;
-    --border: #2a3045;
-    --border2: #3a4460;
-    --accent: #4f7cff;
-    --accent2: #7c5cfc;
-    --green: #22c55e;
-    --yellow: #f59e0b;
-    --red: #ef4444;
-    --text: #e8eaf0;
-    --muted: #7a849e;
-    --muted2: #4a5568;
-    --mono: 'JetBrains Mono', monospace;
-  }
-
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; font-size: 14px; min-height: 100vh; }
-
-  /* NAV */
-  .nav { display: flex; align-items: center; justify-content: space-between; padding: 0 32px; height: 56px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; }
-  .nav-brand { display: flex; align-items: center; gap: 10px; }
-  .nav-logo { width: 28px; height: 28px; background: linear-gradient(135deg, var(--accent), var(--accent2)); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; color: #fff; }
-  .nav-title { font-weight: 600; font-size: 13px; color: var(--text); }
-  .nav-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
-  .nav-links { display: flex; gap: 4px; }
-  .nav-link { padding: 6px 12px; border-radius: 6px; color: var(--muted); font-size: 13px; text-decoration: none; cursor: pointer; transition: all 0.15s; border: none; background: none; }
-  .nav-link:hover { color: var(--text); background: var(--surface2); }
-  .nav-link.active { color: var(--accent); background: rgba(79,124,255,0.1); }
-
-  /* LAYOUT */
-  .main { padding: 32px; max-width: 1400px; margin: 0 auto; }
-  .page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 28px; }
-  .page-title { font-size: 22px; font-weight: 700; color: var(--text); }
-  .page-sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
-
-  /* STATS ROW */
-  .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
-  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
-  .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
-  .stat-value { font-size: 24px; font-weight: 700; font-family: var(--mono); color: var(--text); }
-  .stat-value.green { color: var(--green); }
-  .stat-value.yellow { color: var(--yellow); }
-  .stat-value.blue { color: var(--accent); }
-  .stat-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
-
-  /* TOOLBAR */
-  .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
-  .toolbar-left { display: flex; gap: 8px; flex: 1; }
-  select, input[type="text"], input[type="number"] {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 7px;
-    color: var(--text); padding: 8px 12px; font-size: 13px; font-family: 'Inter', sans-serif;
-    outline: none; transition: border 0.15s;
-  }
-  select:focus, input:focus { border-color: var(--accent); }
-  select { cursor: pointer; }
-
-  /* BUTTONS */
-  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 7px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: all 0.15s; font-family: 'Inter', sans-serif; }
-  .btn-primary { background: var(--accent); color: #fff; }
-  .btn-primary:hover { background: #3d6aef; }
-  .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
-  .btn-ghost:hover { color: var(--text); border-color: var(--border2); background: var(--surface2); }
-  .btn-green { background: rgba(34,197,94,0.15); color: var(--green); border: 1px solid rgba(34,197,94,0.25); }
-  .btn-green:hover { background: rgba(34,197,94,0.25); }
-  .btn-danger { background: rgba(239,68,68,0.1); color: var(--red); border: 1px solid rgba(239,68,68,0.2); }
-  .btn-danger:hover { background: rgba(239,68,68,0.2); }
-  .btn-sm { padding: 5px 10px; font-size: 12px; }
-
-  /* TABLE */
-  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-  table { width: 100%; border-collapse: collapse; }
-  th { padding: 12px 16px; text-align: left; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; background: var(--surface2); border-bottom: 1px solid var(--border); }
-  td { padding: 13px 16px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
-  tr:last-child td { border-bottom: none; }
-  tr:hover td { background: rgba(255,255,255,0.02); }
-  .td-mono { font-family: var(--mono); font-size: 13px; }
-  .td-name { font-weight: 500; }
-  .td-muted { color: var(--muted); font-size: 12px; }
-
-  /* BADGES */
-  .badge { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
-  .badge-dm { background: rgba(79,124,255,0.15); color: #7fa8ff; }
-  .badge-tm { background: rgba(124,92,252,0.15); color: #a98aff; }
-  .badge-xhs { background: rgba(239,68,68,0.15); color: #f87171; }
-  .badge-other { background: rgba(100,116,139,0.15); color: #94a3b8; }
-  .badge-draft { background: rgba(100,116,139,0.15); color: #94a3b8; }
-  .badge-issued { background: rgba(245,158,11,0.15); color: #fbbf24; }
-  .badge-paid { background: rgba(34,197,94,0.15); color: #4ade80; }
-
-  /* PROFIT INDICATOR */
-  .profit-bar-wrap { display: flex; align-items: center; gap: 8px; }
-  .profit-bar-bg { flex: 1; height: 4px; background: var(--border); border-radius: 2px; min-width: 60px; }
-  .profit-bar-fill { height: 4px; border-radius: 2px; transition: width 0.3s; }
-  .profit-bar-fill.safe { background: var(--green); }
-  .profit-bar-fill.warn { background: var(--yellow); }
-  .profit-bar-fill.over { background: var(--red); }
-  .profit-num { font-family: var(--mono); font-size: 12px; min-width: 70px; }
-  .profit-num.safe { color: var(--green); }
-  .profit-num.warn { color: var(--yellow); }
-  .profit-num.over { color: var(--red); }
-
-  /* MODAL */
-  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1000; backdrop-filter: blur(4px); }
-  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 28px; width: 520px; max-width: 95vw; max-height: 90vh; overflow-y: auto; }
-  .modal-title { font-size: 17px; font-weight: 700; margin-bottom: 20px; }
-  .form-grid { display: grid; gap: 14px; }
-  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .form-group { display: flex; flex-direction: column; gap: 6px; }
-  .form-label { font-size: 12px; color: var(--muted); font-weight: 500; }
-  .form-input { width: 100%; }
-  .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
-
-  /* INVOICE PREVIEW */
-  .invoice-preview { background: #fff; color: #1a1a2e; border-radius: 8px; padding: 40px; width: 100%; font-family: 'Inter', sans-serif; }
-  .inv-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; }
-  .inv-company-name { font-size: 18px; font-weight: 800; color: #1a1a2e; letter-spacing: -0.02em; }
-  .inv-reg { font-size: 11px; color: #666; margin-top: 2px; }
-  .inv-address { font-size: 11px; color: #666; margin-top: 8px; line-height: 1.5; }
-  .inv-label { font-size: 28px; font-weight: 800; color: #4f7cff; text-align: right; }
-  .inv-meta { text-align: right; font-size: 12px; color: #666; margin-top: 4px; }
-  .inv-divider { height: 2px; background: linear-gradient(to right, #4f7cff, #7c5cfc); border-radius: 1px; margin-bottom: 24px; }
-  .inv-bill-to { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
-  .inv-bill-name { font-size: 15px; font-weight: 700; color: #1a1a2e; }
-  .inv-bill-sub { font-size: 12px; color: #666; margin-top: 2px; }
-  .inv-table { width: 100%; margin: 24px 0; border-collapse: collapse; }
-  .inv-table th { background: #f0f4ff; padding: 10px 12px; text-align: left; font-size: 11px; color: #4f7cff; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
-  .inv-table td { padding: 12px; border-bottom: 1px solid #eee; font-size: 13px; color: #333; }
-  .inv-total-row { display: flex; justify-content: flex-end; }
-  .inv-total-box { background: #f0f4ff; border-radius: 8px; padding: 16px 20px; min-width: 200px; }
-  .inv-total-label { font-size: 12px; color: #666; }
-  .inv-total-amount { font-size: 22px; font-weight: 800; color: #4f7cff; margin-top: 4px; font-family: 'JetBrains Mono', monospace; }
-  .inv-footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #eee; font-size: 11px; color: #999; }
-
-  /* TABS */
-  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
-  .tab { padding: 10px 16px; font-size: 13px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all 0.15s; }
-  .tab:hover { color: var(--text); }
-  .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 500; }
-
-  /* EMPTY STATE */
-  .empty { padding: 60px; text-align: center; }
-  .empty-icon { font-size: 40px; margin-bottom: 12px; opacity: 0.4; }
-  .empty-text { color: var(--muted); font-size: 14px; }
-
-  /* TOAST */
-  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface2); border: 1px solid var(--border2); border-radius: 8px; padding: 12px 16px; font-size: 13px; z-index: 2000; opacity: 0; transform: translateY(8px); transition: all 0.2s; display: flex; align-items: center; gap: 8px; }
-  .toast.show { opacity: 1; transform: translateY(0); }
-  .toast.success { border-color: rgba(34,197,94,0.4); }
-  .toast.error { border-color: rgba(239,68,68,0.4); }
-
-  /* SETUP BANNER */
-  .setup-banner { background: rgba(79,124,255,0.08); border: 1px solid rgba(79,124,255,0.2); border-radius: 10px; padding: 20px; margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-  .setup-banner-text { font-size: 13px; color: var(--text); }
-  .setup-banner-sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
-
-  .section-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
-  .ytd-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; margin-left: 6px; }
-
-  .hidden { display: none !important; }
-
-  /* SQL modal */
-  .sql-block { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-family: var(--mono); font-size: 11px; color: #94a3b8; line-height: 1.7; white-space: pre; overflow-x: auto; max-height: 300px; overflow-y: auto; }
-
-  /* LOGIN SCREEN */
-  .login-screen { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 9999; }
-  .login-box { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 40px; width: 380px; }
-  .login-logo { width: 44px; height: 44px; background: linear-gradient(135deg, var(--accent), var(--accent2)); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 16px; color: #fff; margin-bottom: 20px; }
-  .login-title { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
-  .login-sub { font-size: 13px; color: var(--muted); margin-bottom: 28px; }
-  .login-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
-  .login-label { font-size: 12px; color: var(--muted); font-weight: 500; }
-  .login-input { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 10px 14px; font-size: 14px; font-family: 'Inter', sans-serif; outline: none; transition: border 0.15s; width: 100%; }
-  .login-input:focus { border-color: var(--accent); }
-  .login-btn { width: 100%; padding: 11px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 6px; transition: background 0.15s; font-family: 'Inter', sans-serif; }
-  .login-btn:hover { background: #3d6aef; }
-  .login-error { color: var(--red); font-size: 12px; margin-top: 8px; min-height: 16px; }
-
-  /* USER CHIP IN NAV */
-  .nav-user { display: flex; align-items: center; gap: 8px; }
-  .user-chip { display: flex; align-items: center; gap: 6px; background: var(--surface2); border: 1px solid var(--border); border-radius: 20px; padding: 4px 12px 4px 6px; }
-  .user-avatar { width: 22px; height: 22px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent2)); display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff; }
-  .user-name { font-size: 12px; font-weight: 500; color: var(--text); }
-  .user-role { font-size: 10px; color: var(--muted); }
-  .logout-btn { padding: 5px 10px; border-radius: 6px; background: transparent; border: 1px solid var(--border); color: var(--muted); font-size: 11px; cursor: pointer; font-family: 'Inter', sans-serif; transition: all 0.15s; }
-  .logout-btn:hover { color: var(--red); border-color: rgba(239,68,68,0.3); }
-
-  /* AUDIT LOG */
-  .audit-action { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius: 3px; }
-  .audit-create { background: rgba(34,197,94,0.1); color: var(--green); }
-  .audit-update { background: rgba(245,158,11,0.1); color: var(--yellow); }
-  .audit-delete { background: rgba(239,68,68,0.1); color: var(--red); }
-
-  /* BULK UPLOAD */
-  .upload-zone { border: 2px dashed var(--border2); border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.2s; background: var(--surface); }
-  .upload-zone:hover, .upload-zone.drag { border-color: var(--accent); background: rgba(79,124,255,0.05); }
-  .upload-zone-icon { font-size: 36px; margin-bottom: 12px; }
-  .upload-zone-text { font-size: 14px; font-weight: 500; color: var(--text); }
-  .upload-zone-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
-  .parse-result-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 10px; }
-  .parse-result-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-  .parse-result-name { font-weight: 600; font-size: 14px; }
-  .parse-result-amount { font-family: var(--mono); font-size: 16px; font-weight: 700; color: var(--green); }
-  .parse-cat-row { display: flex; justify-content: space-between; font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--border); }
-  .parse-cat-row:last-child { border-bottom: none; }
-  .parse-cat-label { color: var(--muted); }
-  .parse-cat-amount { font-family: var(--mono); font-weight: 500; }
-  .parse-status { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 8px; border-radius: 4px; }
-  .parse-status.matched { background: rgba(34,197,94,0.1); color: var(--green); }
-  .parse-status.unmatched { background: rgba(239,68,68,0.1); color: var(--red); }
-  .parse-status.processing { background: rgba(245,158,11,0.1); color: var(--yellow); }
-
-  /* BREAKDOWN PAGE */
-  .breakdown-grid { display: grid; grid-template-columns: 280px 1fr; gap: 20px; }
-  .breakdown-sidebar { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-  .breakdown-sidebar-header { padding: 14px 16px; background: var(--surface2); border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
-  .breakdown-proxy-item { padding: 12px 16px; cursor: pointer; border-bottom: 1px solid var(--border); transition: background 0.1s; display: flex; justify-content: space-between; align-items: center; }
-  .breakdown-proxy-item:hover { background: var(--surface2); }
-  .breakdown-proxy-item.active { background: rgba(79,124,255,0.1); border-left: 3px solid var(--accent); }
-  .breakdown-proxy-item:last-child { border-bottom: none; }
-  .breakdown-content { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; overflow-y: auto; max-height: calc(100vh - 200px); }
-  .cat-section { margin-bottom: 20px; }
-  .cat-section-title { font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; padding: 8px 0; border-bottom: 1px solid var(--border); margin-bottom: 8px; display: flex; justify-content: space-between; }
-  .order-row { display: grid; grid-template-columns: 120px 1fr 60px 80px 80px; gap: 8px; font-size: 11px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.04); align-items: center; }
-  .order-row:last-child { border-bottom: none; }
-  .order-row.header { color: var(--muted); font-weight: 600; font-size: 10px; text-transform: uppercase; }
-</style>
-</head>
-<body>
-
-<!-- LOGIN SCREEN -->
-<div class="login-screen" id="loginScreen">
-  <div class="login-box">
-    <div class="login-logo">NE</div>
-    <div class="login-title">New Era System</div>
-    <div class="login-sub">New Era Consulting Enterprise — Internal</div>
-    <div class="login-field">
-      <label class="login-label">Username</label>
-      <input type="text" id="loginUser" class="login-input" placeholder="e.g. kaiyan" onkeydown="if(event.key==='Enter')doLogin()">
-    </div>
-    <div class="login-field">
-      <label class="login-label">Password</label>
-      <input type="password" id="loginPass" class="login-input" placeholder="enter password" onkeydown="if(event.key==='Enter')doLogin()">
-    </div>
-    <button class="login-btn" onclick="doLogin()">Sign In</button>
-    <div class="login-error" id="loginError"></div>
-  </div>
-</div>
-
-<nav class="nav">
-  <div class="nav-brand">
-    <div class="nav-logo">NE</div>
-    <div>
-      <div class="nav-title">New Era Consulting Enterprise</div>
-      <div class="nav-sub">Internal Management System</div>
-    </div>
-  </div>
-  <div style="display:flex;align-items:center;gap:8px">
-    <div class="nav-links">
-      <a class="nav-link active" onclick="showPage('proxy')">Proxy Inv</a>
-      <a class="nav-link" onclick="showPage('payroll')">Payroll</a>
-      <a class="nav-link" onclick="showPage('manager')">Manager Sharing</a>
-      <a class="nav-link" onclick="showPage('pl')">P&amp;L</a>
-      <a class="nav-link" onclick="showPage('export')">Export</a>
-      <a class="nav-link" id="auditNavLink" onclick="showPage('audit')" style="display:none">Audit Log</a>
-      <a class="nav-link" onclick="showPage('breakdown')">Breakdown</a>
-      <a class="nav-link" onclick="showPage('setup')">Setup</a>    </div>
-    <div class="nav-user">
-      <div class="user-chip" id="userChip" style="display:none">
-        <div class="user-avatar" id="userAvatar">?</div>
-        <div>
-          <div class="user-name" id="userNameDisplay">-</div>
-          <div class="user-role" id="userRoleDisplay">-</div>
-        </div>
-      </div>
-      <button class="logout-btn" id="logoutBtn" style="display:none" onclick="doLogout()">Logout</button>
-    </div>
-  </div>
-</nav>
-
-<div class="main">
-
-  <!-- SETUP BANNER (shown if not configured) -->
-  <div class="setup-banner" id="setupBanner" style="display:none">
-    <div>
-      <div class="setup-banner-text">⚠️ Database tables not set up yet</div>
-      <div class="setup-banner-sub">Go to Setup tab → run the SQL in your Supabase SQL editor to create the tables first.</div>
-    </div>
-    <button class="btn btn-primary btn-sm" onclick="showPage('setup')">Go to Setup</button>
-  </div>
-
-  <!-- ========== PROXY PAGE ========== -->
-  <div id="page-proxy">
-    <div class="page-header">
-      <div>
-        <div class="page-title">Proxy Invoice Manager</div>
-        <div class="page-sub">Track proxy accounts & generate monthly invoices for Marketing Services</div>
-      </div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost" onclick="openAddProxyModal()">+ Add Proxy</button>
-        <button class="btn btn-ghost" onclick="showPage('upload')" style="color:var(--yellow);border-color:rgba(245,158,11,0.3)">⬆ Bulk Upload Payslips</button>
-        <button class="btn btn-primary" onclick="openNewInvoiceModal()">New Invoice Entry</button>
-      </div>
-    </div>
-
-    <!-- Stats -->
-    <div class="stats-row" id="proxyStats">
-      <div class="stat-card">
-        <div class="stat-label">Active Proxies</div>
-        <div class="stat-value blue" id="statProxyCount">—</div>
-        <div class="stat-sub">registered accounts</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">This Month Revenue</div>
-        <div class="stat-value green" id="statMonthRev">—</div>
-        <div class="stat-sub" id="statMonthLabel">invoiced to NEC</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">YTD Revenue</div>
-        <div class="stat-value blue" id="statYtdRev">—</div>
-        <div class="stat-sub" id="statYear">year to date</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Pending Invoices</div>
-        <div class="stat-value yellow" id="statPending">—</div>
-        <div class="stat-sub">draft / not paid</div>
-      </div>
-    </div>
-
-    <!-- Toolbar -->
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <select id="filterYear" onchange="loadInvoices()">
-          <option value="2025">2025</option>
-          <option value="2026" selected>2026</option>
-        </select>
-        <select id="filterMonth" onchange="loadInvoices()">
-          <option value="">All Months</option>
-          <option value="1">January</option><option value="2">February</option>
-          <option value="3">March</option><option value="4">April</option>
-          <option value="5">May</option><option value="6">June</option>
-          <option value="7">July</option><option value="8">August</option>
-          <option value="9">September</option><option value="10">October</option>
-          <option value="11">November</option><option value="12">December</option>
-        </select>
-        <select id="filterChannel" onchange="loadInvoices()">
-          <option value="">All Channels</option>
-          <option value="DM">DM</option>
-          <option value="TM">TM</option>
-          <option value="XHS">XHS</option>
-          <option value="OTHER">Other</option>
-        </select>
-        <select id="filterStatus" onchange="loadInvoices()">
-          <option value="">All Status</option>
-          <option value="draft">Draft</option>
-          <option value="issued">Issued</option>
-          <option value="paid">Paid</option>
-        </select>
-      </div>
-      <button class="btn btn-ghost btn-sm" onclick="loadInvoices()">↻ Refresh</button>
-    </div>
-
-    <!-- Invoice Table -->
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Proxy Name</th>
-            <th>Channel</th>
-            <th>Month</th>
-            <th>Coway Payslip</th>
-            <th>Invoice Amount</th>
-            <th>YTD Profit</th>
-            <th>Status</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="invoiceTableBody">
-          <tr><td colspan="8"><div class="empty"><div class="empty-icon">📄</div><div class="empty-text">Loading invoices...</div></div></td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- ========== PAYROLL PAGE ========== -->
-  <div id="page-payroll" class="hidden">
-    <div class="page-header">
-      <div>
-        <div class="page-title">Staff Payroll</div>
-        <div class="page-sub">Sales commission + Admin fixed salary</div>
-      </div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost" onclick="openAddStaffModal()">+ Add Staff</button>
-        <button class="btn btn-primary" onclick="openPayrollEntryModal()">Record Payroll</button>
-      </div>
-    </div>
-
-    <div class="stats-row">
-      <div class="stat-card">
-        <div class="stat-label">Total Staff</div>
-        <div class="stat-value blue" id="statStaffCount">—</div>
-        <div class="stat-sub">active members</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">This Month Payroll</div>
-        <div class="stat-value" id="statPayrollMonth">—</div>
-        <div class="stat-sub">total payout</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Sales Staff</div>
-        <div class="stat-value green" id="statSalesStaff">—</div>
-        <div class="stat-sub">commission-based</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Admin Staff</div>
-        <div class="stat-value yellow" id="statAdminStaff">—</div>
-        <div class="stat-sub">fixed salary</div>
-      </div>
-    </div>
-
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <select id="payrollYear" onchange="loadPayroll()">
-          <option value="2025">2025</option>
-          <option value="2026" selected>2026</option>
-        </select>
-        <select id="payrollMonth" onchange="loadPayroll()">
-          <option value="">All Months</option>
-          <option value="1">January</option><option value="2">February</option>
-          <option value="3">March</option><option value="4">April</option>
-          <option value="5">May</option><option value="6">June</option>
-          <option value="7">July</option><option value="8">August</option>
-          <option value="9">September</option><option value="10">October</option>
-          <option value="11">November</option><option value="12">December</option>
-        </select>
-        <select id="payrollChannel" onchange="loadPayroll()">
-          <option value="">All Channels</option>
-          <option value="DM">DM</option><option value="TM">TM</option>
-          <option value="XHS">XHS</option><option value="OTHER">Other</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Staff Name</th>
-            <th>Channel</th>
-            <th>Type</th>
-            <th>Month</th>
-            <th>Orders</th>
-            <th>Commission</th>
-            <th>Base Salary</th>
-            <th>Bonus</th>
-            <th>Total Pay</th>
-            <th>Status</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="payrollTableBody">
-          <tr><td colspan="11"><div class="empty"><div class="empty-icon">👥</div><div class="empty-text">Loading payroll...</div></div></td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- ========== MANAGER SHARING PAGE ========== -->
-  <div id="page-manager" class="hidden">
-    <div class="page-header">
-      <div>
-        <div class="page-title">Manager Profit Sharing</div>
-        <div class="page-sub">Coway payslips → routed through NEC → distributed by % to each manager</div>
-      </div>
-      <button class="btn btn-primary" onclick="openManagerEntryModal()">Record This Month</button>
-    </div>
-
-    <div class="stats-row" id="managerStats">
-      <div class="stat-card">
-        <div class="stat-label">Kai Yan</div>
-        <div class="stat-value blue" id="mgr0">—</div>
-        <div class="stat-sub" id="mgr0pct">—% share</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Chloe</div>
-        <div class="stat-value" id="mgr1">—</div>
-        <div class="stat-sub" id="mgr1pct">—% share</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Carine</div>
-        <div class="stat-value" id="mgr2">—</div>
-        <div class="stat-sub" id="mgr2pct">—% share</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Jess</div>
-        <div class="stat-value" id="mgr3">—</div>
-        <div class="stat-sub" id="mgr3pct">—% share</div>
-      </div>
-    </div>
-
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <select id="mgrYear" onchange="loadManagerSharing()">
-          <option value="2025">2025</option>
-          <option value="2026" selected>2026</option>
-        </select>
-        <select id="mgrMonth" onchange="loadManagerSharing()">
-          <option value="">All Months</option>
-          <option value="1">January</option><option value="2">February</option>
-          <option value="3">March</option><option value="4">April</option>
-          <option value="5">May</option><option value="6">June</option>
-          <option value="7">July</option><option value="8">August</option>
-          <option value="9">September</option><option value="10">October</option>
-          <option value="11">November</option><option value="12">December</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Manager</th>
-            <th>Month</th>
-            <th>Coway Payslip</th>
-            <th>Share %</th>
-            <th>Amount Received</th>
-            <th>Notes</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="managerTableBody">
-          <tr><td colspan="7"><div class="empty"><div class="empty-icon">👔</div><div class="empty-text">Loading records...</div></div></td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- ========== P&L PAGE ========== -->
-  <div id="page-pl" class="hidden">
-    <div class="page-header">
-      <div>
-        <div class="page-title">P&L Dashboard</div>
-        <div class="page-sub">Revenue vs costs by channel & overall company</div>
-      </div>
-      <button class="btn btn-primary" onclick="openCostEntryModal()">Add Cost Entry</button>
-    </div>
-
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <select id="plYear" onchange="loadPL()">
-          <option value="2025">2025</option>
-          <option value="2026" selected>2026</option>
-        </select>
-        <select id="plMonth" onchange="loadPL()">
-          <option value="">Full Year</option>
-          <option value="1">January</option><option value="2">February</option>
-          <option value="3">March</option><option value="4">April</option>
-          <option value="5">May</option><option value="6">June</option>
-          <option value="7">July</option><option value="8">August</option>
-          <option value="9">September</option><option value="10">October</option>
-          <option value="11">November</option><option value="12">December</option>
-        </select>
-      </div>
-    </div>
-
-    <!-- PL Summary Cards -->
-    <div class="stats-row" id="plSummary">
-      <div class="stat-card">
-        <div class="stat-label">Total Revenue</div>
-        <div class="stat-value green" id="plTotalRev">—</div>
-        <div class="stat-sub">from proxy invoices</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Total Costs</div>
-        <div class="stat-value red" id="plTotalCost">—</div>
-        <div class="stat-sub">all expenses</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Net Profit</div>
-        <div class="stat-value" id="plNetProfit">—</div>
-        <div class="stat-sub">revenue - costs</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Profit Margin</div>
-        <div class="stat-value" id="plMargin">—</div>
-        <div class="stat-sub">net / revenue</div>
-      </div>
-    </div>
-
-    <!-- Channel P&L -->
-    <div class="section-title" style="margin-top:8px">By Channel</div>
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:28px" id="plChannels">
-      <!-- filled by JS -->
-    </div>
-
-    <!-- Cost breakdown table -->
-    <div class="section-title">Cost Entries</div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Month</th>
-            <th>Channel</th>
-            <th>Category</th>
-            <th>Description</th>
-            <th>Amount</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="plTableBody">
-          <tr><td colspan="6"><div class="empty"><div class="empty-icon">📊</div><div class="empty-text">Loading cost entries...</div></div></td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- ========== EXPORT PAGE ========== -->
-  <div id="page-export" class="hidden">
-    <div class="page-header">
-      <div>
-        <div class="page-title">Tax Filing Export</div>
-        <div class="page-sub">Generate full-year records per proxy for LHDN submission</div>
-      </div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
-      <div>
-        <div class="section-title">Per Proxy Annual Report</div>
-        <div style="display:flex;gap:8px;margin-bottom:16px">
-          <select id="exportYear" style="flex:1">
-            <option value="2025">2025</option>
-            <option value="2026" selected>2026</option>
-          </select>
-          <button class="btn btn-primary" onclick="loadExportProxies()">Load</button>
-        </div>
-        <div id="exportProxyList">
-          <div class="empty"><div class="empty-icon">📁</div><div class="empty-text">Select year and click Load</div></div>
-        </div>
-      </div>
-      <div>
-        <div class="section-title">Company P&L Summary</div>
-        <div style="display:flex;gap:8px;margin-bottom:16px">
-          <select id="exportPlYear" style="flex:1">
-            <option value="2025">2025</option>
-            <option value="2026" selected>2026</option>
-          </select>
-          <button class="btn btn-primary" onclick="exportPL()">Export CSV</button>
-        </div>
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;font-size:12px;color:var(--muted);line-height:1.8">
-          Export includes:<br>
-          ✓ Monthly revenue from proxy invoices<br>
-          ✓ Staff payroll total per month<br>
-          ✓ All overhead costs by category<br>
-          ✓ Net profit per month<br>
-          ✓ Manager distribution records
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ========== SETUP PAGE ========== -->
-  <div id="page-setup" class="hidden">
-    <div class="page-header">
-      <div>
-        <div class="page-title">System Setup</div>
-        <div class="page-sub">First-time setup — create database tables & configure managers</div>
-      </div>
-    </div>
-
-    <div style="display:grid;gap:20px;max-width:800px">
-      <!-- Step 1 -->
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:24px">
-        <div style="font-weight:600;margin-bottom:6px">Step 1 — Create Supabase Tables</div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Copy the SQL below → paste into your Supabase SQL Editor → Run</div>
-        <div class="sql-block" id="setupSQL"></div>
-        <button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="copySQL()">Copy SQL</button>
-      </div>
-
-      <!-- Step 2 -->
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:24px">
-        <div style="font-weight:600;margin-bottom:6px">Step 2 — Initialize Managers</div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Set up the 4 co-founders and their profit share %. Total must = 100%</div>
-        <div id="managerSetupList" style="display:grid;gap:10px;margin-bottom:16px">
-          <!-- filled by JS -->
-        </div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Total: <span id="setupPctTotal" style="font-weight:700;color:var(--accent)">0</span>%</div>
-        <button class="btn btn-primary" onclick="saveManagers()">Save Managers</button>
-      </div>
-
-      <!-- Step 3 -->
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:24px">
-        <div style="font-weight:600;margin-bottom:6px">Step 3 — Verify Connection</div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Test that all tables exist and are accessible</div>
-        <button class="btn btn-ghost" onclick="testConnection()">Run Connection Test</button>
-        <div id="connTestResult" style="margin-top:12px;font-size:12px;color:var(--muted)"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ========== BULK UPLOAD PAGE ========== -->
-  <div id="page-upload" class="hidden">
-    <div class="page-header">
-      <div>
-        <div class="page-title">Bulk Payslip Upload</div>
-        <div class="page-sub">Upload multiple Coway PDF payslips — system auto-reads all amounts & categories</div>
-      </div>
-      <div style="display:flex;gap:8px">
-        <select id="uploadYear" style="width:100px">
-          <option value="2025">2025</option>
-          <option value="2026" selected>2026</option>
-        </select>
-        <select id="uploadMonth" style="width:130px">
-          <option value="1">January</option><option value="2">February</option>
-          <option value="3">March</option><option value="4">April</option>
-          <option value="5">May</option><option value="6" selected>June</option>
-          <option value="7">July</option><option value="8">August</option>
-          <option value="9">September</option><option value="10">October</option>
-          <option value="11">November</option><option value="12">December</option>
-        </select>
-        <button class="btn btn-ghost" onclick="showPage('proxy')">← Back</button>
-      </div>
-    </div>
-
-    <!-- Upload Zone -->
-    <div class="upload-zone" id="uploadZone" onclick="document.getElementById('pdfFileInput').click()"
-      ondragover="event.preventDefault();this.classList.add('drag')"
-      ondragleave="this.classList.remove('drag')"
-      ondrop="event.preventDefault();this.classList.remove('drag');handlePDFDrop(event)">
-      <div class="upload-zone-icon">📄</div>
-      <div class="upload-zone-text">Click or drag & drop Coway payslip PDFs here</div>
-      <div class="upload-zone-sub">Upload multiple files at once — all formats supported (HP, HP Manager)</div>
-      <input type="file" id="pdfFileInput" multiple accept=".pdf" style="display:none" onchange="handlePDFFiles(this.files)">
-    </div>
-    <div style="text-align:right;margin-top:8px">
-      <label style="font-size:11px;color:var(--muted);cursor:pointer">
-        🔍 Debug single PDF raw text: 
-        <input type="file" accept=".pdf" style="display:none" onchange="debugPDF(this.files[0])">
-        <span style="color:var(--accent);text-decoration:underline">choose file</span>
-      </label>
-    </div>
-
-    <!-- Processing status -->
-    <div id="uploadProgress" style="display:none;margin-top:16px">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-        <div style="font-weight:600" id="uploadProgressText">Processing PDFs...</div>
-        <div style="font-size:12px;color:var(--muted)" id="uploadProgressCount"></div>
-      </div>
-      <div style="background:var(--border);border-radius:4px;height:4px;overflow:hidden">
-        <div id="uploadProgressBar" style="height:4px;background:var(--accent);border-radius:4px;width:0%;transition:width 0.3s"></div>
-      </div>
-    </div>
-
-    <!-- Results -->
-    <div id="uploadResults" style="margin-top:20px"></div>
-
-    <!-- Confirm button -->
-    <div id="uploadConfirmBar" style="display:none;margin-top:16px;padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px;display:flex;align-items:center;justify-content:space-between">
-      <div>
-        <div style="font-weight:600" id="uploadConfirmText">Ready to save</div>
-        <div style="font-size:12px;color:var(--muted)" id="uploadConfirmSub">Review above, then confirm to save all invoices</div>
-      </div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost" onclick="clearUpload()">Clear All</button>
-        <button class="btn btn-primary" onclick="confirmBulkSave()">✓ Save All Invoices</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ========== BREAKDOWN PAGE ========== -->
-  <div id="page-breakdown" class="hidden">
-    <div class="page-header">
-      <div>
-        <div class="page-title">Payslip Breakdown</div>
-        <div class="page-sub">Full category & order detail from uploaded payslips</div>
-      </div>
-      <div style="display:flex;gap:8px">
-        <select id="bdYear" onchange="loadBreakdown()">
-          <option value="2025">2025</option>
-          <option value="2026" selected>2026</option>
-        </select>
-        <select id="bdMonth" onchange="loadBreakdown()">
-          <option value="">All Months</option>
-          <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
-          <option value="4">Apr</option><option value="5">May</option><option value="6" selected>Jun</option>
-          <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
-          <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
-        </select>
-      </div>
-    </div>
-    <div class="breakdown-grid">
-      <div>
-        <div class="breakdown-sidebar">
-          <div class="breakdown-sidebar-header">Proxies & Managers</div>
-          <div id="breakdownSidebar">
-            <div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">Loading...</div>
-          </div>
-        </div>
-      </div>
-      <div class="breakdown-content" id="breakdownContent">
-        <div style="text-align:center;padding:40px;color:var(--muted)">
-          <div style="font-size:32px;margin-bottom:12px">📊</div>
-          Select a person from the left to see their full payslip breakdown
-        </div>
-      </div>
-    </div>
-  </div>
-
-</div>
-
-<!-- ===== MODALS ===== -->
-  <div id="page-audit" class="hidden">
-    <div class="page-header">
-      <div>
-        <div class="page-title">Audit Log</div>
-        <div class="page-sub">All changes made by all users — only visible to Kai Yan</div>
-      </div>
-      <button class="btn btn-ghost btn-sm" onclick="loadAuditLog()">↻ Refresh</button>
-    </div>
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <select id="auditUser" onchange="loadAuditLog()">
-          <option value="">All Users</option>
-          <option value="kaiyan">Kai Yan</option>
-          <option value="chloe">Chloe</option>
-          <option value="carine">Carine</option>
-          <option value="jess">Jess</option>
-          <option value="zehao">Zehao</option>
-          <option value="admin">Admin</option>
-        </select>
-        <select id="auditAction" onchange="loadAuditLog()">
-          <option value="">All Actions</option>
-          <option value="CREATE">Create</option>
-          <option value="UPDATE">Update</option>
-          <option value="DELETE">Delete</option>
-        </select>
-        <select id="auditTable" onchange="loadAuditLog()">
-          <option value="">All Tables</option>
-          <option value="proxy_accounts">Proxy Accounts</option>
-          <option value="proxy_invoices">Proxy Invoices</option>
-          <option value="nec_staff">Staff</option>
-          <option value="nec_payroll">Payroll</option>
-          <option value="nec_manager_sharing">Manager Sharing</option>
-          <option value="nec_pl_costs">P&amp;L Costs</option>
-        </select>
-      </div>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>User</th>
-            <th>Action</th>
-            <th>Table</th>
-            <th>Details</th>
-          </tr>
-        </thead>
-        <tbody id="auditTableBody">
-          <tr><td colspan="5"><div class="empty"><div class="empty-icon">📋</div><div class="empty-text">Loading audit log...</div></div></td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-</div>
-
-<!-- ===== MODALS ===== -->
-
-<!-- Add Proxy Modal -->
-<div class="modal-bg hidden" id="modalAddProxy">
-  <div class="modal">
-    <div class="modal-title">Add Proxy Account</div>
-    <div class="form-grid">
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Full Name (as per IC)</label>
-          <input type="text" id="newProxyName" class="form-input" placeholder="Ahmad bin Ali">
-        </div>
-        <div class="form-group">
-          <label class="form-label">IC Number</label>
-          <input type="text" id="newProxyIC" class="form-input" placeholder="900101-14-1234">
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Coway Agent ID</label>
-          <input type="text" id="newProxyCoway" class="form-input" placeholder="718676">
-        </div>
-      </div>
-    </div>
-    <div class="form-actions">
-      <button class="btn btn-ghost" onclick="closeModal('modalAddProxy')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveProxy()">Add Proxy</button>
-    </div>
-  </div>
-</div>
-
-<!-- New Invoice Modal -->
-<div class="modal-bg hidden" id="modalNewInvoice">
-  <div class="modal">
-    <div class="modal-title">New Invoice Entry</div>
-    <div class="form-grid">
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Year</label>
-          <select id="invYear" class="form-input">
-            <option value="2025">2025</option>
-            <option value="2026" selected>2026</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Month</label>
-          <select id="invMonth" class="form-input">
-            <option value="1">January</option><option value="2">February</option>
-            <option value="3">March</option><option value="4">April</option>
-            <option value="5">May</option><option value="6" selected>June</option>
-            <option value="7">July</option><option value="8">August</option>
-            <option value="9">September</option><option value="10">October</option>
-            <option value="11">November</option><option value="12">December</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Proxy Account</label>
-        <select id="invProxy" class="form-input" onchange="loadYTDForProxy()">
-          <option value="">Select proxy...</option>
-        </select>
-      </div>
-      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12px" id="ytdInfo" style="display:none">
-        <div style="color:var(--muted)">YTD Proxy Profit (before this entry)</div>
-        <div style="font-family:var(--mono);font-size:16px;font-weight:700;margin-top:4px" id="ytdValue">—</div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Coway Payslip Amount (RM)</label>
-          <input type="number" id="invPayslip" class="form-input" placeholder="0.00" step="0.01" oninput="calcInvoiceAmount()">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Invoice Amount to NEC (RM)</label>
-          <input type="number" id="invAmount" class="form-input" placeholder="0.00" step="0.01" oninput="updateProfit()">
-        </div>
-      </div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost btn-sm" onclick="setDeductPct(5)">-5%</button>
-        <button class="btn btn-ghost btn-sm" onclick="setDeductPct(6)">-6%</button>
-        <button class="btn btn-ghost btn-sm" onclick="setDeductPct(7)">-7%</button>
-        <button class="btn btn-ghost btn-sm" onclick="setDeductPct(8)">-8%</button>
-      </div>
-      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12px" id="profitPreview">
-        <div style="display:flex;justify-content:space-between">
-          <span style="color:var(--muted)">Proxy keeps (profit this month)</span>
-          <span style="font-family:var(--mono);font-weight:700" id="profitThisMonth">RM 0.00</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;margin-top:6px">
-          <span style="color:var(--muted)">Proxy YTD profit (after this)</span>
-          <span style="font-family:var(--mono);font-weight:700" id="profitYTD">RM 0.00</span>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Invoice Number</label>
-          <input type="text" id="invNumber" class="form-input" placeholder="NEC-2026-001">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Status</label>
-          <select id="invStatus" class="form-input">
-            <option value="draft">Draft</option>
-            <option value="issued">Issued</option>
-            <option value="paid">Paid</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Notes</label>
-        <input type="text" id="invNotes" class="form-input" placeholder="Optional notes...">
-      </div>
-    </div>
-    <div class="form-actions">
-      <button class="btn btn-ghost" onclick="closeModal('modalNewInvoice')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveInvoice()">Save Invoice</button>
-    </div>
-  </div>
-</div>
-
-<!-- Add Staff Modal -->
-<div class="modal-bg hidden" id="modalAddStaff">
-  <div class="modal">
-    <div class="modal-title">Add Staff Member</div>
-    <div class="form-grid">
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Name</label>
-          <input type="text" id="staffName" class="form-input" placeholder="Staff name">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Role / Title</label>
-          <input type="text" id="staffRole" class="form-input" placeholder="e.g. Closer, Admin">
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Staff Type</label>
-          <select id="staffType" class="form-input" onchange="toggleStaffFields()">
-            <option value="sales">Sales (Commission-based)</option>
-            <option value="admin">Admin (Fixed Salary)</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Channel</label>
-          <select id="staffChannel" class="form-input">
-            <option value="DM">DM</option><option value="TM">TM</option>
-            <option value="XHS">XHS</option><option value="OTHER">Other/Admin</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group" id="commField">
-          <label class="form-label">Commission per Order (RM)</label>
-          <input type="number" id="staffComm" class="form-input" placeholder="0.00">
-        </div>
-        <div class="form-group" id="salaryField">
-          <label class="form-label">Base Salary (RM)</label>
-          <input type="number" id="staffSalary" class="form-input" placeholder="0.00">
-        </div>
-      </div>
-    </div>
-    <div class="form-actions">
-      <button class="btn btn-ghost" onclick="closeModal('modalAddStaff')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveStaff()">Add Staff</button>
-    </div>
-  </div>
-</div>
-
-<!-- Payroll Entry Modal -->
-<div class="modal-bg hidden" id="modalPayrollEntry">
-  <div class="modal">
-    <div class="modal-title">Record Payroll</div>
-    <div class="form-grid">
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Year</label>
-          <select id="prYear" class="form-input"><option value="2025">2025</option><option value="2026" selected>2026</option></select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Month</label>
-          <select id="prMonth" class="form-input">
-            <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
-            <option value="4">Apr</option><option value="5">May</option><option value="6" selected>Jun</option>
-            <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
-            <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Staff Member</label>
-        <select id="prStaff" class="form-input" onchange="loadStaffPayrollDefaults()">
-          <option value="">Select staff...</option>
-        </select>
-      </div>
-      <div class="form-row" id="prOrdersRow">
-        <div class="form-group">
-          <label class="form-label">Orders This Month</label>
-          <input type="number" id="prOrders" class="form-input" placeholder="0" oninput="calcPayroll()">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Commission Earned (RM)</label>
-          <input type="number" id="prComm" class="form-input" placeholder="0.00">
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Base Salary (RM)</label>
-          <input type="number" id="prSalary" class="form-input" placeholder="0.00">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Bonus (RM)</label>
-          <input type="number" id="prBonus" class="form-input" placeholder="0.00">
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Deductions (RM)</label>
-        <input type="number" id="prDeduct" class="form-input" placeholder="0.00">
-      </div>
-      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px">
-        <div style="display:flex;justify-content:space-between">
-          <span style="color:var(--muted);font-size:12px">Total Pay</span>
-          <span style="font-family:var(--mono);font-weight:700;font-size:16px" id="prTotal">RM 0.00</span>
-        </div>
-      </div>
-    </div>
-    <div class="form-actions">
-      <button class="btn btn-ghost" onclick="closeModal('modalPayrollEntry')">Cancel</button>
-      <button class="btn btn-primary" onclick="savePayroll()">Save Payroll</button>
-    </div>
-  </div>
-</div>
-
-<!-- Manager Entry Modal -->
-<div class="modal-bg hidden" id="modalManagerEntry">
-  <div class="modal">
-    <div class="modal-title">Record Manager Coway Payslips</div>
-    <div class="form-grid">
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Year</label>
-          <select id="meYear" class="form-input"><option value="2025">2025</option><option value="2026" selected>2026</option></select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Month</label>
-          <select id="meMonth" class="form-input">
-            <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
-            <option value="4">Apr</option><option value="5">May</option><option value="6" selected>Jun</option>
-            <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
-            <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
-          </select>
-        </div>
-      </div>
-      <div id="managerEntryFields" style="display:grid;gap:10px">
-        <!-- filled by JS -->
-      </div>
-    </div>
-    <div class="form-actions">
-      <button class="btn btn-ghost" onclick="closeModal('modalManagerEntry')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveManagerSharing()">Save</button>
-    </div>
-  </div>
-</div>
-
-<!-- Cost Entry Modal -->
-<div class="modal-bg hidden" id="modalCostEntry">
-  <div class="modal">
-    <div class="modal-title">Add Cost Entry</div>
-    <div class="form-grid">
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Year</label>
-          <select id="ceYear" class="form-input"><option value="2025">2025</option><option value="2026" selected>2026</option></select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Month</label>
-          <select id="ceMonth" class="form-input">
-            <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
-            <option value="4">Apr</option><option value="5">May</option><option value="6" selected>Jun</option>
-            <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
-            <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Category</label>
-          <select id="ceCategory" class="form-input">
-            <option value="ad_spend">Ad Spend</option>
-            <option value="staff_pay">Staff Pay</option>
-            <option value="rental">Office Rental</option>
-            <option value="admin">Admin</option>
-            <option value="wifi">Wifi</option>
-            <option value="utilities">Water & Electric</option>
-            <option value="team_building">Team Building</option>
-            <option value="cleaning">Cleaning Service</option>
-            <option value="other">Other</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Channel (or SHARED)</label>
-          <select id="ceChannel" class="form-input">
-            <option value="DM">DM</option><option value="TM">TM</option>
-            <option value="XHS">XHS</option><option value="OTHER">Other Channel</option>
-            <option value="SHARED">SHARED (company-wide)</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Description</label>
-        <input type="text" id="ceDesc" class="form-input" placeholder="e.g. Facebook Ads June - DM team">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Amount (RM)</label>
-        <input type="number" id="ceAmount" class="form-input" placeholder="0.00" step="0.01">
-      </div>
-    </div>
-    <div class="form-actions">
-      <button class="btn btn-ghost" onclick="closeModal('modalCostEntry')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveCostEntry()">Save Cost</button>
-    </div>
-  </div>
-</div>
-
-<!-- Toast -->
-<div class="toast" id="toast"></div>
-
-<script>
-const SUPABASE_URL = 'https://hgzbybtufyawewfsvmwx.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhnemJ5YnR1Znlhd2V3ZnN2bXd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5MjQ0NjUsImV4cCI6MjA5MjUwMDQ2NX0.zWcuK03hNozXqore-4MBEGHE7jbwh5RGj7y0LU_zkDs';
-
-const MONTHS = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const MONTH_FULL = ['','January','February','March','April','May','June','July','August','September','October','November','December'];
-
-// ============ AUTH ============
-
-const ACCOUNTS = {
-  kaiyan: { password: 'kaiyan+nec2025', displayName: 'Kai Yan', role: 'owner' },
-  chloe:   { password: 'chloe+nec2025',   displayName: 'Chloe',    role: 'manager' },
-  carine:  { password: 'carine+nec2025',  displayName: 'Carine',   role: 'manager' },
-  jess:    { password: 'jess+nec2025',    displayName: 'Jess',     role: 'manager' },
-  zehao:   { password: 'zehao+nec2025',   displayName: 'Zehao',    role: 'manager' },
-  admin:   { password: 'admin+nec2025',   displayName: 'Admin',    role: 'admin' },
-};
-
-let currentUser = null;
-
-function doLogin() {
-  const username = document.getElementById('loginUser').value.trim().toLowerCase();
-  const password = document.getElementById('loginPass').value;
-  const acc = ACCOUNTS[username];
-  if (!acc || acc.password !== password) {
-    document.getElementById('loginError').textContent = 'Invalid username or password';
-    return;
-  }
-  currentUser = { username, ...acc };
-  sessionStorage.setItem('nec_user', JSON.stringify(currentUser));
-  document.getElementById('loginScreen').style.display = 'none';
-  initUserUI();
-}
-
-function doLogout() {
-  sessionStorage.removeItem('nec_user');
-  currentUser = null;
-  document.getElementById('loginScreen').style.display = 'flex';
-  document.getElementById('userChip').style.display = 'none';
-  document.getElementById('logoutBtn').style.display = 'none';
-  document.getElementById('loginUser').value = '';
-  document.getElementById('loginPass').value = '';
-  document.getElementById('loginError').textContent = '';
-}
-
-function initUserUI() {
-  if (!currentUser) return;
-  document.getElementById('userChip').style.display = 'flex';
-  document.getElementById('logoutBtn').style.display = 'block';
-  document.getElementById('userAvatar').textContent = currentUser.displayName.charAt(0).toUpperCase();
-  document.getElementById('userNameDisplay').textContent = currentUser.displayName;
-  document.getElementById('userRoleDisplay').textContent = currentUser.role;
-  // Show audit log only for owner
-  if (currentUser.role === 'owner') {
-    document.getElementById('auditNavLink').style.display = 'inline-flex';
-  }
-}
-
-function getCurrentUser() {
-  return currentUser ? currentUser.username : 'unknown';
-}
-
-// ============ AUDIT LOG ============
-
-async function logAudit(action, tableName, details) {
+import pdfParse from 'pdf-parse/lib/pdf-parse.js';
+
+export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const { base64, debug } = req.body;
+  if (!base64) return res.status(400).json({ error: 'No PDF data' });
   try {
-    await sb('nec_audit_log', {
-      method: 'POST',
-      body: {
-        username: getCurrentUser(),
-        display_name: currentUser?.displayName || 'Unknown',
-        action,
-        table_name: tableName,
-        details,
-        created_at: new Date().toISOString()
+    const buffer = Buffer.from(base64, 'base64');
+    const pdfData = await pdfParse(buffer);
+    const text = pdfData.text;
+    if (debug) return res.status(200).json({ success: true, raw_text: text.substring(0, 12000) });
+    const result = parseCowayPayslip(text);
+    return res.status(200).json({ success: true, data: result });
+  } catch(e) {
+    return res.status(500).json({ error: e.message });
+  }
+}
+
+function pn(s) { return parseFloat(String(s).replace(/,/g,'')) || 0; }
+function r2(n) { return Math.round(n * 100) / 100; }
+
+function parseCowayPayslip(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+  // ── 1. Header ──────────────────────────────────────────────
+  let distributor_code = null, distributor_name = null;
+  let period_date = null, member_level = null;
+  let total_net_payable = 0, withholding_tax = 0;
+
+  for (let i = 0; i < Math.min(lines.length, 20); i++) {
+    if (!distributor_code && lines[i].match(/^\d{5,8}$/)) {
+      distributor_code = lines[i];
+      if (lines[i+1] && lines[i+1].match(/^[A-Z]/) && lines[i+1].length > 3)
+        distributor_name = lines[i+1];
+    }
+    if (lines[i] === 'Date' && lines[i+1] === ':') period_date = lines[i+2];
+    if (lines[i] === 'Member Level' && lines[i+1] === ':') member_level = lines[i+2];
+  }
+  for (const l of lines) {
+    // Total Net Payable - try multiple formats
+    const nm = l.match(/TOTAL NET PAYABLE\s*[:\s]\s*([\d,]+\.?\d*)/);
+    if (nm) total_net_payable = pn(nm[1]);
+    const wm = l.match(/Withholding Tax Deduction.*?:\s*([\d,]+\.?\d*)/);
+    if (wm) withholding_tax = pn(wm[1]);
+  }
+  // Also try finding "TOTAL NET PAYABLE :" on one line, number on next
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes('TOTAL NET PAYABLE') && total_net_payable === 0) {
+      // Try next few lines for the number
+      for (let j = i; j < Math.min(i+3, lines.length); j++) {
+        const m = lines[j].match(/([\d,]+\.\d{2})/);
+        if (m && pn(m[1]) > 100) { total_net_payable = pn(m[1]); break; }
       }
-    });
-  } catch(e) {
-    // Silently fail — don't block main action if audit log fails
-    console.warn('Audit log failed:', e.message);
-  }
-}
-
-async function loadAuditLog() {
-  const user = document.getElementById('auditUser').value;
-  const action = document.getElementById('auditAction').value;
-  const table = document.getElementById('auditTable').value;
-
-  let filter = '';
-  const filters = [];
-  if (user) filters.push(`username=eq.${user}`);
-  if (action) filters.push(`action=eq.${action}`);
-  if (table) filters.push(`table_name=eq.${table}`);
-  filter = filters.join('&');
-
-  try {
-    const logs = await sb('nec_audit_log', {
-      filter,
-      select: 'username,display_name,action,table_name,details,created_at',
-      limit: 200
-    });
-    // Sort newest first
-    logs.sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
-
-    const tbody = document.getElementById('auditTableBody');
-    if (logs.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="5"><div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No audit records found</div></div></td></tr>`;
-      return;
     }
-    tbody.innerHTML = logs.map(l => {
-      const dt = new Date(l.created_at);
-      const timeStr = dt.toLocaleDateString('en-MY') + ' ' + dt.toLocaleTimeString('en-MY', {hour:'2-digit',minute:'2-digit'});
-      const actionCls = l.action === 'CREATE' ? 'audit-create' : l.action === 'DELETE' ? 'audit-delete' : 'audit-update';
-      const tableLabel = {
-        proxy_accounts:'Proxy Accounts', proxy_invoices:'Proxy Invoices',
-        nec_staff:'Staff', nec_payroll:'Payroll',
-        nec_manager_sharing:'Mgr Sharing', nec_pl_costs:'P&L Costs',
-        nec_managers:'Managers'
-      }[l.table_name] || l.table_name;
-      return `<tr>
-        <td style="color:var(--muted);font-size:12px;font-family:var(--mono)">${timeStr}</td>
-        <td><span style="font-weight:500">${l.display_name}</span> <span style="color:var(--muted);font-size:11px">(${l.username})</span></td>
-        <td><span class="audit-action ${actionCls}">${l.action}</span></td>
-        <td style="font-size:12px;color:var(--muted)">${tableLabel}</td>
-        <td style="font-size:12px;color:var(--text);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${l.details||''}">${l.details || '—'}</td>
-      </tr>`;
-    }).join('');
-  } catch(e) {
-    document.getElementById('auditTableBody').innerHTML = `<tr><td colspan="5"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Audit log table not set up yet. Run the updated SQL in Setup.</div></div></td></tr>`;
+    if (lines[i].includes('Withholding Tax Deduction') && withholding_tax === 0) {
+      for (let j = i; j < Math.min(i+3, lines.length); j++) {
+        const m = lines[j].match(/([\d,]+\.\d{2})/);
+        if (m) { withholding_tax = pn(m[1]); break; }
+      }
+    }
   }
-}
 
-async function sb(table, opts = {}) {
-  const { method = 'GET', filter = '', body, select = '*', limit = 2000 } = opts;
-  let url = `${SUPABASE_URL}/rest/v1/${table}?select=${select}&limit=${limit}`;
-  if (filter) url += `&${filter}`;
-  const res = await fetch(url, {
-    method,
-    headers: {
-      'apikey': SUPABASE_KEY,
-      'Authorization': `Bearer ${SUPABASE_KEY}`,
-      'Content-Type': 'application/json',
-      'Prefer': method === 'POST' ? 'return=representation' : (method === 'PATCH' ? 'return=representation' : '')
-    },
-    body: body ? JSON.stringify(body) : undefined
+  // ── 2. Find Bonus Commission section & extract new order numbers ──
+  const bonusStart = lines.findIndex(l => l === 'Bonus Commission');
+  const newOrderNos = new Set();
+  const bonusOrders = [];
+
+  if (bonusStart >= 0) {
+    const bonusEnd = lines.findIndex((l, i) => i > bonusStart &&
+      (l === 'Food Supplements Sales Commission (100%)' || l.includes('Team Building') || l === 'Allowance'));
+    const bLines = lines.slice(bonusStart + 1, bonusEnd > 0 ? bonusEnd : bonusStart + 100);
+    for (const l of bLines) {
+      const m = l.match(/^(\d{7,})([A-Z].+?)REN/);
+      if (m) {
+        newOrderNos.add(m[1]);
+        bonusOrders.push({ order_no: m[1], customer_name: m[2].trim() });
+      }
+    }
+  }
+
+  // ── 2b. Extract bonus amounts globally (they appear BEFORE "Bonus Commission" header) ──
+  // Format: "1 pv bonus_pct amount amount" e.g. "1 1,230 9 110.70 110.70"
+  // These appear right before "AmountBONUS%PVMonthStock DescType" line
+  const bonusAmountRows = [];
+  for (const l of lines) {
+    const bm = l.match(/^(\d{1,2})\s+([\d,]+)\s+(\d{1,2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})$/);
+    if (bm) bonusAmountRows.push(pn(bm[5])); // last column = bonus com
+  }
+  // ── 3. orderAmounts map & pair bonus amounts ──────────────────
+  const orderAmounts = {}; // order_no -> bonus com amount
+
+  // Pair bonus amounts with bonus orders positionally
+  bonusOrders.forEach((o, idx) => {
+    if (idx < bonusAmountRows.length) {
+      orderAmounts[o.order_no] = r2(bonusAmountRows[idx]);
+    }
   });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(err);
+
+  const SECTION_STARTS = [
+    'Sales Commission (Rental - 100% Payout)',
+    'Sales Commission (Rental - 70% Payout)',
+    'Sales Overidding Commission ( HM Rental & 1st Installment Month)',
+    'Sales Overidding Commission ( HM Rental & Other Installment Month)',
+    'Sales Commission (Rental & 1st Installment Month)',
+    'Sales Commission (Rental & Other Installment Month)',
+    'Bonus Commission',
+    'Food Supplements Sales Commission (100%)',
+    'Team Building Commission',
+    'Allowance',
+  ];
+
+  // Find section boundaries
+  const secBounds = [];
+  for (let i = 0; i < lines.length; i++) {
+    for (const s of SECTION_STARTS) {
+      if (lines[i] === s || lines[i].includes(s)) {
+        secBounds.push({ name: s, idx: i }); break;
+      }
+    }
   }
-  if (method === 'DELETE') return [];
-  const text = await res.text();
-  return text ? JSON.parse(text) : [];
-}
 
-async function sbDelete(table, filter) {
-  const url = `${SUPABASE_URL}/rest/v1/${table}?${filter}`;
-  await fetch(url, {
-    method: 'DELETE',
-    headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
-  });
-}
+  // For each section except TBC, Allowance, Food: collect numRows & orderRows
+  let passive_and_tbc_total = 0;
+  let tbc_total = 0;
+  const allowances = [];
+  const new_orders_detail = []; // { order_no, customer_name, com_from_payslip }
 
-function fmt(n) { return 'RM ' + parseFloat(n || 0).toLocaleString('en-MY', {minimumFractionDigits:2, maximumFractionDigits:2}); }
-function fmtNum(n) { return parseFloat(n || 0).toLocaleString('en-MY', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+  for (let si = 0; si < secBounds.length; si++) {
+    const sec = secBounds[si];
+    const nextIdx = secBounds[si+1]?.idx ?? lines.length;
+    const sLines = lines.slice(sec.idx + 1, nextIdx);
 
-function showPage(page) {
-  ['proxy','payroll','manager','pl','export','audit','upload','breakdown','setup'].forEach(p => {
-    const el = document.getElementById(`page-${p}`);
-    if (el) el.classList.add('hidden');
-  });
-  document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
-  const pageEl = document.getElementById(`page-${page}`);
-  if (pageEl) pageEl.classList.remove('hidden');
-  event?.target?.classList.add('active');
-  if (page === 'proxy') loadInvoices();
-  if (page === 'payroll') loadPayroll();
-  if (page === 'manager') loadManagerSharing();
-  if (page === 'pl') loadPL();
-  if (page === 'audit') loadAuditLog();
-  if (page === 'breakdown') loadBreakdown();
-  if (page === 'setup') loadSetup();
-}
-
-function showToast(msg, type = 'success') {
-  const t = document.getElementById('toast');
-  t.textContent = type === 'success' ? '✓ ' + msg : '✗ ' + msg;
-  t.className = `toast ${type} show`;
-  setTimeout(() => t.classList.remove('show'), 3000);
-}
-
-function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
-function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
-
-// ============ PROXY ============
-
-let proxyList = [];
-
-async function loadProxies() {
-  try {
-    proxyList = await sb('proxy_accounts', { filter: 'is_active=eq.true', select: 'id,name,ic_number,channel,coway_id,bank_name,bank_account' });
-    return proxyList;
-  } catch(e) { return []; }
-}
-
-async function loadInvoices() {
-  const year = document.getElementById('filterYear').value;
-  const month = document.getElementById('filterMonth').value;
-  const channel = document.getElementById('filterChannel').value;
-  const status = document.getElementById('filterStatus').value;
-
-  let filter = `year=eq.${year}`;
-  if (month) filter += `&month=eq.${month}`;
-  if (status) filter += `&status=eq.${status}`;
-
-  try {
-    await loadProxies();
-    const invoices = await sb('proxy_invoices', {
-      filter, select: 'id,proxy_id,year,month,coway_payslip_amount,invoice_amount,proxy_profit,invoice_number,status,notes'
-    });
-
-    // Filter by channel if needed
-    let filtered = invoices;
-    if (channel) {
-      const channelProxies = proxyList.filter(p => p.channel === channel).map(p => p.id);
-      filtered = invoices.filter(i => channelProxies.includes(i.proxy_id));
+    if (sec.name === 'Allowance') {
+      // From raw text: amounts appear BEFORE the Allowance header in the Food Supplements section
+      // Structure is: " 6,100.00\n 2,000.00\n 4,100.00\nAmount\nDescription\nAllowance\nSPECIAL WS\nHP NEW PI"
+      // So by the time we reach Allowance section, the amounts are already parsed above
+      // Instead, look BACKWARDS from Allowance header for the amounts, then match with descriptions
+      const descLabels = [];
+      for (const l of sLines) {
+        if (l === 'SPECIAL WS' || l === 'HP NEW PI' || l === 'CASH INCENTIVE') descLabels.push(l);
+      }
+      // Find amounts just before Allowance header in the full lines array
+      const allowHeaderIdx = sec.idx;
+      const amountsBefore = [];
+      for (let k = allowHeaderIdx - 1; k >= Math.max(0, allowHeaderIdx - 15); k--) {
+        const m = lines[k].match(/^\s*([\d,]+\.\d{2})\s*$/);
+        if (m) amountsBefore.unshift(pn(m[1]));
+        else if (lines[k].includes('Food Supplements') || lines[k].includes('Order No')) break;
+      }
+      // Remove total (largest) and keep individual amounts
+      if (amountsBefore.length > 1) {
+        const maxVal = Math.max(...amountsBefore);
+        const indivAmounts = amountsBefore.filter(n => n !== maxVal);
+        descLabels.forEach((desc, i) => {
+          if (i < indivAmounts.length) allowances.push({ description: desc, amount: indivAmounts[i] });
+        });
+      } else if (amountsBefore.length === 1 && descLabels.length === 1) {
+        allowances.push({ description: descLabels[0], amount: amountsBefore[0] });
+      }
+      // Fallback: if no amounts found before, check after
+      if (allowances.length === 0) {
+        for (let j = 0; j < sLines.length; j++) {
+          const l = sLines[j];
+          if (l === 'SPECIAL WS' || l === 'HP NEW PI' || l === 'CASH INCENTIVE') {
+            const nm = sLines[j+1]?.match(/^([\d,]+\.\d{2})$/);
+            if (nm) { allowances.push({ description: l, amount: pn(nm[1]) }); j++; }
+          }
+        }
+      }
+      continue;
     }
 
-    // Update stats
-    const allYearInvoices = await sb('proxy_invoices', { filter: `year=eq.${year}`, select: 'invoice_amount,status' });
-    const currentMonth = new Date().getMonth() + 1;
-    const currentYear = new Date().getFullYear();
-    const thisMonthInv = allYearInvoices.filter(i => {
-      // we need month data - use the filtered month invoices
-      return true;
-    });
-
-    const monthInvoices = await sb('proxy_invoices', {
-      filter: `year=eq.${currentYear}&month=eq.${currentMonth}`,
-      select: 'invoice_amount,status'
-    });
-
-    document.getElementById('statProxyCount').textContent = proxyList.length;
-    document.getElementById('statMonthRev').textContent = fmt(monthInvoices.reduce((s,i) => s + parseFloat(i.invoice_amount||0), 0));
-    document.getElementById('statYtdRev').textContent = fmt(allYearInvoices.reduce((s,i) => s + parseFloat(i.invoice_amount||0), 0));
-    document.getElementById('statPending').textContent = allYearInvoices.filter(i => i.status !== 'paid').length;
-
-    // Build YTD per proxy
-    const ytdMap = {};
-    for (const inv of allYearInvoices) {
-      // need month - reload with month
-    }
-    const allYearFull = await sb('proxy_invoices', { filter: `year=eq.${year}`, select: 'proxy_id,month,coway_payslip_amount,invoice_amount' });
-    allYearFull.forEach(inv => {
-      if (!ytdMap[inv.proxy_id]) ytdMap[inv.proxy_id] = {};
-      ytdMap[inv.proxy_id][inv.month] = parseFloat(inv.coway_payslip_amount) - parseFloat(inv.invoice_amount);
-    });
-
-    // Render table
-    const tbody = document.getElementById('invoiceTableBody');
-    if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-icon">📄</div><div class="empty-text">No invoices found for this filter</div></div></td></tr>`;
-      return;
+    if (sec.name === 'Team Building Commission') {
+      // TBC total = last standalone decimal in section
+      for (let j = sLines.length - 1; j >= 0; j--) {
+        const m = sLines[j].match(/^([\d,]+\.\d{2})$/);
+        if (m) { tbc_total = pn(m[1]); break; }
+      }
+      continue;
     }
 
-    tbody.innerHTML = filtered.map(inv => {
-      const proxy = proxyList.find(p => p.id === inv.proxy_id) || { name: 'Unknown', channel: 'DM' };
-      const ytdProfit = Object.values(ytdMap[inv.proxy_id] || {}).reduce((s,v) => s + v, 0);
-      const pct = Math.min(100, (ytdProfit / 5000) * 100);
-      const cls = pct >= 100 ? 'over' : pct >= 80 ? 'warn' : 'safe';
-      return `
-        <tr>
-          <td><div class="td-name">${proxy.name}</div><div class="td-muted">${proxy.coway_id || '—'}</div></td>
-          <td><span class="badge badge-${(proxy.channel||'dm').toLowerCase()}">${proxy.channel}</span></td>
-          <td class="td-mono">${MONTHS[inv.month]} ${inv.year}</td>
-          <td class="td-mono">${fmt(inv.coway_payslip_amount)}</td>
-          <td class="td-mono" style="color:var(--accent)">${fmt(inv.invoice_amount)}</td>
-          <td>
-            <div class="profit-bar-wrap">
-              <div>
-                <div class="profit-num ${cls}">${fmt(ytdProfit)}</div>
-                <div class="profit-bar-bg"><div class="profit-bar-fill ${cls}" style="width:${pct}%"></div></div>
-              </div>
-            </div>
-          </td>
-          <td><span class="badge badge-${inv.status}">${inv.status}</span></td>
-          <td>
-            <div style="display:flex;gap:4px">
-              <button class="btn btn-ghost btn-sm" onclick="previewInvoice('${inv.id}')">Preview</button>
-              <button class="btn btn-green btn-sm" onclick="markPaid('${inv.id}')">✓ Paid</button>
-              <button class="btn btn-danger btn-sm" onclick="deleteInvoice('${inv.id}')">✕</button>
-            </div>
-          </td>
-        </tr>`;
-    }).join('');
-  } catch(e) {
-    console.error(e);
-    document.getElementById('invoiceTableBody').innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading data. Check Setup tab to create tables first.</div></div></td></tr>`;
-    document.getElementById('setupBanner').style.display = 'flex';
-  }
-}
-
-async function openAddProxyModal() {
-  openModal('modalAddProxy');
-}
-
-async function saveProxy() {
-  const body = {
-    name: document.getElementById('newProxyName').value,
-    ic_number: document.getElementById('newProxyIC').value,
-    coway_id: document.getElementById('newProxyCoway').value,
-    channel: 'OTHER',
-  };
-  if (!body.name) return showToast('Name is required', 'error');
-  try {
-    await sb('proxy_accounts', { method: 'POST', body });
-    closeModal('modalAddProxy');
-    showToast(`Proxy "${body.name}" added`);
-    await logAudit('CREATE', 'proxy_accounts', `Added proxy: ${body.name} (${body.channel})`);
-    await loadProxies();
-    loadInvoices();
-  } catch(e) { showToast('Error: ' + e.message, 'error'); }
-}
-
-async function openNewInvoiceModal() {
-  await loadProxies();
-  const sel = document.getElementById('invProxy');
-  sel.innerHTML = '<option value="">Select proxy...</option>' +
-    proxyList.map(p => `<option value="${p.id}">${p.name} (${p.channel})</option>`).join('');
-  openModal('modalNewInvoice');
-}
-
-let currentYTD = 0;
-
-async function loadYTDForProxy() {
-  const proxyId = document.getElementById('invProxy').value;
-  const year = document.getElementById('invYear').value;
-  const month = document.getElementById('invMonth').value;
-  if (!proxyId) return;
-  try {
-    const records = await sb('proxy_invoices', {
-      filter: `proxy_id=eq.${proxyId}&year=eq.${year}`,
-      select: 'month,coway_payslip_amount,invoice_amount'
-    });
-    currentYTD = records
-      .filter(r => r.month < parseInt(month))
-      .reduce((s,r) => s + (parseFloat(r.coway_payslip_amount) - parseFloat(r.invoice_amount)), 0);
-    document.getElementById('ytdInfo').style.display = 'block';
-    document.getElementById('ytdValue').textContent = fmt(currentYTD) + ' / RM 5,000.00 limit';
-    document.getElementById('ytdValue').style.color = currentYTD > 4000 ? 'var(--yellow)' : 'var(--green)';
-    updateProfit();
-  } catch(e) {}
-}
-
-function setDeductPct(pct) {
-  const payslip = parseFloat(document.getElementById('invPayslip').value) || 0;
-  document.getElementById('invAmount').value = (payslip * (1 - pct/100)).toFixed(2);
-  updateProfit();
-}
-
-function calcInvoiceAmount() { updateProfit(); }
-
-function updateProfit() {
-  const payslip = parseFloat(document.getElementById('invPayslip').value) || 0;
-  const amount = parseFloat(document.getElementById('invAmount').value) || 0;
-  const profit = payslip - amount;
-  document.getElementById('profitThisMonth').textContent = fmt(profit);
-  const ytdAfter = currentYTD + profit;
-  document.getElementById('profitYTD').textContent = fmt(ytdAfter);
-  const el = document.getElementById('profitYTD');
-  el.style.color = ytdAfter > 5000 ? 'var(--red)' : ytdAfter > 4000 ? 'var(--yellow)' : 'var(--green)';
-}
-
-async function saveInvoice() {
-  const body = {
-    proxy_id: document.getElementById('invProxy').value,
-    year: parseInt(document.getElementById('invYear').value),
-    month: parseInt(document.getElementById('invMonth').value),
-    coway_payslip_amount: parseFloat(document.getElementById('invPayslip').value),
-    invoice_amount: parseFloat(document.getElementById('invAmount').value),
-    invoice_number: document.getElementById('invNumber').value,
-    status: document.getElementById('invStatus').value,
-    notes: document.getElementById('invNotes').value,
-  };
-  if (!body.proxy_id) return showToast('Select a proxy', 'error');
-  if (!body.coway_payslip_amount) return showToast('Enter payslip amount', 'error');
-  if (!body.invoice_amount) return showToast('Enter invoice amount', 'error');
-  try {
-    await sb('proxy_invoices', { method: 'POST', body });
-    closeModal('modalNewInvoice');
-    showToast('Invoice saved');
-    const proxyName = proxyList.find(p => p.id === body.proxy_id)?.name || body.proxy_id;
-    await logAudit('CREATE', 'proxy_invoices', `Invoice ${body.invoice_number || 'draft'} for ${proxyName} — ${MONTHS[body.month]} ${body.year} — RM${body.invoice_amount}`);
-    loadInvoices();
-  } catch(e) { showToast('Error: ' + e.message, 'error'); }
-}
-
-async function markPaid(id) {
-  try {
-    const url = `${SUPABASE_URL}/rest/v1/proxy_invoices?id=eq.${id}`;
-    await fetch(url, {
-      method: 'PATCH',
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'paid' })
-    });
-    showToast('Marked as paid');
-    await logAudit('UPDATE', 'proxy_invoices', `Marked invoice ${id} as paid`);
-    loadInvoices();
-  } catch(e) { showToast('Error', 'error'); }
-}
-
-async function deleteInvoice(id) {
-  if (!confirm('Delete this invoice entry?')) return;
-  await sbDelete('proxy_invoices', `id=eq.${id}`);
-  showToast('Deleted');
-  await logAudit('DELETE', 'proxy_invoices', `Deleted invoice id: ${id}`);
-  loadInvoices();
-}
-
-async function previewInvoice(id) {
-  try {
-    const [inv] = await sb('proxy_invoices', { filter: `id=eq.${id}` });
-    const proxy = proxyList.find(p => p.id === inv.proxy_id) || {};
-    const html = `
-      <div class="invoice-preview">
-        <div class="inv-header">
-          <div>
-            <div class="inv-company-name">NEW ERA CONSULTING ENTERPRISE</div>
-            <div class="inv-reg">202503018811 (MA0326725-T)</div>
-            <div class="inv-address">No 21, Jalan Villa Puncak Desa 3,<br>Villa Puncak Desa, Taman Desa Petaling,<br>57100 Kuala Lumpur, W.P.</div>
-          </div>
-          <div>
-            <div class="inv-label">INVOICE</div>
-            <div class="inv-meta">No: ${inv.invoice_number || 'DRAFT'}<br>Date: ${MONTH_FULL[inv.month]} ${inv.year}</div>
-          </div>
-        </div>
-        <div class="inv-divider"></div>
-        <div class="inv-bill-to">Bill To</div>
-        <div class="inv-bill-name">${proxy.name || 'Unknown'}</div>
-        <div class="inv-bill-sub">IC: ${proxy.ic_number || '—'} | Coway ID: ${proxy.coway_id || '—'}</div>
-        <table class="inv-table">
-          <thead><tr><th>Description</th><th>Amount</th></tr></thead>
-          <tbody>
-            <tr>
-              <td>Digital Marketing Services for ${MONTH_FULL[inv.month]} ${inv.year}<br>
-              <span style="font-size:11px;color:#888">Lead generation, ad management & customer acquisition services</span></td>
-              <td style="font-weight:700">RM ${fmtNum(inv.invoice_amount)}</td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="inv-total-row">
-          <div class="inv-total-box">
-            <div class="inv-total-label">Total Amount Due</div>
-            <div class="inv-total-amount">RM ${fmtNum(inv.invoice_amount)}</div>
-          </div>
-        </div>
-        <div class="inv-footer">
-          <strong>Payment Information</strong><br>
-          Bank: Public Bank Berhad<br>
-          Account Name: New Era Consulting Enterprise<br>
-          Account No: 3243542608<br><br>
-          This invoice is issued by New Era Consulting Enterprise for marketing services rendered.
-        </div>
-      </div>`;
-    const win = window.open('', '_blank', 'width=700,height=800');
-    win.document.write(`<html><head><title>Invoice ${inv.invoice_number}</title>
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
-      <style>body{margin:40px;background:#f5f5f5;font-family:Inter,sans-serif}
-      .invoice-preview{background:#fff;padding:40px;max-width:700px;margin:0 auto;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.1)}
-      .inv-header{display:flex;justify-content:space-between;margin-bottom:32px}
-      .inv-company-name{font-size:18px;font-weight:800;color:#1a1a2e}
-      .inv-reg{font-size:11px;color:#666;margin-top:2px}
-      .inv-address{font-size:11px;color:#666;margin-top:8px;line-height:1.5}
-      .inv-label{font-size:28px;font-weight:800;color:#4f7cff;text-align:right}
-      .inv-meta{text-align:right;font-size:12px;color:#666;margin-top:4px}
-      .inv-divider{height:2px;background:linear-gradient(to right,#4f7cff,#7c5cfc);border-radius:1px;margin-bottom:24px}
-      .inv-bill-to{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
-      .inv-bill-name{font-size:15px;font-weight:700;color:#1a1a2e}
-      .inv-bill-sub{font-size:12px;color:#666;margin-top:2px}
-      .inv-table{width:100%;margin:24px 0;border-collapse:collapse}
-      .inv-table th{background:#f0f4ff;padding:10px 12px;text-align:left;font-size:11px;color:#4f7cff;text-transform:uppercase;letter-spacing:.06em;font-weight:600}
-      .inv-table td{padding:12px;border-bottom:1px solid #eee;font-size:13px;color:#333}
-      .inv-total-row{display:flex;justify-content:flex-end}
-      .inv-total-box{background:#f0f4ff;border-radius:8px;padding:16px 20px;min-width:200px}
-      .inv-total-label{font-size:12px;color:#666}
-      .inv-total-amount{font-size:22px;font-weight:800;color:#4f7cff;margin-top:4px;font-family:'JetBrains Mono',monospace}
-      .inv-footer{margin-top:32px;padding-top:16px;border-top:1px solid #eee;font-size:11px;color:#999}
-      @media print{body{margin:0;background:#fff}.invoice-preview{box-shadow:none}}
-      </style></head><body>${html}<br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#4f7cff;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
-  } catch(e) { showToast('Error loading invoice', 'error'); }
-}
-
-// ============ PAYROLL ============
-
-let staffList = [];
-
-async function loadStaff() {
-  try {
-    staffList = await sb('nec_staff', { filter: 'is_active=eq.true' });
-    return staffList;
-  } catch(e) { return []; }
-}
-
-async function loadPayroll() {
-  const year = document.getElementById('payrollYear').value;
-  const month = document.getElementById('payrollMonth').value;
-  const channel = document.getElementById('payrollChannel').value;
-
-  try {
-    await loadStaff();
-    let filter = `year=eq.${year}`;
-    if (month) filter += `&month=eq.${month}`;
-    const records = await sb('nec_payroll', { filter, select: '*' });
-
-    let filtered = records;
-    if (channel) {
-      const chStaff = staffList.filter(s => s.channel === channel).map(s => s.id);
-      filtered = records.filter(r => chStaff.includes(r.staff_id));
+    if (sec.name === 'Food Supplements Sales Commission (100%)') {
+      // Food supplements: find the first standalone large decimal = subtotal
+      for (const l of sLines) {
+        const m = l.match(/^([\d,]+\.\d{2})$/);
+        if (m && pn(m[1]) > 10) {
+          // This is the food supplements total, treat as passive
+          passive_and_tbc_total = r2(passive_and_tbc_total + pn(m[1]));
+          break;
+        }
+      }
+      continue;
     }
 
-    const salesStaff = staffList.filter(s => s.staff_type === 'sales');
-    const adminStaff = staffList.filter(s => s.staff_type === 'admin');
-    document.getElementById('statStaffCount').textContent = staffList.length;
-    document.getElementById('statSalesStaff').textContent = salesStaff.length;
-    document.getElementById('statAdminStaff').textContent = adminStaff.length;
-    const monthTotal = records.reduce((s,r) => s + parseFloat(r.total_pay||0), 0);
-    document.getElementById('statPayrollMonth').textContent = fmt(monthTotal);
-
-    const tbody = document.getElementById('payrollTableBody');
-    if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="11"><div class="empty"><div class="empty-icon">👥</div><div class="empty-text">No payroll records. Add staff first then record payroll.</div></div></td></tr>`;
-      return;
+    if (sec.name === 'Bonus Commission') {
+      // Bonus amounts already extracted globally and paired above
+      // Just skip this section in the loop
+      continue;
     }
-    tbody.innerHTML = filtered.map(r => {
-      const staff = staffList.find(s => s.id === r.staff_id) || { name: 'Unknown', staff_type: 'sales', channel: 'DM' };
-      return `<tr>
-        <td class="td-name">${staff.name}</td>
-        <td><span class="badge badge-${(staff.channel||'dm').toLowerCase()}">${staff.channel}</span></td>
-        <td><span class="badge badge-${staff.staff_type === 'sales' ? 'dm' : 'other'}">${staff.staff_type}</span></td>
-        <td class="td-mono">${MONTHS[r.month]} ${r.year}</td>
-        <td class="td-mono">${r.orders_count || 0}</td>
-        <td class="td-mono">${fmt(r.commission_earned)}</td>
-        <td class="td-mono">${fmt(r.base_salary)}</td>
-        <td class="td-mono">${fmt(r.bonus)}</td>
-        <td class="td-mono" style="color:var(--green);font-weight:600">${fmt(r.total_pay)}</td>
-        <td><span class="badge badge-${r.status}">${r.status}</span></td>
-        <td><button class="btn btn-danger btn-sm" onclick="deletePayroll('${r.id}')">✕</button></td>
-      </tr>`;
-    }).join('');
-  } catch(e) {
-    document.getElementById('payrollTableBody').innerHTML = `<tr><td colspan="11"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Tables not set up yet. Go to Setup tab.</div></div></td></tr>`;
-  }
-}
 
-async function openAddStaffModal() { openModal('modalAddStaff'); }
+    if (sec.name === 'Sales Commission (Rental & 1st Installment Month)' ||
+        sec.name === 'Sales Overidding Commission ( HM Rental & 1st Installment Month)') {
+      // 1st Install section - contains: subtotal, regular "1 pv amount" rows, and order rows
+      // Regular rows (month=1, no bonus_pct) go to passive (already counted in 70% section)
+      // Just add subtotal to passive
+      for (let j = sLines.length-1; j >= 0; j--) {
+        const m = sLines[j].match(/^([\d,]+\.\d{2})$/);
+        if (m && pn(m[1]) < 500) { // subtotal should be modest
+          passive_and_tbc_total = r2(passive_and_tbc_total + pn(m[1]));
+          break;
+        }
+      }
+      continue;
+    }
 
-function toggleStaffFields() {
-  const type = document.getElementById('staffType').value;
-  document.getElementById('commField').style.opacity = type === 'sales' ? '1' : '0.3';
-  document.getElementById('salaryField').style.opacity = type === 'admin' ? '1' : '0.3';
-}
+    // ── 100% / 70% / Install sections ──
+    const is100 = sec.name.includes('100%');
+    const isOtherInstall = sec.name.includes('Other Installment');
 
-async function saveStaff() {
-  const body = {
-    name: document.getElementById('staffName').value,
-    role: document.getElementById('staffRole').value,
-    staff_type: document.getElementById('staffType').value,
-    channel: document.getElementById('staffChannel').value,
-    commission_per_order: parseFloat(document.getElementById('staffComm').value) || 0,
-    base_salary: parseFloat(document.getElementById('staffSalary').value) || 0,
-  };
-  if (!body.name) return showToast('Name required', 'error');
-  try {
-    await sb('nec_staff', { method: 'POST', body });
-    closeModal('modalAddStaff');
-    showToast(`${body.name} added`);
-    await logAudit('CREATE', 'nec_staff', `Added staff: ${body.name} (${body.staff_type}, ${body.channel})`);
-    loadPayroll();
-  } catch(e) { showToast('Error: ' + e.message, 'error'); }
-}
+    // Collect num rows and order rows
+    const numRows = [];
+    const orderRows = [];
 
-async function openPayrollEntryModal() {
-  await loadStaff();
-  const sel = document.getElementById('prStaff');
-  sel.innerHTML = '<option value="">Select staff...</option>' +
-    staffList.map(s => `<option value="${s.id}" data-type="${s.staff_type}" data-comm="${s.commission_per_order}" data-salary="${s.base_salary}">${s.name} (${s.staff_type})</option>`).join('');
-  openModal('modalPayrollEntry');
-}
+    for (let j = 0; j < sLines.length; j++) {
+      const l = sLines[j];
+      // Skip noise
+      if (l.match(/^[12]?\d$/) && pn(l) < 50) continue; // page numbers
+      if (['REN','NEW','Customer Name','Order No','App Type','Months','AMOUNT','AMT','Amount'].includes(l)) continue;
+      if (l.includes('Individual Customer') || l.includes('Commission Statement')) continue;
+      if (l.includes('%PV') || l.includes('App Type')) continue;
 
-function loadStaffPayrollDefaults() {
-  const sel = document.getElementById('prStaff');
-  const opt = sel.options[sel.selectedIndex];
-  if (!opt || !opt.value) return;
-  const type = opt.dataset.type;
-  const comm = opt.dataset.comm;
-  const salary = opt.dataset.salary;
-  document.getElementById('prSalary').value = salary || 0;
-  if (type === 'admin') {
-    document.getElementById('prOrdersRow').style.opacity = '0.3';
-  } else {
-    document.getElementById('prOrdersRow').style.opacity = '1';
-  }
-  calcPayroll();
-}
+      // Num row: "months pv amount"
+      const nm = l.match(/^(\d{1,2})\s+([\d,]+)\s+([\d,]+\.\d{2})$/);
+      if (nm && parseInt(nm[1]) >= 1 && parseInt(nm[1]) <= 30 && pn(nm[2]) > 100) {
+        numRows.push({ months: parseInt(nm[1]), pv: pn(nm[2]), amount: pn(nm[3]) });
+        continue;
+      }
 
-function calcPayroll() {
-  const sel = document.getElementById('prStaff');
-  const opt = sel.options[sel.selectedIndex];
-  if (!opt) return;
-  const commPerOrder = parseFloat(opt.dataset.comm || 0);
-  const orders = parseInt(document.getElementById('prOrders').value) || 0;
-  const comm = orders * commPerOrder;
-  document.getElementById('prComm').value = comm.toFixed(2);
-  const total = comm + (parseFloat(document.getElementById('prSalary').value)||0) + (parseFloat(document.getElementById('prBonus').value)||0) - (parseFloat(document.getElementById('prDeduct').value)||0);
-  document.getElementById('prTotal').textContent = fmt(total);
-}
+      // Order row: 7+ digit order no + customer + 15 (contract months)
+      const om = l.match(/^(\d{7,})([A-Z].+?)(\d{1,2})\s*$/);
+      if (om) {
+        let pct = null;
+        if (j+1 < sLines.length) {
+          const pm = sLines[j+1].match(/^\((\d+)%\)$/);
+          if (pm) { pct = parseInt(pm[1]); j++; }
+        }
+        orderRows.push({ order_no: om[1], customer_name: om[2].trim(), pct });
+      }
+    }
 
-async function savePayroll() {
-  const body = {
-    staff_id: document.getElementById('prStaff').value,
-    year: parseInt(document.getElementById('prYear').value),
-    month: parseInt(document.getElementById('prMonth').value),
-    orders_count: parseInt(document.getElementById('prOrders').value) || 0,
-    commission_earned: parseFloat(document.getElementById('prComm').value) || 0,
-    base_salary: parseFloat(document.getElementById('prSalary').value) || 0,
-    bonus: parseFloat(document.getElementById('prBonus').value) || 0,
-    deductions: parseFloat(document.getElementById('prDeduct').value) || 0,
-  };
-  if (!body.staff_id) return showToast('Select staff', 'error');
-  try {
-    await sb('nec_payroll', { method: 'POST', body });
-    closeModal('modalPayrollEntry');
-    showToast('Payroll saved');
-    const staffName = staffList.find(s => s.id === body.staff_id)?.name || body.staff_id;
-    await logAudit('CREATE', 'nec_payroll', `Payroll for ${staffName} — ${MONTHS[body.month]} ${body.year} — RM${(body.commission_earned + body.base_salary + body.bonus - body.deductions).toFixed(2)}`);
-    loadPayroll();
-  } catch(e) { showToast('Error: ' + e.message, 'error'); }
-}
+    // Find section subtotal
+    let subtotal = 0;
+    for (let j = sLines.length-1; j >= 0; j--) {
+      const m = sLines[j].match(/^([\d,]+\.\d{2})$/);
+      if (m) { subtotal = pn(m[1]); break; }
+    }
 
-async function deletePayroll(id) {
-  if (!confirm('Delete this payroll record?')) return;
-  await sbDelete('nec_payroll', `id=eq.${id}`);
-  showToast('Deleted');
-  loadPayroll();
-}
-
-// ============ MANAGER SHARING ============
-
-let managerList = [];
-
-async function loadManagers() {
-  try {
-    managerList = await sb('nec_managers', { filter: 'is_active=eq.true' });
-    return managerList;
-  } catch(e) { return []; }
-}
-
-async function openManagerEntryModal() {
-  await loadManagers();
-  const container = document.getElementById('managerEntryFields');
-  container.innerHTML = managerList.map(m => `
-    <div style="display:flex;align-items:center;gap:10px">
-      <div style="font-weight:500;min-width:100px">${m.name}</div>
-      <div style="font-size:11px;color:var(--muted);min-width:60px">${m.share_percentage}% share</div>
-      <div style="flex:1;display:flex;align-items:center;gap:6px">
-        <label style="font-size:12px;color:var(--muted)">Coway Payslip (RM)</label>
-        <input type="number" id="mePayslip_${m.id}" class="form-input" placeholder="0.00" style="flex:1" oninput="calcMgrShare('${m.id}','${m.share_percentage}')">
-        <span style="font-size:12px;color:var(--accent)" id="meResult_${m.id}">→ RM 0.00</span>
-      </div>
-    </div>`).join('');
-  openModal('modalManagerEntry');
-}
-
-function calcMgrShare(id, pct) {
-  const payslip = parseFloat(document.getElementById(`mePayslip_${id}`).value) || 0;
-  const amount = payslip * (parseFloat(pct) / 100);
-  document.getElementById(`meResult_${id}`).textContent = `→ ${fmt(amount)}`;
-}
-
-async function saveManagerSharing() {
-  const year = parseInt(document.getElementById('meYear').value);
-  const month = parseInt(document.getElementById('meMonth').value);
-  try {
-    for (const m of managerList) {
-      const payslip = parseFloat(document.getElementById(`mePayslip_${m.id}`)?.value) || 0;
-      if (payslip <= 0) continue;
-      const amount = payslip * (m.share_percentage / 100);
-      await sb('nec_manager_sharing', {
-        method: 'POST',
-        body: { manager_id: m.id, year, month, coway_payslip_amount: payslip, share_percentage: m.share_percentage, amount_received: amount }
+    // Pair and accumulate
+    if (sec.name.includes('70% Payout') || sec.name.includes('Overidding')) {
+      // In 70% section: classify by months value, not positional order
+      // months=1 rows = new orders (70% payout), months>1 = trailing (30%)
+      const newAmt70 = numRows.filter(n => n.months === 1).map(n => n.amount);
+      const trailing70 = numRows.filter(n => n.months > 1).reduce((s,n) => r2(s+n.amount), 0);
+      passive_and_tbc_total = r2(passive_and_tbc_total + trailing70);
+      // Assign new order amounts to bonus orders by position
+      // Both are in same sequence (new orders appear at end of 70% section)
+      newAmt70.forEach((amt, idx) => {
+        if (idx < bonusOrders.length) {
+          orderAmounts[bonusOrders[idx].order_no] = r2((orderAmounts[bonusOrders[idx].order_no] || 0) + amt);
+        } else {
+          passive_and_tbc_total = r2(passive_and_tbc_total + amt);
+        }
       });
-    }
-    closeModal('modalManagerEntry');
-    showToast('Manager sharing saved');
-    await logAudit('CREATE', 'nec_manager_sharing', `Recorded manager sharing for ${MONTHS[month]} ${year}`);
-    loadManagerSharing();
-  } catch(e) { showToast('Error: ' + e.message, 'error'); }
-}
-
-async function loadManagerSharing() {
-  const year = document.getElementById('mgrYear').value;
-  const month = document.getElementById('mgrMonth').value;
-  try {
-    await loadManagers();
-    let filter = `year=eq.${year}`;
-    if (month) filter += `&month=eq.${month}`;
-    const records = await sb('nec_manager_sharing', { filter });
-
-    // Update stat cards
-    managerList.forEach((m, i) => {
-      const mRecords = records.filter(r => r.manager_id === m.id);
-      const total = mRecords.reduce((s,r) => s + parseFloat(r.amount_received||0), 0);
-      if (document.getElementById(`mgr${i}`)) {
-        document.getElementById(`mgr${i}`).textContent = total > 0 ? fmt(total) : '—';
-        document.getElementById(`mgr${i}pct`).textContent = `${m.share_percentage}% share`;
+    } else {
+      const count = Math.min(orderRows.length, numRows.length);
+      for (let k = 0; k < count; k++) {
+        const o = orderRows[k];
+        const n = numRows[k];
+        if (isOtherInstall) {
+          passive_and_tbc_total = r2(passive_and_tbc_total + n.amount);
+        } else if ((is100 || o.pct === null) && newOrderNos.has(o.order_no)) {
+          orderAmounts[o.order_no] = r2((orderAmounts[o.order_no] || 0) + n.amount);
+        } else {
+          passive_and_tbc_total = r2(passive_and_tbc_total + n.amount);
+        }
       }
+      if (numRows.length > orderRows.length) {
+        for (let k = orderRows.length; k < numRows.length; k++) {
+          passive_and_tbc_total = r2(passive_and_tbc_total + numRows[k].amount);
+        }
+      }
+    }
+  }
+
+  // ── 4. Build new orders detail ──────────────────────────────
+  // Allowance per order
+  const allowanceTotal = r2(allowances.reduce((s,a) => s + a.amount, 0));
+  const allowancePerOrder = bonusOrders.length > 0 ? r2(allowanceTotal / bonusOrders.length) : 0;
+
+  let new_orders_total = 0;
+  for (const o of bonusOrders) {
+    const comFromPayslip = r2(orderAmounts[o.order_no] || 0);
+    const totalCom = r2(comFromPayslip + allowancePerOrder);
+    new_orders_detail.push({
+      order_no: o.order_no,
+      customer_name: o.customer_name,
+      com_from_payslip: comFromPayslip,
+      allowance_portion: allowancePerOrder,
+      total_com: totalCom
     });
-
-    const tbody = document.getElementById('managerTableBody');
-    if (records.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-icon">👔</div><div class="empty-text">No records for this period</div></div></td></tr>`;
-      return;
-    }
-    tbody.innerHTML = records.map(r => {
-      const mgr = managerList.find(m => m.id === r.manager_id) || { name: 'Unknown' };
-      return `<tr>
-        <td class="td-name">${mgr.name}</td>
-        <td class="td-mono">${MONTHS[r.month]} ${r.year}</td>
-        <td class="td-mono">${fmt(r.coway_payslip_amount)}</td>
-        <td class="td-mono">${r.share_percentage}%</td>
-        <td class="td-mono" style="color:var(--green);font-weight:600">${fmt(r.amount_received)}</td>
-        <td style="color:var(--muted);font-size:12px">${r.notes || '—'}</td>
-        <td><button class="btn btn-danger btn-sm" onclick="deleteManagerRecord('${r.id}')">✕</button></td>
-      </tr>`;
-    }).join('');
-  } catch(e) {
-    document.getElementById('managerTableBody').innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Tables not set up yet. Go to Setup.</div></div></td></tr>`;
-  }
-}
-
-async function deleteManagerRecord(id) {
-  if (!confirm('Delete this record?')) return;
-  await sbDelete('nec_manager_sharing', `id=eq.${id}`);
-  showToast('Deleted');
-  loadManagerSharing();
-}
-
-// ============ P&L ============
-
-async function loadPL() {
-  const year = document.getElementById('plYear').value;
-  const month = document.getElementById('plMonth').value;
-
-  try {
-    let invFilter = `year=eq.${year}`;
-    if (month) invFilter += `&month=eq.${month}`;
-    const invoices = await sb('proxy_invoices', { filter: invFilter, select: 'proxy_id,invoice_amount' });
-    const proxies = await sb('proxy_accounts', { select: 'id,channel' });
-
-    const costs = await sb('nec_pl_costs', { filter: invFilter });
-
-    // Revenue by channel
-    const revByChannel = { DM:0, TM:0, XHS:0, OTHER:0 };
-    for (const inv of invoices) {
-      const proxy = proxies.find(p => p.id === inv.proxy_id);
-      const ch = proxy?.channel || 'OTHER';
-      revByChannel[ch] = (revByChannel[ch] || 0) + parseFloat(inv.invoice_amount || 0);
-    }
-    const totalRev = Object.values(revByChannel).reduce((s,v) => s+v, 0);
-
-    // Costs by channel
-    const costByChannel = { DM:0, TM:0, XHS:0, OTHER:0, SHARED:0 };
-    costs.forEach(c => { costByChannel[c.channel] = (costByChannel[c.channel]||0) + parseFloat(c.amount||0); });
-    const totalCost = Object.values(costByChannel).reduce((s,v) => s+v, 0);
-    const netProfit = totalRev - totalCost;
-    const margin = totalRev > 0 ? (netProfit / totalRev * 100) : 0;
-
-    document.getElementById('plTotalRev').textContent = fmt(totalRev);
-    document.getElementById('plTotalCost').textContent = fmt(totalCost);
-    const npEl = document.getElementById('plNetProfit');
-    npEl.textContent = fmt(netProfit);
-    npEl.style.color = netProfit >= 0 ? 'var(--green)' : 'var(--red)';
-    const mgEl = document.getElementById('plMargin');
-    mgEl.textContent = margin.toFixed(1) + '%';
-    mgEl.style.color = margin >= 20 ? 'var(--green)' : margin >= 0 ? 'var(--yellow)' : 'var(--red)';
-
-    // Channel cards
-    const sharedCostPerChannel = costByChannel.SHARED / 4;
-    document.getElementById('plChannels').innerHTML = ['DM','TM','XHS','OTHER'].map(ch => {
-      const rev = revByChannel[ch] || 0;
-      const cost = (costByChannel[ch] || 0) + sharedCostPerChannel;
-      const net = rev - cost;
-      return `<div class="stat-card">
-        <div class="stat-label"><span class="badge badge-${ch.toLowerCase()}">${ch}</span></div>
-        <div style="margin-top:10px;display:grid;gap:6px;font-size:12px">
-          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Revenue</span><span style="font-family:var(--mono);color:var(--green)">${fmt(rev)}</span></div>
-          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Costs</span><span style="font-family:var(--mono);color:var(--red)">${fmt(cost)}</span></div>
-          <div style="height:1px;background:var(--border);margin:2px 0"></div>
-          <div style="display:flex;justify-content:space-between"><span style="font-weight:600">Net</span><span style="font-family:var(--mono);font-weight:700;color:${net>=0?'var(--green)':'var(--red)'}">${fmt(net)}</span></div>
-        </div>
-      </div>`;
-    }).join('');
-
-    // Cost table
-    const tbody = document.getElementById('plTableBody');
-    if (costs.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="6"><div class="empty"><div class="empty-icon">📊</div><div class="empty-text">No cost entries. Click "Add Cost Entry" to start.</div></div></td></tr>`;
-      return;
-    }
-    const categoryLabels = { ad_spend:'Ad Spend', staff_pay:'Staff Pay', rental:'Rental', admin:'Admin', wifi:'Wifi', utilities:'Utilities', team_building:'Team Building', cleaning:'Cleaning', other:'Other' };
-    tbody.innerHTML = costs.map(c => `<tr>
-      <td class="td-mono">${MONTHS[c.month]} ${c.year}</td>
-      <td><span class="badge badge-${(c.channel||'other').toLowerCase()}">${c.channel}</span></td>
-      <td>${categoryLabels[c.category] || c.category}</td>
-      <td style="color:var(--muted);font-size:12px">${c.description || '—'}</td>
-      <td class="td-mono" style="color:var(--red)">${fmt(c.amount)}</td>
-      <td><button class="btn btn-danger btn-sm" onclick="deleteCost('${c.id}')">✕</button></td>
-    </tr>`).join('');
-  } catch(e) {
-    document.getElementById('plTableBody').innerHTML = `<tr><td colspan="6"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Tables not set up. Go to Setup tab.</div></div></td></tr>`;
-  }
-}
-
-function openCostEntryModal() { openModal('modalCostEntry'); }
-
-async function saveCostEntry() {
-  const body = {
-    year: parseInt(document.getElementById('ceYear').value),
-    month: parseInt(document.getElementById('ceMonth').value),
-    channel: document.getElementById('ceChannel').value,
-    category: document.getElementById('ceCategory').value,
-    description: document.getElementById('ceDesc').value,
-    amount: parseFloat(document.getElementById('ceAmount').value),
-  };
-  if (!body.amount) return showToast('Enter amount', 'error');
-  try {
-    await sb('nec_pl_costs', { method: 'POST', body });
-    closeModal('modalCostEntry');
-    showToast('Cost entry saved');
-    await logAudit('CREATE', 'nec_pl_costs', `Cost: ${body.category} — ${body.channel} — RM${body.amount} (${MONTHS[body.month]} ${body.year})`);
-    loadPL();
-  } catch(e) { showToast('Error: ' + e.message, 'error'); }
-}
-
-async function deleteCost(id) {
-  if (!confirm('Delete this cost entry?')) return;
-  await sbDelete('nec_pl_costs', `id=eq.${id}`);
-  showToast('Deleted');
-  loadPL();
-}
-
-// ============ EXPORT ============
-
-async function loadExportProxies() {
-  const year = document.getElementById('exportYear').value;
-  await loadProxies();
-  const container = document.getElementById('exportProxyList');
-  if (proxyList.length === 0) {
-    container.innerHTML = `<div class="empty"><div class="empty-icon">📁</div><div class="empty-text">No proxies found</div></div>`;
-    return;
-  }
-  const invoices = await sb('proxy_invoices', { filter: `year=eq.${year}`, select: 'proxy_id,month,coway_payslip_amount,invoice_amount,invoice_number,status' });
-  container.innerHTML = proxyList.map(p => {
-    const pInv = invoices.filter(i => i.proxy_id === p.id);
-    const ytdCoway = pInv.reduce((s,i) => s + parseFloat(i.coway_payslip_amount||0), 0);
-    const ytdInvoiced = pInv.reduce((s,i) => s + parseFloat(i.invoice_amount||0), 0);
-    const ytdProfit = ytdCoway - ytdInvoiced;
-    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center">
-      <div>
-        <div style="font-weight:600">${p.name}</div>
-        <div style="font-size:11px;color:var(--muted)">IC: ${p.ic_number || '—'} | ${pInv.length} months recorded</div>
-        <div style="font-size:11px;margin-top:4px">
-          Coway Total: <span style="font-family:var(--mono);color:var(--accent)">${fmt(ytdCoway)}</span> | 
-          Invoiced: <span style="font-family:var(--mono);color:var(--green)">${fmt(ytdInvoiced)}</span> | 
-          Profit: <span style="font-family:var(--mono);color:${ytdProfit>4500?'var(--yellow)':'var(--green)'}">${fmt(ytdProfit)}</span>
-        </div>
-      </div>
-      <button class="btn btn-ghost btn-sm" onclick="exportProxy('${p.id}','${p.name}','${year}')">Export CSV</button>
-    </div>`;
-  }).join('');
-}
-
-async function exportProxy(proxyId, proxyName, year) {
-  const invoices = await sb('proxy_invoices', {
-    filter: `proxy_id=eq.${proxyId}&year=eq.${year}`,
-    select: 'month,coway_payslip_amount,invoice_amount,proxy_profit,invoice_number,status,notes'
-  });
-  invoices.sort((a,b) => a.month - b.month);
-  const rows = [
-    ['New Era Consulting Enterprise — Proxy Record'],
-    [`Proxy: ${proxyName} | Year: ${year}`],
-    [''],
-    ['Month','Coway Payslip (RM)','Invoice to NEC (RM)','Proxy Profit (RM)','Invoice No','Status','Notes'],
-    ...invoices.map(i => [MONTH_FULL[i.month], i.coway_payslip_amount, i.invoice_amount, i.proxy_profit, i.invoice_number||'', i.status, i.notes||'']),
-    [''],
-    ['TOTAL',
-      invoices.reduce((s,i)=>s+parseFloat(i.coway_payslip_amount||0),0).toFixed(2),
-      invoices.reduce((s,i)=>s+parseFloat(i.invoice_amount||0),0).toFixed(2),
-      invoices.reduce((s,i)=>s+parseFloat(i.proxy_profit||0),0).toFixed(2),'','','']
-  ];
-  downloadCSV(rows, `NEC_Proxy_${proxyName.replace(/ /g,'_')}_${year}.csv`);
-  showToast(`Exported ${proxyName} ${year}`);
-}
-
-async function exportPL() {
-  const year = document.getElementById('exportPlYear').value;
-  const invoices = await sb('proxy_invoices', { filter: `year=eq.${year}`, select: 'month,invoice_amount' });
-  const costs = await sb('nec_pl_costs', { filter: `year=eq.${year}` });
-  const payroll = await sb('nec_payroll', { filter: `year=eq.${year}`, select: 'month,total_pay' });
-
-  const rows = [
-    ['New Era Consulting Enterprise — P&L Summary'],
-    [`Year: ${year}`], [''],
-    ['Month','Revenue (RM)','Staff Payroll (RM)','Other Costs (RM)','Total Costs (RM)','Net Profit (RM)','Margin %']
-  ];
-  for (let m = 1; m <= 12; m++) {
-    const rev = invoices.filter(i => i.month === m).reduce((s,i)=>s+parseFloat(i.invoice_amount||0),0);
-    const pay = payroll.filter(p => p.month === m).reduce((s,p)=>s+parseFloat(p.total_pay||0),0);
-    const otherCost = costs.filter(c => c.month === m).reduce((s,c)=>s+parseFloat(c.amount||0),0);
-    const totalCost = pay + otherCost;
-    const net = rev - totalCost;
-    const margin = rev > 0 ? (net/rev*100).toFixed(1) : '0.0';
-    rows.push([MONTH_FULL[m], rev.toFixed(2), pay.toFixed(2), otherCost.toFixed(2), totalCost.toFixed(2), net.toFixed(2), margin+'%']);
-  }
-  downloadCSV(rows, `NEC_PL_${year}.csv`);
-  showToast('P&L exported');
-}
-
-function downloadCSV(rows, filename) {
-  const csv = rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n');
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
-}
-
-// ============ SETUP ============
-
-const SETUP_SQL = `-- Run this in Supabase SQL Editor
-
-CREATE TABLE IF NOT EXISTS proxy_accounts (
-  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  name text NOT NULL,
-  ic_number text,
-  bank_name text,
-  bank_account text,
-  coway_id text,
-  channel text,
-  is_active boolean DEFAULT true,
-  created_at timestamptz DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS proxy_invoices (
-  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  proxy_id uuid REFERENCES proxy_accounts(id),
-  year int NOT NULL,
-  month int NOT NULL,
-  coway_payslip_amount numeric(10,2) NOT NULL,
-  invoice_amount numeric(10,2) NOT NULL,
-  proxy_profit numeric(10,2) GENERATED ALWAYS AS (coway_payslip_amount - invoice_amount) STORED,
-  invoice_number text,
-  status text DEFAULT 'draft',
-  notes text,
-  created_at timestamptz DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS nec_staff (
-  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  name text NOT NULL,
-  role text,
-  staff_type text NOT NULL,
-  channel text,
-  base_salary numeric(10,2) DEFAULT 0,
-  commission_per_order numeric(10,2) DEFAULT 0,
-  is_active boolean DEFAULT true,
-  created_at timestamptz DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS nec_payroll (
-  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  staff_id uuid REFERENCES nec_staff(id),
-  year int NOT NULL,
-  month int NOT NULL,
-  orders_count int DEFAULT 0,
-  commission_earned numeric(10,2) DEFAULT 0,
-  base_salary numeric(10,2) DEFAULT 0,
-  bonus numeric(10,2) DEFAULT 0,
-  deductions numeric(10,2) DEFAULT 0,
-  total_pay numeric(10,2) GENERATED ALWAYS AS (commission_earned + base_salary + bonus - deductions) STORED,
-  status text DEFAULT 'draft',
-  created_at timestamptz DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS nec_managers (
-  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  name text NOT NULL,
-  share_percentage numeric(5,2) NOT NULL,
-  is_active boolean DEFAULT true
-);
-
-CREATE TABLE IF NOT EXISTS nec_manager_sharing (
-  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  year int NOT NULL,
-  month int NOT NULL,
-  manager_id uuid REFERENCES nec_managers(id),
-  coway_payslip_amount numeric(10,2) NOT NULL,
-  share_percentage numeric(5,2) NOT NULL,
-  amount_received numeric(10,2) NOT NULL,
-  notes text,
-  created_at timestamptz DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS nec_pl_costs (
-  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  year int NOT NULL,
-  month int NOT NULL,
-  channel text,
-  category text NOT NULL,
-  description text,
-  amount numeric(10,2) NOT NULL,
-  created_at timestamptz DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS nec_audit_log (
-  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  username text NOT NULL,
-  display_name text NOT NULL,
-  action text NOT NULL,
-  table_name text NOT NULL,
-  details text,
-  created_at timestamptz DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS nec_payslip_breakdown (
-  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  proxy_id uuid REFERENCES proxy_accounts(id),
-  year int NOT NULL,
-  month int NOT NULL,
-  distributor_code text,
-  member_level text,
-  total_net_payable numeric(10,2) NOT NULL,
-  withholding_tax numeric(10,2) DEFAULT 0,
-  categories_json text,
-  allowances_json text,
-  team_building_total numeric(10,2) DEFAULT 0,
-  raw_filename text,
-  created_at timestamptz DEFAULT now(),
-  UNIQUE(proxy_id, year, month)
-);`;
-
-const DEFAULT_MANAGERS = [
-  { name: 'Kai Yan', share_percentage: 25 },
-  { name: 'Chloe', share_percentage: 25 },
-  { name: 'Carine', share_percentage: 25 },
-  { name: 'Jess', share_percentage: 25 },
-];
-
-function loadSetup() {
-  document.getElementById('setupSQL').textContent = SETUP_SQL;
-  const container = document.getElementById('managerSetupList');
-  container.innerHTML = DEFAULT_MANAGERS.map((m,i) => `
-    <div style="display:flex;align-items:center;gap:10px">
-      <input type="text" value="${m.name}" id="mgSetupName${i}" style="flex:1" class="form-input" placeholder="Name">
-      <input type="number" value="${m.share_percentage}" id="mgSetupPct${i}" style="width:80px" class="form-input" oninput="updateSetupTotal()" placeholder="%">
-      <span style="font-size:12px;color:var(--muted)">%</span>
-    </div>`).join('');
-  updateSetupTotal();
-}
-
-function updateSetupTotal() {
-  let total = 0;
-  for (let i = 0; i < 4; i++) {
-    total += parseFloat(document.getElementById(`mgSetupPct${i}`)?.value || 0);
-  }
-  const el = document.getElementById('setupPctTotal');
-  el.textContent = total.toFixed(1);
-  el.style.color = Math.abs(total - 100) < 0.1 ? 'var(--green)' : 'var(--red)';
-}
-
-async function saveManagers() {
-  let total = 0;
-  const entries = [];
-  for (let i = 0; i < 4; i++) {
-    const name = document.getElementById(`mgSetupName${i}`).value;
-    const pct = parseFloat(document.getElementById(`mgSetupPct${i}`).value);
-    total += pct;
-    entries.push({ name, share_percentage: pct });
-  }
-  if (Math.abs(total - 100) > 0.1) return showToast('Total % must equal 100%', 'error');
-  try {
-    // Check if managers exist
-    const existing = await sb('nec_managers', {});
-    if (existing.length > 0) {
-      if (!confirm('Managers already exist. Replace them?')) return;
-      for (const m of existing) await sbDelete('nec_managers', `id=eq.${m.id}`);
-    }
-    for (const m of entries) await sb('nec_managers', { method: 'POST', body: m });
-    showToast('Managers saved! ✓');
-  } catch(e) { showToast('Error: ' + e.message, 'error'); }
-}
-
-async function testConnection() {
-  const result = document.getElementById('connTestResult');
-  result.textContent = 'Testing...';
-  const tables = ['proxy_accounts','proxy_invoices','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_pl_costs','nec_audit_log','nec_payslip_breakdown'];
-  const results = [];
-  for (const t of tables) {
-    try {
-      await sb(t, { limit: 1 });
-      results.push(`✓ ${t}`);
-    } catch(e) {
-      results.push(`✗ ${t} — ${e.message.includes('does not exist') ? 'table missing' : 'error'}`);
-    }
-  }
-  result.innerHTML = results.map(r => `<div style="color:${r.startsWith('✓')?'var(--green)':'var(--red)'}">${r}</div>`).join('');
-}
-
-function copySQL() {
-  navigator.clipboard.writeText(SETUP_SQL).then(() => showToast('SQL copied to clipboard'));
-}
-
-// ============ BULK PDF UPLOAD ============
-
-let parsedPayslips = []; // holds parsed results before saving
-
-async function handlePDFDrop(e) {
-  const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
-  if (files.length) await handlePDFFiles(files);
-}
-
-async function handlePDFFiles(files) {
-  files = Array.from(files);
-  if (!files.length) return;
-  parsedPayslips = [];
-  document.getElementById('uploadProgress').style.display = 'block';
-  document.getElementById('uploadResults').innerHTML = '';
-  document.getElementById('uploadConfirmBar').style.display = 'none';
-
-  const total = files.length;
-  for (let i = 0; i < files.length; i++) {
-    document.getElementById('uploadProgressText').textContent = `Processing ${files[i].name}...`;
-    document.getElementById('uploadProgressCount').textContent = `${i+1} / ${total}`;
-    document.getElementById('uploadProgressBar').style.width = `${((i+1)/total)*100}%`;
-    try {
-      const result = await parsePayslipPDF(files[i]);
-      parsedPayslips.push(result);
-      renderParseResult(result);
-    } catch(e) {
-      renderParseError(files[i].name, e.message);
-    }
+    new_orders_total = r2(new_orders_total + comFromPayslip);
   }
 
-  document.getElementById('uploadProgressText').textContent = `Done — ${total} files processed`;
-  if (parsedPayslips.filter(r => r.matched).length > 0) {
-    document.getElementById('uploadConfirmBar').style.display = 'flex';
-    const matched = parsedPayslips.filter(r => r.matched).length;
-    document.getElementById('uploadConfirmText').textContent = `${matched} of ${total} payslips matched to proxy accounts`;
-    document.getElementById('uploadConfirmSub').textContent = `Unmatched entries will be skipped. Review above then confirm.`;
-  }
-}
+  // Add TBC to passive bucket
+  passive_and_tbc_total = r2(passive_and_tbc_total + tbc_total);
 
-async function parsePayslipPDF(file) {
-  // Read PDF as base64
-  const base64 = await new Promise((res, rej) => {
-    const reader = new FileReader();
-    reader.onload = () => res(reader.result.split(',')[1]);
-    reader.onerror = rej;
-    reader.readAsDataURL(file);
-  });
-
-  // Call our Vercel serverless function (avoids CORS)
-  const response = await fetch('/api/parse-payslip', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ base64, filename: file.name })
-  });
-
-  if (!response.ok) {
-    const err = await response.json();
-    throw new Error(err.error || 'API error');
-  }
-
-  const { data: parsed } = await response.json();
-
-  // Match to proxy accounts
-  await loadProxies();
-  const name = (parsed.distributor_name || '').trim().toUpperCase();
-  const code = (parsed.distributor_code || '').trim();
-  const match = proxyList.find(p =>
-    p.name?.toUpperCase() === name ||
-    p.coway_id === code
-  );
+  // ── 5. Summary ─────────────────────────────────────────────
+  const new_orders_count = bonusOrders.length;
+  const verify_total = r2(new_orders_total + allowanceTotal + passive_and_tbc_total);
 
   return {
-    ...parsed,
-    filename: file.name,
-    matched: !!match,
-    proxy: match || null,
-    proxy_id: match?.id || null
+    distributor_code, distributor_name, period_date, member_level,
+    total_net_payable, withholding_tax,
+    new_orders_count,
+    new_orders_total,        // com from new orders (excl allowance)
+    allowance_total: allowanceTotal,
+    allowance_per_order: allowancePerOrder,
+    passive_and_tbc_total,   // trailing + TBC + food supplements
+    tbc_total,
+    allowances,
+    new_orders: new_orders_detail,
+    _verify_total: verify_total,
+    _match: Math.abs(verify_total - total_net_payable) < 1.00
   };
 }
-
-function renderParseResult(result) {
-  const container = document.getElementById('uploadResults');
-  const statusCls = result.matched ? 'matched' : 'unmatched';
-  const statusText = result.matched ? `✓ Matched: ${result.proxy?.name}` : '✗ No match found in system';
-  const matchColor = result._match ? 'var(--green)' : 'var(--yellow)';
-  const matchIcon = result._match ? '✓' : '⚠';
-
-  const orderRows = (result.new_orders || []).map(o =>
-    `<div class="order-row">
-      <span style="color:var(--muted);font-family:var(--mono);font-size:10px">${o.order_no}</span>
-      <span>${o.customer_name}</span>
-      <span style="font-family:var(--mono)">${fmtNum(o.com_from_payslip)}</span>
-      <span style="font-family:var(--mono);color:var(--yellow)">${fmtNum(o.allowance_portion)}</span>
-      <span style="font-family:var(--mono);font-weight:700;color:var(--green)">${fmtNum(o.total_com)}</span>
-    </div>`).join('');
-
-  container.innerHTML += `
-    <div class="parse-result-card">
-      <div class="parse-result-header">
-        <div>
-          <div class="parse-result-name">${result.distributor_name || result.filename}</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">Code: ${result.distributor_code || '—'} | ${result.member_level || '—'} | ${result.period_date || '—'}</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px">
-          <span class="parse-status ${statusCls}">${statusText}</span>
-          <div class="parse-result-amount">RM ${fmtNum(result.total_net_payable)}</div>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;font-size:12px">
-        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px">
-          <div style="color:var(--muted);margin-bottom:4px">New Orders (${result.new_orders_count || 0} units)</div>
-          <div style="font-family:var(--mono);font-weight:700;color:var(--green)">RM ${fmtNum(result.new_orders_total)}</div>
-        </div>
-        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px">
-          <div style="color:var(--muted);margin-bottom:4px">Allowance (HP PI + WS)</div>
-          <div style="font-family:var(--mono);font-weight:700;color:var(--yellow)">RM ${fmtNum(result.allowance_total)}</div>
-          <div style="font-size:10px;color:var(--muted)">RM ${fmtNum(result.allowance_per_order)}/order</div>
-        </div>
-        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px">
-          <div style="color:var(--muted);margin-bottom:4px">Passive + TBC</div>
-          <div style="font-family:var(--mono);font-weight:700;color:var(--muted)">RM ${fmtNum(result.passive_and_tbc_total)}</div>
-        </div>
-      </div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">
-        Verify: RM ${fmtNum(result._verify_total)} vs Net RM ${fmtNum(result.total_net_payable)}
-        <span style="color:${matchColor};margin-left:6px">${matchIcon}</span>
-      </div>
-      ${orderRows.length > 0 ? `
-        <div class="order-row header" style="font-size:10px"><span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span></div>
-        ${orderRows}` : ''}
-      ${!result.matched ? `<div style="margin-top:10px;font-size:12px;color:var(--red)">⚠ Add "${result.distributor_name}" as proxy first, then re-upload.</div>` : ''}
-    </div>`;
-}
-
-function renderParseError(filename, msg) {
-  document.getElementById('uploadResults').innerHTML +=
-    `<div class="parse-result-card" style="border-color:rgba(239,68,68,0.3)">
-      <div style="color:var(--red);font-weight:600">✗ ${filename}</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:4px">${msg}</div>
-    </div>`;
-}
-
-function clearUpload() {
-  parsedPayslips = [];
-  document.getElementById('uploadResults').innerHTML = '';
-  document.getElementById('uploadProgress').style.display = 'none';
-  document.getElementById('uploadConfirmBar').style.display = 'none';
-  document.getElementById('pdfFileInput').value = '';
-}
-
-async function debugPDF(file) {
-  const base64 = await new Promise((res, rej) => {
-    const reader = new FileReader();
-    reader.onload = () => res(reader.result.split(',')[1]);
-    reader.onerror = rej;
-    reader.readAsDataURL(file);
-  });
-  document.getElementById('uploadResults').innerHTML = '<div style="color:var(--yellow);padding:12px">Loading raw text...</div>';
-  const response = await fetch('/api/parse-payslip', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ base64, debug: true })
-  });
-  const data = await response.json();
-  const raw = (data.raw_text || data.error || 'no data').replace(/</g,'&lt;').replace(/\n/g,'<br>');
-  document.getElementById('uploadResults').innerHTML = `
-    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:16px;font-family:var(--mono);font-size:11px;color:#94a3b8;line-height:1.6;white-space:pre-wrap;max-height:600px;overflow-y:auto">${raw}</div>`;
-}
-
-async function confirmBulkSave() {
-  const year = parseInt(document.getElementById('uploadYear').value);
-  const month = parseInt(document.getElementById('uploadMonth').value);
-  const matched = parsedPayslips.filter(r => r.matched && r.total_net_payable > 0);
-  if (!matched.length) return showToast('No matched payslips to save', 'error');
-
-  let saved = 0;
-  for (const p of matched) {
-    try {
-      // Save invoice
-      await sb('proxy_invoices', {
-        method: 'POST',
-        body: {
-          proxy_id: p.proxy_id,
-          year, month,
-          coway_payslip_amount: p.total_net_payable,
-          invoice_amount: p.total_net_payable, // default = full amount, admin can edit
-          invoice_number: `NEC-${year}-${String(month).padStart(2,'0')}-${(p.proxy?.coway_id || 'XX')}`,
-          status: 'draft',
-          notes: `Auto-imported from PDF: ${p.filename}`
-        }
-      });
-
-      // Save breakdown data
-      await sb('nec_payslip_breakdown', {
-        method: 'POST',
-        body: {
-          proxy_id: p.proxy_id,
-          year, month,
-          distributor_code: p.distributor_code,
-          member_level: p.member_level,
-          total_net_payable: p.total_net_payable,
-          withholding_tax: p.withholding_tax || 0,
-          categories_json: JSON.stringify(p.new_orders || []),
-          allowances_json: JSON.stringify(p.allowances || []),
-          team_building_total: p.tbc_total || 0,
-          raw_filename: p.filename
-        }
-      });
-
-      await logAudit('CREATE', 'proxy_invoices', `Bulk import: ${p.distributor_name} — ${MONTHS[month]} ${year} — RM${p.total_net_payable}`);
-      saved++;
-    } catch(e) {
-      console.error('Save error for', p.distributor_name, e.message);
-    }
-  }
-
-  showToast(`Saved ${saved} invoices ✓`);
-  clearUpload();
-  showPage('proxy');
-}
-
-// ============ BREAKDOWN PAGE ============
-
-async function loadBreakdown() {
-  const year = document.getElementById('bdYear').value;
-  const month = document.getElementById('bdMonth').value;
-
-  try {
-    await loadProxies();
-    let filter = `year=eq.${year}`;
-    if (month) filter += `&month=eq.${month}`;
-    const breakdowns = await sb('nec_payslip_breakdown', { filter, select: '*' });
-
-    const sidebar = document.getElementById('breakdownSidebar');
-    if (!breakdowns.length) {
-      sidebar.innerHTML = `<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">No breakdown data.<br>Upload payslips first.</div>`;
-      return;
-    }
-
-    sidebar.innerHTML = breakdowns.map(b => {
-      const proxy = proxyList.find(p => p.id === b.proxy_id) || { name: b.distributor_code || '?' };
-      return `<div class="breakdown-proxy-item" onclick="showBreakdown('${b.id}')">
-        <div>
-          <div style="font-weight:500;font-size:13px">${proxy.name}</div>
-          <div style="font-size:11px;color:var(--muted)">${MONTHS[b.month]} ${b.year} · ${b.member_level || '—'}</div>
-        </div>
-        <div style="font-family:var(--mono);font-size:12px;color:var(--green)">RM ${fmtNum(b.total_net_payable)}</div>
-      </div>`;
-    }).join('');
-  } catch(e) {
-    document.getElementById('breakdownSidebar').innerHTML = `<div style="padding:20px;color:var(--red);font-size:12px">Error: ${e.message}</div>`;
-  }
-}
-
-async function showBreakdown(id) {
-  document.querySelectorAll('.breakdown-proxy-item').forEach(el => el.classList.remove('active'));
-  event?.target?.closest('.breakdown-proxy-item')?.classList.add('active');
-
-  try {
-    const [b] = await sb('nec_payslip_breakdown', { filter: `id=eq.${id}` });
-    const proxy = proxyList.find(p => p.id === b.proxy_id) || { name: b.distributor_code };
-    const cats = JSON.parse(b.categories_json || '[]');
-    const allowances = JSON.parse(b.allowances_json || '[]');
-    const tbc = parseFloat(b.team_building_total || 0);
-
-    const catHTML = cats.map(cat => {
-      const newOrders = (cat.new_orders || []);
-      const orderRows = newOrders.map(o => `
-        <div class="order-row">
-          <span style="color:var(--muted);font-family:var(--mono)">${o.order_no || '—'}</span>
-          <span>${o.customer_name || '—'}</span>
-          <span style="color:var(--muted)">${o.months != null ? o.months + 'M' : '—'}</span>
-          <span style="color:var(--muted);font-family:var(--mono)">${o.pv ? o.pv.toLocaleString() : '—'}</span>
-          <span style="font-family:var(--mono);font-weight:600;color:var(--text)">${fmtNum(o.amount)}</span>
-        </div>`).join('');
-
-      const trailingRow = cat.trailing_total > 0 ? `
-        <div class="order-row" style="opacity:0.5">
-          <span style="color:var(--muted)">—</span>
-          <span style="color:var(--muted);font-style:italic">Trailing months (30% payout)</span>
-          <span>—</span><span>—</span>
-          <span style="font-family:var(--mono);color:var(--muted)">${fmtNum(cat.trailing_total)}</span>
-        </div>` : '';
-
-      return `<div class="cat-section">
-        <div class="cat-section-title">
-          <span>${cat.name}</span>
-          <span style="color:var(--green)">RM ${fmtNum(cat.subtotal)}</span>
-        </div>
-        ${newOrders.length > 0 ? `<div class="order-row header">
-          <span>Order No</span><span>Customer</span><span>Months</span><span>PV</span><span>Amount</span>
-        </div>` : ''}
-        ${orderRows}${trailingRow}
-      </div>`;
-    }).join('');
-
-    const tbcHTML = tbc > 0 ? `
-      <div class="cat-section">
-        <div class="cat-section-title">
-          <span>Team Building Commission</span>
-          <span style="color:var(--yellow)">RM ${fmtNum(tbc)}</span>
-        </div>
-        <div style="font-size:12px;color:var(--muted);padding:6px 0">Total TBC (individual rows not stored)</div>
-      </div>` : '';
-
-    const allowHTML = allowances.length ? `
-      <div class="cat-section">
-        <div class="cat-section-title">
-          <span>Allowances & Incentives</span>
-          <span style="color:var(--yellow)">RM ${fmtNum(allowances.reduce((s,a)=>s+(a.amount||0),0))}</span>
-        </div>
-        ${allowances.map(a => `<div class="parse-cat-row"><span class="parse-cat-label">${a.description}</span><span class="parse-cat-amount" style="color:var(--yellow)">RM ${fmtNum(a.amount)}</span></div>`).join('')}
-      </div>` : '';
-
-    document.getElementById('breakdownContent').innerHTML = `
-      <div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)">
-        <div style="font-size:18px;font-weight:700">${proxy.name}</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:4px">
-          Code: ${b.distributor_code} · ${b.member_level || '—'} · ${MONTHS[b.month]} ${b.year}
-        </div>
-        <div style="display:flex;gap:20px;margin-top:12px;font-size:13px">
-          <div><span style="color:var(--muted)">Gross:</span> <span style="font-family:var(--mono);font-weight:700">RM ${fmtNum(parseFloat(b.total_net_payable) + parseFloat(b.withholding_tax||0))}</span></div>
-          <div><span style="color:var(--muted)">WHT (2%):</span> <span style="font-family:var(--mono);color:var(--red)">-RM ${fmtNum(b.withholding_tax)}</span></div>
-          <div><span style="color:var(--muted)">Net Payable:</span> <span style="font-family:var(--mono);font-weight:700;color:var(--green)">RM ${fmtNum(b.total_net_payable)}</span></div>
-        </div>
-      </div>
-      ${catHTML}${tbcHTML}${allowHTML}`;
-  } catch(e) {
-    document.getElementById('breakdownContent').innerHTML = `<div style="color:var(--red);padding:20px">${e.message}</div>`;
-  }
-}
-window.addEventListener('DOMContentLoaded', () => {
-  const saved = sessionStorage.getItem('nec_user');
-  if (saved) {
-    try {
-      currentUser = JSON.parse(saved);
-      document.getElementById('loginScreen').style.display = 'none';
-      initUserUI();
-      loadInvoices();
-    } catch(e) {
-      sessionStorage.removeItem('nec_user');
-    }
-  }
-  // Login screen is visible by default, no need to show it
-});
-</script>
-</body>
-</html>
