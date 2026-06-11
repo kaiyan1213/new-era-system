@@ -16,6 +16,11 @@ export default async function handler(req, res) {
     const pdfData = await pdfParse(buffer);
     const text = pdfData.text;
 
+    // Debug mode: return raw text so we can see the actual PDF structure
+    if (req.body.debug) {
+      return res.status(200).json({ success: true, raw_text: text.substring(0, 8000) });
+    }
+
     const result = parseCowayPayslip(text);
     return res.status(200).json({ success: true, data: result });
   } catch(e) {
