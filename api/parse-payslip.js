@@ -65,55 +65,40 @@ function parseCowayPayslip(text) {
   }
 
   // ── 2. Find Bonus Commission section & extract new order numbers ──
-  // Bonus section format: order_no + customer + REN + product_desc (all on one line or split)
-  // e.g. "10892675KAM YAU SIANGRENCHP-6210N (NEON-PINK)"
   const bonusStart = lines.findIndex(l => l === 'Bonus Commission');
   const newOrderNos = new Set();
-  const bonusOrders = []; // { order_no, customer_name }
+  const bonusOrders = [];
 
   if (bonusStart >= 0) {
-    // Find end of bonus section
     const bonusEnd = lines.findIndex((l, i) => i > bonusStart &&
       (l === 'Food Supplements Sales Commission (100%)' || l.includes('Team Building') || l === 'Allowance'));
-
     const bLines = lines.slice(bonusStart + 1, bonusEnd > 0 ? bonusEnd : bonusStart + 100);
     for (const l of bLines) {
-      // Pattern: "10892675KAM YAU SIANGRENCHP-6210N..."
       const m = l.match(/^(\d{7,})([A-Z].+?)REN/);
       if (m) {
-        const orderNo = m[1];
-        const customer = m[2].trim();
-        newOrderNos.add(orderNo);
-        bonusOrders.push({ order_no: orderNo, customer_name: customer });
+        newOrderNos.add(m[1]);
+        bonusOrders.push({ order_no: m[1], customer_name: m[2].trim() });
       }
     }
   }
 
-  // ── 3. Collect ALL amount rows from entire payslip ──────────
-  // Map: order_no -> total amount across all sections
-  // Num row formats:
-  //   "months pv amount"  e.g. "1 1,230 129.15"
-  //   "months pv bonus% bonus amount"  e.g. "1 1,230 9 110.70 110.70"
-  // Order row: "ORDER_NOCustomerName15 \n (70%) or (30%)"
-  // We need to pair them positionally within each section
+  // ── 2b. Extract bonus amounts globally (they appear BEFORE "Bonus Commission" header) ──
+  // Format: "1 pv bonus_pct amount amount" e.g. "1 1,230 9 110.70 110.70"
+  // These appear right before "AmountBONUS%PVMonthStock DescType" line
+  const bonusAmountRows = [];
+  for (const l of lines) {
+    const bm = l.match(/^(\d{1,2})\s+([\d,]+)\s+(\d{1,2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})$/);
+    if (bm) bonusAmountRows.push(pn(bm[5])); // last column = bonus com
+  }
+  // ── 3. orderAmounts map & pair bonus amounts ──────────────────
+  const orderAmounts = {}; // order_no -> bonus com amount
 
-  // Strategy: scan through ALL lines, collect (order_no, amount) pairs
-  // For sections with (70%)/(30%) markers, pair order rows with preceding num rows
-  // For bonus section, pair order rows with following num rows
-
-  const orderAmounts = {}; // order_no -> total amount
-
-  // Parse 70% section specifically - it has the bulk of data
-  // The PDF structure: num rows appear BEFORE their order rows within each page block
-  // We'll do a global scan: collect all num rows and all order rows, pair by position
-
-  // Actually the most reliable: for each order_no found anywhere, sum up all
-  // "months pv amount" rows that correspond to it.
-  // But since they're positional, we need section-by-section parsing.
-
-  // Let's do a cleaner approach:
-  // Within 70% section, pairs are: numRow[i] <-> orderRow[i]
-  // The num rows and order rows are interleaved in page chunks
+  // Pair bonus amounts with bonus orders positionally
+  bonusOrders.forEach((o, idx) => {
+    if (idx < bonusAmountRows.length) {
+      orderAmounts[o.order_no] = r2(bonusAmountRows[idx]);
+    }
+  });
 
   const SECTION_STARTS = [
     'Sales Commission (Rental - 100% Payout)',
@@ -210,21 +195,8 @@ function parseCowayPayslip(text) {
     }
 
     if (sec.name === 'Bonus Commission') {
-      // Bonus num rows appear INSIDE this section, format: "1 pv bonus_pct amount amount"
-      // e.g. "1 1,230 9 110.70 110.70" - last column = bonus amount per order
-      // These rows appear AFTER the order rows in the PDF text
-      const bonusAmounts = [];
-      for (const l of sLines) {
-        // "1 1,230 9 110.70 110.70" -> last amount = bonus com
-        const bm = l.match(/^(\d{1,2})\s+([\d,]+)\s+(\d{1,2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})$/);
-        if (bm) { bonusAmounts.push(pn(bm[5])); continue; }
-      }
-      // Pair bonus amounts with bonus orders positionally
-      bonusOrders.forEach((o, idx) => {
-        if (idx < bonusAmounts.length) {
-          orderAmounts[o.order_no] = r2((orderAmounts[o.order_no] || 0) + bonusAmounts[idx]);
-        }
-      });
+      // Bonus amounts already extracted globally and paired above
+      // Just skip this section in the loop
       continue;
     }
 
