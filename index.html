@@ -741,6 +741,13 @@
       <div class="upload-zone-sub">Upload multiple files at once — all formats supported (HP, HP Manager)</div>
       <input type="file" id="pdfFileInput" multiple accept=".pdf" style="display:none" onchange="handlePDFFiles(this.files)">
     </div>
+    <div style="text-align:right;margin-top:8px">
+      <label style="font-size:11px;color:var(--muted);cursor:pointer">
+        🔍 Debug single PDF raw text: 
+        <input type="file" accept=".pdf" style="display:none" onchange="debugPDF(this.files[0])">
+        <span style="color:var(--accent);text-decoration:underline">choose file</span>
+      </label>
+    </div>
 
     <!-- Processing status -->
     <div id="uploadProgress" style="display:none;margin-top:16px">
@@ -2464,6 +2471,23 @@ function clearUpload() {
   document.getElementById('uploadProgress').style.display = 'none';
   document.getElementById('uploadConfirmBar').style.display = 'none';
   document.getElementById('pdfFileInput').value = '';
+}
+
+async function debugPDF(file) {
+  const base64 = await new Promise((res, rej) => {
+    const reader = new FileReader();
+    reader.onload = () => res(reader.result.split(',')[1]);
+    reader.onerror = rej;
+    reader.readAsDataURL(file);
+  });
+  const response = await fetch('/api/parse-payslip', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base64, debug: true })
+  });
+  const data = await response.json();
+  const win = window.open('', '_blank');
+  win.document.write(`<pre style="font-size:11px;white-space:pre-wrap;font-family:monospace;background:#111;color:#0f0;padding:20px">${(data.raw_text || data.error || '').replace(/</g,'&lt;')}</pre>`);
 }
 
 async function confirmBulkSave() {
