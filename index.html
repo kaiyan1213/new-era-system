@@ -2365,8 +2365,16 @@ async function parsePayslipPDF(file) {
   // Read PDF as base64
   const base64 = await new Promise((res, rej) => {
     const reader = new FileReader();
-    reader.onload = () => res(reader.result.split(',')[1]);
-    reader.onerror = rej;
+    reader.onload = () => {
+      try {
+        const result = reader.result;
+        if (!result || typeof result !== 'string') { rej(new Error('FileReader returned empty result')); return; }
+        const comma = result.indexOf(',');
+        if (comma < 0) { rej(new Error('FileReader result missing data URL comma')); return; }
+        res(result.substring(comma + 1));
+      } catch(e) { rej(e); }
+    };
+    reader.onerror = (e) => rej(new Error('FileReader error: ' + (reader.error?.message || 'unknown')));
     reader.readAsDataURL(file);
   });
 
