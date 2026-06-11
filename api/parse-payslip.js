@@ -41,10 +41,27 @@ function parseCowayPayslip(text) {
     if (lines[i] === 'Member Level' && lines[i+1] === ':') member_level = lines[i+2];
   }
   for (const l of lines) {
+    // Total Net Payable - try multiple formats
     const nm = l.match(/TOTAL NET PAYABLE\s*[:\s]\s*([\d,]+\.?\d*)/);
     if (nm) total_net_payable = pn(nm[1]);
     const wm = l.match(/Withholding Tax Deduction.*?:\s*([\d,]+\.?\d*)/);
     if (wm) withholding_tax = pn(wm[1]);
+  }
+  // Also try finding "TOTAL NET PAYABLE :" on one line, number on next
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes('TOTAL NET PAYABLE') && total_net_payable === 0) {
+      // Try next few lines for the number
+      for (let j = i; j < Math.min(i+3, lines.length); j++) {
+        const m = lines[j].match(/([\d,]+\.\d{2})/);
+        if (m && pn(m[1]) > 100) { total_net_payable = pn(m[1]); break; }
+      }
+    }
+    if (lines[i].includes('Withholding Tax Deduction') && withholding_tax === 0) {
+      for (let j = i; j < Math.min(i+3, lines.length); j++) {
+        const m = lines[j].match(/([\d,]+\.\d{2})/);
+        if (m) { withholding_tax = pn(m[1]); break; }
+      }
+    }
   }
 
   // ── 2. Find Bonus Commission section & extract new order numbers ──
@@ -133,16 +150,39 @@ function parseCowayPayslip(text) {
     const sLines = lines.slice(sec.idx + 1, nextIdx);
 
     if (sec.name === 'Allowance') {
-      // Parse SPECIAL WS, HP NEW PI, CASH INCENTIVE
-      for (let j = 0; j < sLines.length; j++) {
-        const l = sLines[j];
-        if (l === 'SPECIAL WS' || l === 'HP NEW PI' || l === 'CASH INCENTIVE') {
-          const nm = sLines[j+1]?.match(/^([\d,]+\.\d{2})$/);
-          if (nm) { allowances.push({ description: l, amount: pn(nm[1]) }); j++; }
+      // From raw text, format is:
+      // " 6,100.00\n 2,000.00\n 4,100.00\nAmount\nDescription\nAllowance\nSPECIAL WS\nHP NEW PI"
+      // The amounts appear BEFORE the description labels in PDF text stream
+      // 6,100.00 = total, 2,000.00 = SPECIAL WS, 4,100.00 = HP NEW PI
+      const allNums = [];
+      const allDescs = [];
+      for (const l of sLines) {
+        if (l === 'SPECIAL WS' || l === 'HP NEW PI' || l === 'CASH INCENTIVE') allDescs.push(l);
+        // Standalone amounts (not TBC rows which have spaces between numbers)
+        const nm = l.match(/^\s*([\d,]+\.\d{2})\s*$/);
+        if (nm) allNums.push(pn(nm[1]));
+      }
+      // Match: skip the first number if it's the total (largest), pair remaining with descriptions
+      // Or: total is first, then individual amounts follow
+      const sortedNums = [...allNums].sort((a,b) => b-a);
+      // Individual amounts = all except the largest (which is the section total)
+      const individualNums = allNums.filter(n => n !== sortedNums[0]);
+      allDescs.forEach((desc, i) => {
+        if (i < individualNums.length) {
+          allowances.push({ description: desc, amount: individualNums[i] });
+        } else if (i < allNums.length) {
+          allowances.push({ description: desc, amount: allNums[i] });
         }
-        // Also inline format
-        const inm = l.match(/^(SPECIAL WS|HP NEW PI|CASH INCENTIVE)\s+([\d,]+\.\d{2})$/);
-        if (inm) allowances.push({ description: inm[1], amount: pn(inm[2]) });
+      });
+      // If no nums found via above, try line-by-line matching
+      if (allowances.length === 0) {
+        for (let j = 0; j < sLines.length; j++) {
+          const l = sLines[j];
+          if (l === 'SPECIAL WS' || l === 'HP NEW PI' || l === 'CASH INCENTIVE') {
+            const nm = sLines[j+1]?.match(/^([\d,]+\.\d{2})$/);
+            if (nm) { allowances.push({ description: l, amount: pn(nm[1]) }); j++; }
+          }
+        }
       }
       continue;
     }
@@ -170,23 +210,46 @@ function parseCowayPayslip(text) {
     }
 
     if (sec.name === 'Bonus Commission') {
-      // Bonus: num rows have format "1 pv bonus% bonus amount"
-      // pair with bonus order rows (already collected above)
-      const bonusNumRows = [];
+      // Bonus section only has order_no + customer_name
+      // The actual bonus amounts are in "Sales Commission (Rental & 1st Installment Month)"
+      // Format there: "1 pv bonus_pct amount amount" e.g. "1 1,230 9 110.70 110.70"
+      // We already extracted bonusOrders above. Amounts will be paired in 1st Install section below.
+      continue;
+    }
+
+    if (sec.name === 'Sales Commission (Rental & 1st Installment Month)' ||
+        sec.name === 'Sales Overidding Commission ( HM Rental & 1st Installment Month)') {
+      // This section has bonus amounts paired with bonus orders
+      // Num row format: "1 pv bonus_pct amount amount" - last column = bonus amount
+      // Also regular "1 pv amount" rows
+      const bonusAmounts = [];
       for (const l of sLines) {
-        // "1 1,230 9 110.70 110.70" - last number is amount
-        const bm = l.match(/^(\d{1,2})\s+([\d,]+)\s+(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})$/);
-        if (bm) bonusNumRows.push(pn(bm[5])); // last amount
-        // Also "months pv amount" regular format
+        // "1 1,230 9 110.70 110.70" -> last amount = bonus
+        const bm = l.match(/^(\d{1,2})\s+([\d,]+)\s+(\d{1,2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})$/);
+        if (bm) { bonusAmounts.push(pn(bm[5])); continue; }
+        // "1 1,230 73.80" -> regular 1st install
         const nm = l.match(/^(\d{1,2})\s+([\d,]+)\s+([\d,]+\.\d{2})$/);
-        if (nm && parseInt(nm[1]) <= 30) bonusNumRows.push(pn(nm[3]));
+        if (nm && parseInt(nm[1]) === 1) bonusAmounts.push(pn(nm[3]));
       }
-      // Pair with bonusOrders
+      // Find subtotal
+      let subtotal = 0;
+      for (let j = sLines.length-1; j >= 0; j--) {
+        const m = sLines[j].match(/^([\d,]+\.\d{2})$/);
+        if (m) { subtotal = pn(m[1]); break; }
+      }
+      // Pair bonus amounts with bonus orders
       bonusOrders.forEach((o, idx) => {
-        if (idx < bonusNumRows.length) {
-          orderAmounts[o.order_no] = r2((orderAmounts[o.order_no] || 0) + bonusNumRows[idx]);
+        if (idx < bonusAmounts.length) {
+          orderAmounts[o.order_no] = r2((orderAmounts[o.order_no] || 0) + bonusAmounts[idx]);
         }
       });
+      // Any 1st install amounts beyond bonus order count are also new order income
+      // but we'll add them to passive since we can't match them
+      if (bonusAmounts.length > bonusOrders.length) {
+        for (let k = bonusOrders.length; k < bonusAmounts.length; k++) {
+          passive_and_tbc_total = r2(passive_and_tbc_total + bonusAmounts[k]);
+        }
+      }
       continue;
     }
 
@@ -238,10 +301,12 @@ function parseCowayPayslip(text) {
       const o = orderRows[k];
       const n = numRows[k];
       if (isOtherInstall) {
-        // All trailing
         passive_and_tbc_total = r2(passive_and_tbc_total + n.amount);
-      } else if (is100 || o.pct === 70 || o.pct === null) {
-        // New order - accumulate into orderAmounts
+      } else if (o.pct === 70) {
+        // 70% new order com - accumulate into orderAmounts by order_no
+        orderAmounts[o.order_no] = r2((orderAmounts[o.order_no] || 0) + n.amount);
+      } else if (is100 || o.pct === null) {
+        // 100% or unmarked - accumulate
         orderAmounts[o.order_no] = r2((orderAmounts[o.order_no] || 0) + n.amount);
       } else {
         // (30%) trailing
