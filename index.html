@@ -2412,8 +2412,9 @@ function renderParseResult(result) {
   const catRows = (result.categories || []).map(cat => {
     const newCount = (cat.new_orders || []).length;
     const trailingNote = cat.trailing_total > 0 ? ` <span style="color:var(--muted)">(+RM${fmtNum(cat.trailing_total)} trailing)</span>` : '';
+    const matchIcon = cat._match === false ? ` <span style="color:var(--red)" title="Sum mismatch: computed RM${fmtNum(cat._computed_sum)} vs reported RM${fmtNum(cat.subtotal)}">⚠</span>` : (cat._match === true ? ` <span style="color:var(--green)">✓</span>` : '');
     return `<div class="parse-cat-row">
-      <span class="parse-cat-label">${cat.name} ${newCount > 0 ? `· ${newCount} new orders` : ''}${trailingNote}</span>
+      <span class="parse-cat-label">${cat.name} ${newCount > 0 ? `· ${newCount} new orders` : ''}${trailingNote}${matchIcon}</span>
       <span class="parse-cat-amount" style="color:var(--text)">RM ${fmtNum(cat.subtotal)}</span>
     </div>`;
   }).join('');
