@@ -2246,6 +2246,7 @@ CREATE TABLE IF NOT EXISTS nec_payslip_breakdown (
   withholding_tax numeric(10,2) DEFAULT 0,
   categories_json text,
   allowances_json text,
+  team_building_total numeric(10,2) DEFAULT 0,
   raw_filename text,
   created_at timestamptz DEFAULT now(),
   UNIQUE(proxy_id, year, month)
@@ -2408,12 +2409,20 @@ function renderParseResult(result) {
   const statusCls = result.matched ? 'matched' : 'unmatched';
   const statusText = result.matched ? `✓ Matched: ${result.proxy?.name}` : '✗ No match found in system';
 
-  const catRows = (result.categories || []).map(cat =>
-    `<div class="parse-cat-row">
-      <span class="parse-cat-label">${cat.name}</span>
+  const catRows = (result.categories || []).map(cat => {
+    const sigCount = (cat.significant_orders || []).length;
+    const passiveNote = cat.passive_total > 0 ? ` <span style="color:var(--muted)">(+RM${fmtNum(cat.passive_total)} passive)</span>` : '';
+    return `<div class="parse-cat-row">
+      <span class="parse-cat-label">${cat.name} ${sigCount > 0 ? `· ${sigCount} orders` : ''}${passiveNote}</span>
       <span class="parse-cat-amount" style="color:var(--text)">RM ${fmtNum(cat.subtotal)}</span>
-    </div>`
-  ).join('');
+    </div>`;
+  }).join('');
+
+  const tbcRow = result.team_building_total > 0 ? `
+    <div class="parse-cat-row">
+      <span class="parse-cat-label">Team Building Commission</span>
+      <span class="parse-cat-amount" style="color:var(--yellow)">RM ${fmtNum(result.team_building_total)}</span>
+    </div>` : '';
 
   const allowRows = (result.allowances || []).map(a =>
     `<div class="parse-cat-row">
@@ -2434,12 +2443,9 @@ function renderParseResult(result) {
           <div class="parse-result-amount">RM ${fmtNum(result.total_net_payable)}</div>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div>${catRows}</div>
-        <div>${allowRows}</div>
-      </div>
-      ${result.withholding_tax ? `<div style="font-size:11px;color:var(--muted);margin-top:8px;text-align:right">Withholding Tax (2%): -RM ${fmtNum(result.withholding_tax)}</div>` : ''}
-      ${!result.matched ? `<div style="margin-top:10px;font-size:12px;color:var(--red)">⚠ Add this person as a proxy first, then re-upload. Name in PDF: "${result.distributor_name}"</div>` : ''}
+      <div>${catRows}${tbcRow}${allowRows}</div>
+      ${result.withholding_tax ? `<div style="font-size:11px;color:var(--muted);margin-top:8px;text-align:right">WHT (2%): -RM ${fmtNum(result.withholding_tax)}</div>` : ''}
+      ${!result.matched ? `<div style="margin-top:10px;font-size:12px;color:var(--red)">⚠ Add "${result.distributor_name}" as proxy first, then re-upload.</div>` : ''}
     </div>`;
 }
 
@@ -2494,6 +2500,7 @@ async function confirmBulkSave() {
           withholding_tax: p.withholding_tax || 0,
           categories_json: JSON.stringify(p.categories || []),
           allowances_json: JSON.stringify(p.allowances || []),
+          team_building_total: p.team_building_total || 0,
           raw_filename: p.filename
         }
       });
@@ -2552,9 +2559,11 @@ async function showBreakdown(id) {
     const proxy = proxyList.find(p => p.id === b.proxy_id) || { name: b.distributor_code };
     const cats = JSON.parse(b.categories_json || '[]');
     const allowances = JSON.parse(b.allowances_json || '[]');
+    const tbc = parseFloat(b.team_building_total || 0);
 
     const catHTML = cats.map(cat => {
-      const orderRows = (cat.orders || []).map(o => `
+      const sigOrders = (cat.significant_orders || []);
+      const orderRows = sigOrders.map(o => `
         <div class="order-row">
           <span style="color:var(--muted);font-family:var(--mono)">${o.order_no || '—'}</span>
           <span>${o.customer_name || '—'}</span>
@@ -2563,21 +2572,41 @@ async function showBreakdown(id) {
           <span style="font-family:var(--mono);font-weight:600;color:var(--text)">${fmtNum(o.amount)}</span>
         </div>`).join('');
 
+      const passiveRow = cat.passive_total > 0 ? `
+        <div class="order-row" style="opacity:0.5">
+          <span style="color:var(--muted)">—</span>
+          <span style="color:var(--muted);font-style:italic">Passive income (multiple small orders)</span>
+          <span>—</span><span>—</span>
+          <span style="font-family:var(--mono);color:var(--muted)">${fmtNum(cat.passive_total)}</span>
+        </div>` : '';
+
       return `<div class="cat-section">
         <div class="cat-section-title">
           <span>${cat.name}</span>
           <span style="color:var(--green)">RM ${fmtNum(cat.subtotal)}</span>
         </div>
-        <div class="order-row header">
+        ${sigOrders.length > 0 ? `<div class="order-row header">
           <span>Order No</span><span>Customer</span><span>Months</span><span>PV</span><span>Amount</span>
-        </div>
-        ${orderRows || '<div style="font-size:11px;color:var(--muted);padding:6px 0">No order detail</div>'}
+        </div>` : ''}
+        ${orderRows}${passiveRow}
       </div>`;
     }).join('');
 
+    const tbcHTML = tbc > 0 ? `
+      <div class="cat-section">
+        <div class="cat-section-title">
+          <span>Team Building Commission</span>
+          <span style="color:var(--yellow)">RM ${fmtNum(tbc)}</span>
+        </div>
+        <div style="font-size:12px;color:var(--muted);padding:6px 0">Total TBC (individual rows not stored)</div>
+      </div>` : '';
+
     const allowHTML = allowances.length ? `
       <div class="cat-section">
-        <div class="cat-section-title"><span>Allowances & Incentives</span><span style="color:var(--yellow)">RM ${fmtNum(allowances.reduce((s,a)=>s+(a.amount||0),0))}</span></div>
+        <div class="cat-section-title">
+          <span>Allowances & Incentives</span>
+          <span style="color:var(--yellow)">RM ${fmtNum(allowances.reduce((s,a)=>s+(a.amount||0),0))}</span>
+        </div>
         ${allowances.map(a => `<div class="parse-cat-row"><span class="parse-cat-label">${a.description}</span><span class="parse-cat-amount" style="color:var(--yellow)">RM ${fmtNum(a.amount)}</span></div>`).join('')}
       </div>` : '';
 
@@ -2593,8 +2622,7 @@ async function showBreakdown(id) {
           <div><span style="color:var(--muted)">Net Payable:</span> <span style="font-family:var(--mono);font-weight:700;color:var(--green)">RM ${fmtNum(b.total_net_payable)}</span></div>
         </div>
       </div>
-      ${catHTML}
-      ${allowHTML}`;
+      ${catHTML}${tbcHTML}${allowHTML}`;
   } catch(e) {
     document.getElementById('breakdownContent').innerHTML = `<div style="color:var(--red);padding:20px">${e.message}</div>`;
   }
