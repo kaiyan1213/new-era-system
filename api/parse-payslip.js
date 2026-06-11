@@ -135,31 +135,33 @@ function parseCowayPayslip(text) {
     const sLines = lines.slice(sec.idx + 1, nextIdx);
 
     if (sec.name === 'Allowance') {
-      // From raw text, format is:
-      // " 6,100.00\n 2,000.00\n 4,100.00\nAmount\nDescription\nAllowance\nSPECIAL WS\nHP NEW PI"
-      // The amounts appear BEFORE the description labels in PDF text stream
-      // 6,100.00 = total, 2,000.00 = SPECIAL WS, 4,100.00 = HP NEW PI
-      const allNums = [];
-      const allDescs = [];
+      // From raw text: amounts appear BEFORE the Allowance header in the Food Supplements section
+      // Structure is: " 6,100.00\n 2,000.00\n 4,100.00\nAmount\nDescription\nAllowance\nSPECIAL WS\nHP NEW PI"
+      // So by the time we reach Allowance section, the amounts are already parsed above
+      // Instead, look BACKWARDS from Allowance header for the amounts, then match with descriptions
+      const descLabels = [];
       for (const l of sLines) {
-        if (l === 'SPECIAL WS' || l === 'HP NEW PI' || l === 'CASH INCENTIVE') allDescs.push(l);
-        // Standalone amounts (not TBC rows which have spaces between numbers)
-        const nm = l.match(/^\s*([\d,]+\.\d{2})\s*$/);
-        if (nm) allNums.push(pn(nm[1]));
+        if (l === 'SPECIAL WS' || l === 'HP NEW PI' || l === 'CASH INCENTIVE') descLabels.push(l);
       }
-      // Match: skip the first number if it's the total (largest), pair remaining with descriptions
-      // Or: total is first, then individual amounts follow
-      const sortedNums = [...allNums].sort((a,b) => b-a);
-      // Individual amounts = all except the largest (which is the section total)
-      const individualNums = allNums.filter(n => n !== sortedNums[0]);
-      allDescs.forEach((desc, i) => {
-        if (i < individualNums.length) {
-          allowances.push({ description: desc, amount: individualNums[i] });
-        } else if (i < allNums.length) {
-          allowances.push({ description: desc, amount: allNums[i] });
-        }
-      });
-      // If no nums found via above, try line-by-line matching
+      // Find amounts just before Allowance header in the full lines array
+      const allowHeaderIdx = sec.idx;
+      const amountsBefore = [];
+      for (let k = allowHeaderIdx - 1; k >= Math.max(0, allowHeaderIdx - 15); k--) {
+        const m = lines[k].match(/^\s*([\d,]+\.\d{2})\s*$/);
+        if (m) amountsBefore.unshift(pn(m[1]));
+        else if (lines[k].includes('Food Supplements') || lines[k].includes('Order No')) break;
+      }
+      // Remove total (largest) and keep individual amounts
+      if (amountsBefore.length > 1) {
+        const maxVal = Math.max(...amountsBefore);
+        const indivAmounts = amountsBefore.filter(n => n !== maxVal);
+        descLabels.forEach((desc, i) => {
+          if (i < indivAmounts.length) allowances.push({ description: desc, amount: indivAmounts[i] });
+        });
+      } else if (amountsBefore.length === 1 && descLabels.length === 1) {
+        allowances.push({ description: descLabels[0], amount: amountsBefore[0] });
+      }
+      // Fallback: if no amounts found before, check after
       if (allowances.length === 0) {
         for (let j = 0; j < sLines.length; j++) {
           const l = sLines[j];
