@@ -260,28 +260,38 @@ function parseCowayPayslip(text) {
     }
 
     // Pair and accumulate
-    const count = Math.min(orderRows.length, numRows.length);
-    for (let k = 0; k < count; k++) {
-      const o = orderRows[k];
-      const n = numRows[k];
-      if (isOtherInstall) {
-        // Other installment = always trailing
-        passive_and_tbc_total = r2(passive_and_tbc_total + n.amount);
-      } else if (o.pct === 70 && newOrderNos.has(o.order_no)) {
-        // 70% payout for a new order (confirmed by bonus section) = add to new order com
-        orderAmounts[o.order_no] = r2((orderAmounts[o.order_no] || 0) + n.amount);
-      } else if ((is100 || o.pct === null) && newOrderNos.has(o.order_no)) {
-        // 100% payout for a new order = add to new order com
-        orderAmounts[o.order_no] = r2((orderAmounts[o.order_no] || 0) + n.amount);
-      } else {
-        // Everything else = passive (30% trailing, old orders, etc.)
-        passive_and_tbc_total = r2(passive_and_tbc_total + n.amount);
+    if (sec.name.includes('70% Payout') || sec.name.includes('Overidding')) {
+      // In 70% section: classify by months value, not positional order
+      // months=1 rows = new orders (70% payout), months>1 = trailing (30%)
+      const newAmt70 = numRows.filter(n => n.months === 1).map(n => n.amount);
+      const trailing70 = numRows.filter(n => n.months > 1).reduce((s,n) => r2(s+n.amount), 0);
+      passive_and_tbc_total = r2(passive_and_tbc_total + trailing70);
+      // Assign new order amounts to bonus orders by position
+      // Both are in same sequence (new orders appear at end of 70% section)
+      newAmt70.forEach((amt, idx) => {
+        if (idx < bonusOrders.length) {
+          orderAmounts[bonusOrders[idx].order_no] = r2((orderAmounts[bonusOrders[idx].order_no] || 0) + amt);
+        } else {
+          passive_and_tbc_total = r2(passive_and_tbc_total + amt);
+        }
+      });
+    } else {
+      const count = Math.min(orderRows.length, numRows.length);
+      for (let k = 0; k < count; k++) {
+        const o = orderRows[k];
+        const n = numRows[k];
+        if (isOtherInstall) {
+          passive_and_tbc_total = r2(passive_and_tbc_total + n.amount);
+        } else if ((is100 || o.pct === null) && newOrderNos.has(o.order_no)) {
+          orderAmounts[o.order_no] = r2((orderAmounts[o.order_no] || 0) + n.amount);
+        } else {
+          passive_and_tbc_total = r2(passive_and_tbc_total + n.amount);
+        }
       }
-    }
-    // Extra numRows = passive
-    if (numRows.length > orderRows.length) {
-      for (let k = orderRows.length; k < numRows.length; k++) {
-        passive_and_tbc_total = r2(passive_and_tbc_total + numRows[k].amount);
+      if (numRows.length > orderRows.length) {
+        for (let k = orderRows.length; k < numRows.length; k++) {
+          passive_and_tbc_total = r2(passive_and_tbc_total + numRows[k].amount);
+        }
       }
     }
   }
