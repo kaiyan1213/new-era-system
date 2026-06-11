@@ -2480,14 +2480,16 @@ async function debugPDF(file) {
     reader.onerror = rej;
     reader.readAsDataURL(file);
   });
+  document.getElementById('uploadResults').innerHTML = '<div style="color:var(--yellow);padding:12px">Loading raw text...</div>';
   const response = await fetch('/api/parse-payslip', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ base64, debug: true })
   });
   const data = await response.json();
-  const win = window.open('', '_blank');
-  win.document.write(`<pre style="font-size:11px;white-space:pre-wrap;font-family:monospace;background:#111;color:#0f0;padding:20px">${(data.raw_text || data.error || '').replace(/</g,'&lt;')}</pre>`);
+  const raw = (data.raw_text || data.error || 'no data').replace(/</g,'&lt;').replace(/\n/g,'<br>');
+  document.getElementById('uploadResults').innerHTML = `
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:16px;font-family:var(--mono);font-size:11px;color:#94a3b8;line-height:1.6;white-space:pre-wrap;max-height:600px;overflow-y:auto">${raw}</div>`;
 }
 
 async function confirmBulkSave() {
