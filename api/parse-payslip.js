@@ -34,12 +34,13 @@ export default async function handler(req, res) {
               type: 'text',
               text: `Extract from this Coway Commission Statement. Return ONLY valid JSON, no markdown.
 
-RULES:
-1. For each commission category section, calculate subtotal of ALL orders in that section.
-2. For orders with amount >= 30: include order_no, customer_name, amount in "significant_orders" array.
-3. For orders with amount < 30: just add to "passive_total" (do NOT list individually).
-4. For Team Building Commission: only record the section total, no individual rows.
+RULES for orders in each category:
+1. If months = 1 (first month / 70% payout): record in "new_orders" array with order_no, customer_name, months, pv, amount.
+2. If months > 1 (trailing months / 30% payout / passive): do NOT list individually, just add amount to "trailing_total".
+3. If months is not present in a section (like Sales Commission Rental 100% Payout): treat all as new_orders regardless of amount.
+4. For Team Building Commission: only record the section total as "team_building_total", no individual rows.
 5. Allowances (CASH INCENTIVE, HP NEW PI, SPECIAL WS, etc): record each description + amount.
+6. Bonus Commission: treat all as new_orders (record order_no, customer_name, amount).
 
 Return this exact structure:
 {
@@ -51,10 +52,10 @@ Return this exact structure:
   "withholding_tax": number,
   "categories": [
     {
-      "name": "exact category name",
+      "name": "exact category name from PDF",
       "subtotal": number,
-      "passive_total": number,
-      "significant_orders": [
+      "trailing_total": number,
+      "new_orders": [
         { "order_no": "string", "customer_name": "string", "months": number, "pv": number, "amount": number }
       ]
     }
@@ -65,7 +66,7 @@ Return this exact structure:
   ]
 }
 
-Note: team_building_total = total of Team Building Commission section. Do not include TBC orders in categories[].
+Verification: for each category, new_orders sum + trailing_total should equal subtotal.
 Return ONLY the JSON object.`
             }
           ]
