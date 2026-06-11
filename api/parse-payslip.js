@@ -297,7 +297,6 @@ function parseCowayPayslip(text) {
   }
 
   // ── 4. Build new orders detail ──────────────────────────────
-  // Allowance per order
   const allowanceTotal = r2(allowances.reduce((s,a) => s + a.amount, 0));
   const allowancePerOrder = bonusOrders.length > 0 ? r2(allowanceTotal / bonusOrders.length) : 0;
 
@@ -315,21 +314,23 @@ function parseCowayPayslip(text) {
     new_orders_total = r2(new_orders_total + comFromPayslip);
   }
 
-  // Add TBC to passive bucket
-  passive_and_tbc_total = r2(passive_and_tbc_total + tbc_total);
+  // Passive+TBC = Total Net Payable - new orders - allowance (reverse calculation, most accurate)
+  const passive_derived = total_net_payable > 0
+    ? r2(total_net_payable - new_orders_total - allowanceTotal)
+    : passive_and_tbc_total;  // fallback if no total found
 
   // ── 5. Summary ─────────────────────────────────────────────
   const new_orders_count = bonusOrders.length;
-  const verify_total = r2(new_orders_total + allowanceTotal + passive_and_tbc_total);
+  const verify_total = r2(new_orders_total + allowanceTotal + passive_derived);
 
   return {
     distributor_code, distributor_name, period_date, member_level,
     total_net_payable, withholding_tax,
     new_orders_count,
-    new_orders_total,        // com from new orders (excl allowance)
+    new_orders_total,
     allowance_total: allowanceTotal,
     allowance_per_order: allowancePerOrder,
-    passive_and_tbc_total,   // trailing + TBC + food supplements
+    passive_and_tbc_total: passive_derived,
     tbc_total,
     allowances,
     new_orders: new_orders_detail,
