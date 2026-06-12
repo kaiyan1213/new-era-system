@@ -267,7 +267,8 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <div class="nav-links">
-      <a class="nav-link active" onclick="showPage('proxy')">Proxy Inv</a>
+      <a class="nav-link" onclick="showPage('proxy')">Proxy Inv</a>
+      <a class="nav-link" onclick="showPage('directory')">Directory</a>
       <a class="nav-link" onclick="showPage('payroll')">Payroll</a>
       <a class="nav-link" onclick="showPage('manager')">Manager Sharing</a>
       <a class="nav-link" onclick="showPage('pl')">P&amp;L</a>
@@ -385,7 +386,43 @@
     </div>
   </div>
 
-  <!-- ========== PAYROLL PAGE ========== -->
+  <!-- ========== DIRECTORY PAGE ========== -->
+  <div id="page-directory" class="hidden">
+    <div class="page-header">
+      <div>
+        <div class="page-title">Proxy Directory</div>
+        <div class="page-sub">All proxies grouped by manager — IC, relationship, HP code, monthly payment status</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <select id="dirYear" onchange="loadDirectory()">
+          <option value="2025">2025</option>
+          <option value="2026" selected>2026</option>
+        </select>
+        <select id="dirMonth" onchange="loadDirectory()">
+          <option value="1">January</option><option value="2">February</option>
+          <option value="3">March</option><option value="4">April</option>
+          <option value="5">May</option><option value="6" selected>June</option>
+          <option value="7">July</option><option value="8">August</option>
+          <option value="9">September</option><option value="10">October</option>
+          <option value="11">November</option><option value="12">December</option>
+        </select>
+        <button class="btn btn-ghost" onclick="generateUnpaidList()">📋 Unpaid List</button>
+      </div>
+    </div>
+
+    <div id="unpaidListBox" style="display:none;margin-bottom:16px;padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:600">Unpaid this month — by manager</div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" onclick="copyUnpaidList()">Copy</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('unpaidListBox').style.display='none'">Close</button>
+        </div>
+      </div>
+      <pre id="unpaidListText" style="font-family:var(--mono);font-size:12px;white-space:pre-wrap;margin:0"></pre>
+    </div>
+
+    <div id="directoryContainer"></div>
+  </div>
   <div id="page-payroll" class="hidden">
     <div class="page-header">
       <div>
@@ -896,6 +933,26 @@
           <label class="form-label">Coway Agent ID</label>
           <input type="text" id="newProxyCoway" class="form-input" placeholder="718676">
         </div>
+        <div class="form-group">
+          <label class="form-label">Manager</label>
+          <select id="newProxyManager" class="form-input">
+            <option value="">— Select —</option>
+            <option value="Kai Yan">Kai Yan</option>
+            <option value="Chloe">Chloe</option>
+            <option value="Carine">Carine</option>
+            <option value="Jess">Jess</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Relationship</label>
+          <input type="text" id="newProxyRelationship" class="form-input" placeholder="e.g. Chloe Staff, Ky Bro">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Direct (referrer)</label>
+          <input type="text" id="newProxyDirect" class="form-input" placeholder="e.g. Chloe, Ky">
+        </div>
       </div>
     </div>
     <div class="form-actions">
@@ -1366,7 +1423,7 @@ function fmt(n) { return 'RM ' + parseFloat(n || 0).toLocaleString('en-MY', {min
 function fmtNum(n) { return parseFloat(n || 0).toLocaleString('en-MY', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 
 function showPage(page) {
-  ['proxy','payroll','manager','pl','export','audit','upload','breakdown','setup'].forEach(p => {
+  ['proxy','payroll','manager','pl','export','audit','upload','breakdown','setup','directory'].forEach(p => {
     const el = document.getElementById(`page-${p}`);
     if (el) el.classList.add('hidden');
   });
@@ -1381,6 +1438,7 @@ function showPage(page) {
   if (page === 'audit') loadAuditLog();
   if (page === 'breakdown') loadBreakdown();
   if (page === 'setup') loadSetup();
+  if (page === 'directory') loadDirectory();
 }
 
 function showToast(msg, type = 'success') {
@@ -1399,7 +1457,7 @@ let proxyList = [];
 
 async function loadProxies() {
   try {
-    proxyList = await sb('proxy_accounts', { filter: 'is_active=eq.true', select: 'id,name,ic_number,channel,coway_id,bank_name,bank_account' });
+    proxyList = await sb('proxy_accounts', { filter: 'is_active=eq.true', select: 'id,name,ic_number,channel,coway_id,bank_name,bank_account,manager,relationship,direct' });
     return proxyList;
   } catch(e) { return []; }
 }
@@ -1416,7 +1474,7 @@ async function loadInvoices() {
   try {
     await loadProxies();
     const invoices = await sb('proxy_invoices', {
-      filter, select: 'id,proxy_id,year,month,coway_payslip_amount,invoice_amount,proxy_profit,invoice_number,status,notes'
+      filter, select: 'id,proxy_id,year,month,coway_payslip_amount,invoice_amount,proxy_profit,invoice_number,status,notes,payment_date'
     });
 
     let filtered = invoices;
@@ -1477,7 +1535,7 @@ async function loadInvoices() {
               </div>
             </div>
           </td>
-          <td><span class="badge badge-${inv.status}">${inv.status}</span></td>
+          <td><span class="badge badge-${inv.status}">${inv.status}</span>${inv.payment_date ? `<div class="td-muted" style="margin-top:2px">${inv.payment_date}</div>` : ''}</td>
           <td>
             <div style="display:flex;gap:4px">
               <button class="btn btn-ghost btn-sm" onclick="previewInvoice('${inv.id}')">Preview</button>
@@ -1503,6 +1561,9 @@ async function saveProxy() {
     name: document.getElementById('newProxyName').value,
     ic_number: document.getElementById('newProxyIC').value,
     coway_id: document.getElementById('newProxyCoway').value,
+    manager: document.getElementById('newProxyManager').value,
+    relationship: document.getElementById('newProxyRelationship').value,
+    direct: document.getElementById('newProxyDirect').value,
     channel: 'OTHER',
   };
   if (!body.name) return showToast('Name is required', 'error');
@@ -1620,13 +1681,14 @@ async function saveInvoice() {
 async function markPaid(id) {
   try {
     const url = `${SUPABASE_URL}/rest/v1/proxy_invoices?id=eq.${id}`;
+    const today = new Date().toISOString().slice(0,10);
     await fetch(url, {
       method: 'PATCH',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'paid' })
+      body: JSON.stringify({ status: 'paid', payment_date: today })
     });
     showToast('Marked as paid');
-    await logAudit('UPDATE', 'proxy_invoices', `Marked invoice ${id} as paid`);
+    await logAudit('UPDATE', 'proxy_invoices', `Marked invoice ${id} as paid (payment date: ${today})`);
     loadInvoices();
   } catch(e) { showToast('Error', 'error'); }
 }
@@ -1637,6 +1699,125 @@ async function deleteInvoice(id) {
   showToast('Deleted');
   await logAudit('DELETE', 'proxy_invoices', `Deleted invoice id: ${id}`);
   loadInvoices();
+}
+
+// ============ DIRECTORY ============
+
+const MANAGER_ORDER = ['Kai Yan', 'Chloe', 'Carine', 'Jess'];
+let directoryInvoiceMap = {}; // proxy_id -> invoice row for selected year/month
+
+async function loadDirectory() {
+  const year = parseInt(document.getElementById('dirYear').value);
+  const month = parseInt(document.getElementById('dirMonth').value);
+  const container = document.getElementById('directoryContainer');
+  container.innerHTML = `<div class="empty"><div class="empty-text">Loading...</div></div>`;
+
+  try {
+    await loadProxies();
+    const invoices = await sb('proxy_invoices', {
+      filter: `year=eq.${year}&month=eq.${month}`,
+      select: 'id,proxy_id,coway_payslip_amount,invoice_amount,status,payment_date,invoice_number'
+    });
+    directoryInvoiceMap = {};
+    invoices.forEach(inv => { directoryInvoiceMap[inv.proxy_id] = inv; });
+
+    // Group proxies by manager
+    const groups = {};
+    MANAGER_ORDER.forEach(m => groups[m] = []);
+    groups['Unassigned'] = [];
+    proxyList.forEach(p => {
+      const m = MANAGER_ORDER.includes(p.manager) ? p.manager : 'Unassigned';
+      groups[m].push(p);
+    });
+
+    const sections = [...MANAGER_ORDER, 'Unassigned'].map(m => {
+      const people = groups[m];
+      if (!people.length) return '';
+      const rows = people.map(p => {
+        const inv = directoryInvoiceMap[p.id];
+        const payslip = inv ? fmt(inv.coway_payslip_amount) : '—';
+        const invoiced = inv ? fmt(inv.invoice_amount) : '—';
+        const paid = inv && inv.payment_date;
+        const paymentCell = paid
+          ? `<span class="badge badge-paid">${inv.payment_date}</span>`
+          : inv
+            ? `<button class="btn btn-green btn-sm" onclick="markDirectoryPaid('${inv.id}')">Mark Paid</button>`
+            : `<span class="td-muted">no invoice</span>`;
+        return `
+          <tr>
+            <td><div class="td-name">${p.name}</div><div class="td-muted">${p.ic_number || '—'}</div></td>
+            <td class="td-muted">${p.relationship || '—'}</td>
+            <td class="td-mono">${p.coway_id || '—'}</td>
+            <td class="td-muted">${p.direct || '—'}</td>
+            <td class="td-mono">${payslip}</td>
+            <td class="td-mono" style="color:var(--accent)">${invoiced}</td>
+            <td>${paymentCell}</td>
+          </tr>`;
+      }).join('');
+
+      return `
+        <div class="table-wrap" style="margin-bottom:20px">
+          <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">${m}</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Name / IC</th>
+                <th>Relationship</th>
+                <th>HP Code</th>
+                <th>Direct</th>
+                <th>Coway Payslip</th>
+                <th>Invoiced (NEC)</th>
+                <th>Payment</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    }).join('');
+
+    container.innerHTML = sections || `<div class="empty"><div class="empty-text">No proxies found. Add proxies with a Manager assigned.</div></div>`;
+  } catch(e) {
+    console.error(e);
+    container.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading directory: ${e.message}</div></div>`;
+  }
+}
+
+async function markDirectoryPaid(invoiceId) {
+  await markPaid(invoiceId);
+  loadDirectory();
+}
+
+function generateUnpaidList() {
+  const groups = {};
+  MANAGER_ORDER.forEach(m => groups[m] = []);
+  groups['Unassigned'] = [];
+
+  proxyList.forEach(p => {
+    const inv = directoryInvoiceMap[p.id];
+    const isPaid = inv && inv.payment_date;
+    if (!isPaid) {
+      const m = MANAGER_ORDER.includes(p.manager) ? p.manager : 'Unassigned';
+      groups[m].push(p.name);
+    }
+  });
+
+  let text = '';
+  [...MANAGER_ORDER, 'Unassigned'].forEach(m => {
+    if (!groups[m].length) return;
+    text += `${m}:\n`;
+    groups[m].forEach(name => { text += `- ${name}\n`; });
+    text += `\n`;
+  });
+
+  if (!text) text = 'Everyone has paid for this month. 🎉';
+
+  document.getElementById('unpaidListText').textContent = text.trim();
+  document.getElementById('unpaidListBox').style.display = 'block';
+}
+
+function copyUnpaidList() {
+  const text = document.getElementById('unpaidListText').textContent;
+  navigator.clipboard.writeText(text).then(() => showToast('Copied to clipboard'));
 }
 
 function buildInvoiceHTML(inv, proxy) {
@@ -2223,9 +2404,16 @@ CREATE TABLE IF NOT EXISTS proxy_accounts (
   bank_account text,
   coway_id text,
   channel text,
+  manager text,
+  relationship text,
+  direct text,
   is_active boolean DEFAULT true,
   created_at timestamptz DEFAULT now()
 );
+
+ALTER TABLE proxy_accounts ADD COLUMN IF NOT EXISTS manager text;
+ALTER TABLE proxy_accounts ADD COLUMN IF NOT EXISTS relationship text;
+ALTER TABLE proxy_accounts ADD COLUMN IF NOT EXISTS direct text;
 
 CREATE TABLE IF NOT EXISTS proxy_invoices (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -2237,9 +2425,12 @@ CREATE TABLE IF NOT EXISTS proxy_invoices (
   proxy_profit numeric(10,2) GENERATED ALWAYS AS (coway_payslip_amount - invoice_amount) STORED,
   invoice_number text,
   status text DEFAULT 'draft',
+  payment_date date,
   notes text,
   created_at timestamptz DEFAULT now()
 );
+
+ALTER TABLE proxy_invoices ADD COLUMN IF NOT EXISTS payment_date date;
 
 CREATE TABLE IF NOT EXISTS nec_staff (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
