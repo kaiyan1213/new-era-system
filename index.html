@@ -308,6 +308,7 @@
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost" onclick="openAddProxyModal()">+ Add Proxy</button>
+        <button class="btn btn-ghost" onclick="printAllInvoices()">🖨 Print All Invoices (this filter)</button>
         <button class="btn btn-ghost" onclick="showPage('upload')" style="color:var(--yellow);border-color:rgba(245,158,11,0.3)">⬆ Bulk Upload Payslips</button>
         <button class="btn btn-primary" onclick="openNewInvoiceModal()">New Invoice Entry</button>
       </div>
@@ -353,13 +354,6 @@
           <option value="9">September</option><option value="10">October</option>
           <option value="11">November</option><option value="12">December</option>
         </select>
-        <select id="filterChannel" onchange="loadInvoices()">
-          <option value="">All Channels</option>
-          <option value="DM">DM</option>
-          <option value="TM">TM</option>
-          <option value="XHS">XHS</option>
-          <option value="OTHER">Other</option>
-        </select>
         <select id="filterStatus" onchange="loadInvoices()">
           <option value="">All Status</option>
           <option value="draft">Draft</option>
@@ -376,7 +370,6 @@
         <thead>
           <tr>
             <th>Proxy Name</th>
-            <th>Channel</th>
             <th>Month</th>
             <th>Coway Payslip</th>
             <th>Invoice Amount</th>
@@ -386,7 +379,7 @@
           </tr>
         </thead>
         <tbody id="invoiceTableBody">
-          <tr><td colspan="8"><div class="empty"><div class="empty-icon">📄</div><div class="empty-text">Loading invoices...</div></div></td></tr>
+          <tr><td colspan="7"><div class="empty"><div class="empty-icon">📄</div><div class="empty-text">Loading invoices...</div></div></td></tr>
         </tbody>
       </table>
     </div>
@@ -1407,7 +1400,6 @@ async function loadProxies() {
 async function loadInvoices() {
   const year = document.getElementById('filterYear').value;
   const month = document.getElementById('filterMonth').value;
-  const channel = document.getElementById('filterChannel').value;
   const status = document.getElementById('filterStatus').value;
 
   let filter = `year=eq.${year}`;
@@ -1420,12 +1412,7 @@ async function loadInvoices() {
       filter, select: 'id,proxy_id,year,month,coway_payslip_amount,invoice_amount,proxy_profit,invoice_number,status,notes'
     });
 
-    // Filter by channel if needed
     let filtered = invoices;
-    if (channel) {
-      const channelProxies = proxyList.filter(p => p.channel === channel).map(p => p.id);
-      filtered = invoices.filter(i => channelProxies.includes(i.proxy_id));
-    }
 
     // Update stats
     const allYearInvoices = await sb('proxy_invoices', { filter: `year=eq.${year}`, select: 'invoice_amount,status' });
@@ -1460,19 +1447,18 @@ async function loadInvoices() {
     // Render table
     const tbody = document.getElementById('invoiceTableBody');
     if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-icon">📄</div><div class="empty-text">No invoices found for this filter</div></div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-icon">📄</div><div class="empty-text">No invoices found for this filter</div></div></td></tr>`;
       return;
     }
 
     tbody.innerHTML = filtered.map(inv => {
-      const proxy = proxyList.find(p => p.id === inv.proxy_id) || { name: 'Unknown', channel: 'DM' };
+      const proxy = proxyList.find(p => p.id === inv.proxy_id) || { name: 'Unknown' };
       const ytdProfit = Object.values(ytdMap[inv.proxy_id] || {}).reduce((s,v) => s + v, 0);
       const pct = Math.min(100, (ytdProfit / 5000) * 100);
       const cls = pct >= 100 ? 'over' : pct >= 80 ? 'warn' : 'safe';
       return `
         <tr>
           <td><div class="td-name">${proxy.name}</div><div class="td-muted">${proxy.coway_id || '—'}</div></td>
-          <td><span class="badge badge-${(proxy.channel||'dm').toLowerCase()}">${proxy.channel}</span></td>
           <td class="td-mono">${MONTHS[inv.month]} ${inv.year}</td>
           <td class="td-mono">${fmt(inv.coway_payslip_amount)}</td>
           <td class="td-mono" style="color:var(--accent)">${fmt(inv.invoice_amount)}</td>
@@ -1496,7 +1482,7 @@ async function loadInvoices() {
     }).join('');
   } catch(e) {
     console.error(e);
-    document.getElementById('invoiceTableBody').innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading data. Check Setup tab to create tables first.</div></div></td></tr>`;
+    document.getElementById('invoiceTableBody').innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading data. Check Setup tab to create tables first.</div></div></td></tr>`;
     document.getElementById('setupBanner').style.display = 'flex';
   }
 }
@@ -1527,7 +1513,7 @@ async function openNewInvoiceModal() {
   await loadProxies();
   const sel = document.getElementById('invProxy');
   sel.innerHTML = '<option value="">Select proxy...</option>' +
-    proxyList.map(p => `<option value="${p.id}">${p.name} (${p.channel})</option>`).join('');
+    proxyList.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
   openModal('modalNewInvoice');
   await refreshInvoiceNumber();
 }
@@ -1646,11 +1632,8 @@ async function deleteInvoice(id) {
   loadInvoices();
 }
 
-async function previewInvoice(id) {
-  try {
-    const [inv] = await sb('proxy_invoices', { filter: `id=eq.${id}` });
-    const proxy = proxyList.find(p => p.id === inv.proxy_id) || {};
-    const html = `
+function buildInvoiceHTML(inv, proxy) {
+  return `
       <div class="invoice-preview">
         <div class="inv-header">
           <div>
@@ -1691,10 +1674,9 @@ async function previewInvoice(id) {
           This invoice is issued by New Era Consulting Enterprise for marketing services rendered.
         </div>
       </div>`;
-    const win = window.open('', '_blank', 'width=700,height=800');
-    win.document.write(`<html><head><title>Invoice ${inv.invoice_number}</title>
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
-      <style>body{margin:40px;background:#f5f5f5;font-family:Inter,sans-serif}
+}
+
+const INVOICE_PRINT_STYLE = `
       .invoice-preview{background:#fff;padding:40px;max-width:700px;margin:0 auto;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.1)}
       .inv-header{display:flex;justify-content:space-between;margin-bottom:32px}
       .inv-company-name{font-size:18px;font-weight:800;color:#1a1a2e}
@@ -1713,10 +1695,68 @@ async function previewInvoice(id) {
       .inv-total-box{background:#f0f4ff;border-radius:8px;padding:16px 20px;min-width:200px}
       .inv-total-label{font-size:12px;color:#666}
       .inv-total-amount{font-size:22px;font-weight:800;color:#4f7cff;margin-top:4px;font-family:'JetBrains Mono',monospace}
-      .inv-footer{margin-top:32px;padding-top:16px;border-top:1px solid #eee;font-size:11px;color:#999}
+      .inv-footer{margin-top:32px;padding-top:16px;border-top:1px solid #eee;font-size:11px;color:#999}`;
+
+async function previewInvoice(id) {
+  try {
+    const [inv] = await sb('proxy_invoices', { filter: `id=eq.${id}` });
+    const proxy = proxyList.find(p => p.id === inv.proxy_id) || {};
+    const html = buildInvoiceHTML(inv, proxy);
+    const win = window.open('', '_blank', 'width=700,height=800');
+    win.document.write(`<html><head><title>Invoice ${inv.invoice_number}</title>
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
+      <style>body{margin:40px;background:#f5f5f5;font-family:Inter,sans-serif}
+      ${INVOICE_PRINT_STYLE}
       @media print{body{margin:0;background:#fff}.invoice-preview{box-shadow:none}}
       </style></head><body>${html}<br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#4f7cff;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
   } catch(e) { showToast('Error loading invoice', 'error'); }
+}
+
+// Opens a single print window containing ALL invoices currently shown in the
+// Proxy Invoice table (respecting the active Year/Month/Status filters), each
+// on its own page. Admin can then "Print / Save as PDF" once for everything.
+async function printAllInvoices() {
+  const year = document.getElementById('filterYear').value;
+  const month = document.getElementById('filterMonth').value;
+  const status = document.getElementById('filterStatus').value;
+
+  let filter = `year=eq.${year}`;
+  if (month) filter += `&month=eq.${month}`;
+  if (status) filter += `&status=eq.${status}`;
+
+  try {
+    await loadProxies();
+    const invoices = await sb('proxy_invoices', {
+      filter, select: 'id,proxy_id,year,month,coway_payslip_amount,invoice_amount,proxy_profit,invoice_number,status,notes'
+    });
+    if (!invoices.length) return showToast('No invoices to print for this filter', 'error');
+
+    invoices.sort((a,b) => {
+      const pa = proxyList.find(p => p.id === a.proxy_id)?.name || '';
+      const pb = proxyList.find(p => p.id === b.proxy_id)?.name || '';
+      return pa.localeCompare(pb);
+    });
+
+    const pages = invoices.map(inv => {
+      const proxy = proxyList.find(p => p.id === inv.proxy_id) || {};
+      return `<div class="invoice-page">${buildInvoiceHTML(inv, proxy)}</div>`;
+    }).join('');
+
+    const win = window.open('', '_blank');
+    win.document.write(`<html><head><title>All Invoices</title>
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
+      <style>body{margin:0;background:#f5f5f5;font-family:Inter,sans-serif}
+      ${INVOICE_PRINT_STYLE}
+      .invoice-page{padding:40px;page-break-after:always}
+      .invoice-page:last-child{page-break-after:auto}
+      @media print{body{background:#fff}.invoice-page{padding:0;box-shadow:none}.invoice-preview{box-shadow:none}}
+      #printBtn{position:fixed;top:16px;right:16px;padding:10px 24px;background:#4f7cff;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;z-index:999}
+      @media print{#printBtn{display:none}}
+      </style></head><body>
+      <button id="printBtn" onclick="window.print()">🖨 Print / Save All as PDF (${invoices.length} invoices)</button>
+      ${pages}
+      </body></html>`);
+  } catch(e) { showToast('Error generating invoices: ' + e.message, 'error'); }
 }
 
 // ============ PAYROLL ============
