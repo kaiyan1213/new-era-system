@@ -137,6 +137,7 @@ function parseCowayPayslip(text) {
     if (sec.name === 'Allowance') {
       // From raw text: amounts appear BEFORE the Allowance header in the Food Supplements section
       // Structure is: " 6,100.00\n 2,000.00\n 4,100.00\nAmount\nDescription\nAllowance\nSPECIAL WS\nHP NEW PI"
+      // (total followed by individual amounts, one per label)
       // So by the time we reach Allowance section, the amounts are already parsed above
       // Instead, look BACKWARDS from Allowance header for the amounts, then match with descriptions
       const descLabels = [];
@@ -151,10 +152,20 @@ function parseCowayPayslip(text) {
         if (m) amountsBefore.unshift(pn(m[1]));
         else if (lines[k].includes('Food Supplements') || lines[k].includes('Order No')) break;
       }
-      // Remove total (largest) and keep individual amounts
-      if (amountsBefore.length > 1) {
+      // The first amount is the total/subtotal; the remaining amounts (one per label) are the individual items.
+      // amountsBefore.length should be descLabels.length + 1 (total + each item).
+      // Drop the leading total, keep the rest in order — this works even when an
+      // individual amount happens to equal the total (single-item case).
+      if (amountsBefore.length === descLabels.length + 1) {
+        const indivAmounts = amountsBefore.slice(1);
+        descLabels.forEach((desc, i) => {
+          allowances.push({ description: desc, amount: indivAmounts[i] });
+        });
+      } else if (amountsBefore.length > 1) {
+        // Fallback to old "drop one max value" approach for mismatched counts
         const maxVal = Math.max(...amountsBefore);
-        const indivAmounts = amountsBefore.filter(n => n !== maxVal);
+        const maxIdx = amountsBefore.indexOf(maxVal);
+        const indivAmounts = amountsBefore.filter((_, i) => i !== maxIdx);
         descLabels.forEach((desc, i) => {
           if (i < indivAmounts.length) allowances.push({ description: desc, amount: indivAmounts[i] });
         });
@@ -275,14 +286,29 @@ function parseCowayPayslip(text) {
           passive_and_tbc_total = r2(passive_and_tbc_total + amt);
         }
       });
+    } else if (isOtherInstall) {
+      // The "1st Installment Month" and "Other Installment Month" sections share one
+      // combined block of numRows + orderRows (their headers appear back-to-back in
+      // the PDF text, so secBounds collapses them into this single section).
+      // months=1 rows = this month's 1st-installment payout for NEW orders -> pair
+      //   positionally with bonusOrders (same order they appear in Bonus Commission).
+      // months>1 rows = "Other Installment" trailing payouts for OLD orders -> passive.
+      const newAmt1st = numRows.filter(n => n.months === 1).map(n => n.amount);
+      const trailingOther = numRows.filter(n => n.months > 1).reduce((s,n) => r2(s+n.amount), 0);
+      passive_and_tbc_total = r2(passive_and_tbc_total + trailingOther);
+      newAmt1st.forEach((amt, idx) => {
+        if (idx < bonusOrders.length) {
+          orderAmounts[bonusOrders[idx].order_no] = r2((orderAmounts[bonusOrders[idx].order_no] || 0) + amt);
+        } else {
+          passive_and_tbc_total = r2(passive_and_tbc_total + amt);
+        }
+      });
     } else {
       const count = Math.min(orderRows.length, numRows.length);
       for (let k = 0; k < count; k++) {
         const o = orderRows[k];
         const n = numRows[k];
-        if (isOtherInstall) {
-          passive_and_tbc_total = r2(passive_and_tbc_total + n.amount);
-        } else if ((is100 || o.pct === null) && newOrderNos.has(o.order_no)) {
+        if ((is100 || o.pct === null) && newOrderNos.has(o.order_no)) {
           orderAmounts[o.order_no] = r2((orderAmounts[o.order_no] || 0) + n.amount);
         } else {
           passive_and_tbc_total = r2(passive_and_tbc_total + n.amount);
