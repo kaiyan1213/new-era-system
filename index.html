@@ -913,14 +913,14 @@
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Year</label>
-          <select id="invYear" class="form-input">
+          <select id="invYear" class="form-input" onchange="refreshInvoiceNumber()">
             <option value="2025">2025</option>
             <option value="2026" selected>2026</option>
           </select>
         </div>
         <div class="form-group">
           <label class="form-label">Month</label>
-          <select id="invMonth" class="form-input">
+          <select id="invMonth" class="form-input" onchange="refreshInvoiceNumber()">
             <option value="1">January</option><option value="2">February</option>
             <option value="3">March</option><option value="4">April</option>
             <option value="5">May</option><option value="6" selected>June</option>
@@ -1529,6 +1529,34 @@ async function openNewInvoiceModal() {
   sel.innerHTML = '<option value="">Select proxy...</option>' +
     proxyList.map(p => `<option value="${p.id}">${p.name} (${p.channel})</option>`).join('');
   openModal('modalNewInvoice');
+  await refreshInvoiceNumber();
+}
+
+// Returns the next sequential invoice number for a given year/month, e.g. NEC-2026-06-001
+async function getNextInvoiceNumber(year, month) {
+  try {
+    const records = await sb('proxy_invoices', {
+      filter: `year=eq.${year}&month=eq.${month}`,
+      select: 'invoice_number'
+    });
+    let maxSeq = 0;
+    records.forEach(r => {
+      const m = (r.invoice_number || '').match(/-(\d{3})$/);
+      if (m) maxSeq = Math.max(maxSeq, parseInt(m[1]));
+    });
+    const next = maxSeq + 1;
+    return `NEC-${year}-${String(month).padStart(2,'0')}-${String(next).padStart(3,'0')}`;
+  } catch(e) {
+    return `NEC-${year}-${String(month).padStart(2,'0')}-001`;
+  }
+}
+
+// Auto-fills the invoice number field in the New Invoice modal based on selected year/month
+async function refreshInvoiceNumber() {
+  const year = parseInt(document.getElementById('invYear').value);
+  const month = parseInt(document.getElementById('invMonth').value);
+  if (!year || !month) return;
+  document.getElementById('invNumber').value = await getNextInvoiceNumber(year, month);
 }
 
 let currentYTD = 0;
@@ -2505,9 +2533,15 @@ async function confirmBulkSave() {
   const matched = parsedPayslips.filter(r => r.matched && r.total_net_payable > 0);
   if (!matched.length) return showToast('No matched payslips to save', 'error');
 
+  // Determine starting sequence number for this year/month, then increment per invoice
+  const startNumber = await getNextInvoiceNumber(year, month);
+  let seq = parseInt(startNumber.match(/-(\d{3})$/)[1]);
+
   let saved = 0;
   for (const p of matched) {
     try {
+      const invoiceNumber = `NEC-${year}-${String(month).padStart(2,'0')}-${String(seq).padStart(3,'0')}`;
+      seq++;
       // Save invoice
       await sb('proxy_invoices', {
         method: 'POST',
@@ -2516,7 +2550,7 @@ async function confirmBulkSave() {
           year, month,
           coway_payslip_amount: p.total_net_payable,
           invoice_amount: p.total_net_payable, // default = full amount, admin can edit
-          invoice_number: `NEC-${year}-${String(month).padStart(2,'0')}-${(p.proxy?.coway_id || 'XX')}`,
+          invoice_number: invoiceNumber,
           status: 'draft',
           notes: `Auto-imported from PDF: ${p.filename}`
         }
