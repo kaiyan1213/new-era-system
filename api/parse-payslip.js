@@ -330,13 +330,22 @@ function parseCowayPayslip(text) {
       // The "1st Installment Month" and "Other Installment Month" sections share one
       // combined block of numRows + orderRows (their headers appear back-to-back in
       // the PDF text, so secBounds collapses them into this single section).
-      // months=1 rows = this month's 1st-installment payout for NEW orders -> pair
-      //   (continuing the same global running index as the 100%/70% sections).
-      // months>1 rows = "Other Installment" trailing payouts for OLD orders -> passive.
+      //
+      // IMPORTANT: this section's own orderRows (e.g. KOH HUAN BUN, LEE KAH FEI) are
+      // NOT necessarily new orders from THIS month — they're often old orders now in
+      // their "Other Installment" (trailing) phase, whose months=1 numRow here is
+      // just a coincidental format match, not a new-order payout. Only pair months=1
+      // rows with bonusOrders (via the global running index) when this section's
+      // orders are themselves in newOrderNos. Otherwise all numRows -> passive.
       const newAmt1st = numRows.filter(n => n.months === 1).map(n => n.amount);
       const trailingOther = numRows.filter(n => n.months > 1).reduce((s,n) => r2(s+n.amount), 0);
       passive_and_tbc_total = r2(passive_and_tbc_total + trailingOther);
-      newAmt1st.forEach(pairMonths1);
+      const sectionHasNewOrders = orderRows.some(o => newOrderNos.has(o.order_no));
+      if (sectionHasNewOrders) {
+        newAmt1st.forEach(pairMonths1);
+      } else {
+        newAmt1st.forEach(amt => { passive_and_tbc_total = r2(passive_and_tbc_total + amt); });
+      }
     } else {
       const count = Math.min(orderRows.length, numRows.length);
       for (let k = 0; k < count; k++) {
