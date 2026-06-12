@@ -22,3 +22,5 @@ Internal management system for New Era Consulting Enterprise (202503018811).
 
 ## Deployment
 Hosted on Vercel. Push to `main` branch to auto-deploy.
+
+<!-- deploy test -->
