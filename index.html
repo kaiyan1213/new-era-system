@@ -941,6 +941,7 @@
             <option value="Chloe">Chloe</option>
             <option value="Carine">Carine</option>
             <option value="Jess">Jess</option>
+            <option value="Zehao">Zehao</option>
           </select>
         </div>
       </div>
@@ -958,6 +959,57 @@
     <div class="form-actions">
       <button class="btn btn-ghost" onclick="closeModal('modalAddProxy')">Cancel</button>
       <button class="btn btn-primary" onclick="saveProxy()">Add Proxy</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Proxy Modal -->
+<div class="modal-bg hidden" id="modalEditProxy">
+  <div class="modal">
+    <div class="modal-title">Edit Proxy Account</div>
+    <input type="hidden" id="editProxyId">
+    <div class="form-grid">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Full Name (as per IC)</label>
+          <input type="text" id="editProxyName" class="form-input" placeholder="Ahmad bin Ali">
+        </div>
+        <div class="form-group">
+          <label class="form-label">IC Number</label>
+          <input type="text" id="editProxyIC" class="form-input" placeholder="900101-14-1234">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Coway Agent ID</label>
+          <input type="text" id="editProxyCoway" class="form-input" placeholder="718676">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Manager</label>
+          <select id="editProxyManager" class="form-input">
+            <option value="">— Select —</option>
+            <option value="Kai Yan">Kai Yan</option>
+            <option value="Chloe">Chloe</option>
+            <option value="Carine">Carine</option>
+            <option value="Jess">Jess</option>
+            <option value="Zehao">Zehao</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Relationship</label>
+          <input type="text" id="editProxyRelationship" class="form-input" placeholder="e.g. Chloe Staff, Ky Bro">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Direct (referrer)</label>
+          <input type="text" id="editProxyDirect" class="form-input" placeholder="e.g. Chloe, Ky">
+        </div>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalEditProxy')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEditProxy()">Save Changes</button>
     </div>
   </div>
 </div>
@@ -1703,7 +1755,7 @@ async function deleteInvoice(id) {
 
 // ============ DIRECTORY ============
 
-const MANAGER_ORDER = ['Kai Yan', 'Chloe', 'Carine', 'Jess'];
+const MANAGER_ORDER = ['Kai Yan', 'Chloe', 'Carine', 'Jess', 'Zehao'];
 let directoryInvoiceMap = {}; // proxy_id -> invoice row for selected year/month
 
 async function loadDirectory() {
