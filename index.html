@@ -2675,7 +2675,7 @@ async function handlePDFFiles(files) {
     document.getElementById('uploadConfirmBar').style.display = 'flex';
     const matched = parsedPayslips.filter(r => r.matched).length;
     document.getElementById('uploadConfirmText').textContent = `${matched} of ${total} payslips matched to proxy accounts`;
-    document.getElementById('uploadConfirmSub').textContent = `Unmatched entries will be skipped. Review above then confirm.`;
+    document.getElementById('uploadConfirmSub').textContent = `Unmatched entries will be skipped. If a proxy already has an invoice for this Year/Month, it will be overwritten with these new numbers. Review above then confirm.`;
   }
 }
 
@@ -2828,11 +2828,36 @@ async function confirmBulkSave() {
   const startNumber = await getNextInvoiceNumber(year, month);
   let seq = parseInt(startNumber.match(/-(\d{3})$/)[1]);
 
-  let saved = 0;
+  let created = 0;
+  let updated = 0;
   for (const p of matched) {
     try {
-      const invoiceNumber = `NEC-${year}-${String(month).padStart(2,'0')}-${String(seq).padStart(3,'0')}`;
-      seq++;
+      // Check if an invoice already exists for this proxy/year/month — if so,
+      // re-upload should OVERWRITE it (e.g. after a parser bug fix) rather than
+      // fail silently on the unique constraint or create a duplicate.
+      const existing = await sb('proxy_invoices', {
+        filter: `proxy_id=eq.${p.proxy_id}&year=eq.${year}&month=eq.${month}`,
+        select: 'id,invoice_number,status,payment_date'
+      });
+
+      let invoiceNumber, prevStatus = 'draft', prevPaymentDate = null;
+      if (existing.length > 0) {
+        // Reuse the existing invoice number so other invoices' sequence numbers
+        // for this month don't shift around. Also preserve paid/payment_date —
+        // re-importing to fix a parser bug shouldn't undo a "Mark Paid" that
+        // already happened.
+        invoiceNumber = existing[0].invoice_number;
+        prevStatus = existing[0].status || 'draft';
+        prevPaymentDate = existing[0].payment_date || null;
+        await sbDelete('proxy_invoices', `id=eq.${existing[0].id}`);
+        await sbDelete('nec_payslip_breakdown', `proxy_id=eq.${p.proxy_id}&year=eq.${year}&month=eq.${month}`);
+        updated++;
+      } else {
+        invoiceNumber = `NEC-${year}-${String(month).padStart(2,'0')}-${String(seq).padStart(3,'0')}`;
+        seq++;
+        created++;
+      }
+
       const invoiceAmount = Math.round(p.total_net_payable * (1 - deductPct/100) * 100) / 100;
       // Save invoice
       await sb('proxy_invoices', {
@@ -2843,7 +2868,8 @@ async function confirmBulkSave() {
           coway_payslip_amount: p.total_net_payable,
           invoice_amount: invoiceAmount, // = payslip amount minus the global deduction %, admin can edit per-invoice afterwards
           invoice_number: invoiceNumber,
-          status: 'draft',
+          status: prevStatus,
+          payment_date: prevPaymentDate,
           notes: `Auto-imported from PDF: ${p.filename} (-${deductPct}%)`
         }
       });
@@ -2866,13 +2892,15 @@ async function confirmBulkSave() {
       });
 
       await logAudit('CREATE', 'proxy_invoices', `Bulk import: ${p.distributor_name} — ${MONTHS[month]} ${year} — RM${p.total_net_payable}`);
-      saved++;
     } catch(e) {
       console.error('Save error for', p.distributor_name, e.message);
     }
   }
 
-  showToast(`Saved ${saved} invoices ✓`);
+  const parts = [];
+  if (created) parts.push(`${created} new`);
+  if (updated) parts.push(`${updated} updated (overwritten)`);
+  showToast(`Saved: ${parts.join(', ')} ✓`);
   clearUpload();
   showPage('proxy');
 }
