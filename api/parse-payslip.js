@@ -100,6 +100,30 @@ function parseCowayPayslip(text) {
     }
   });
 
+  // ── 3b. 100% Payout new orders with (SHI)/(Extrade)/etc prefix before the name ──
+  // Coway sometimes prefixes the customer name with "(SHI)" or "(Extrade)" for
+  // certain orders, e.g. "10888859 (SHI)LEONG TUCK HOE15". The normal order-row
+  // regex (^(\d{7,})([A-Z].+?)...) requires the character right after the order
+  // number to be an uppercase letter, so these prefixed rows are never matched
+  // as order rows. Their commission amount also appears separately as a
+  // standalone "pv amount" 2-token row BEFORE the "100% Payout" section header
+  // (e.g. "1,230 184.50"), in the same order as these prefixed order rows.
+  const prefixedOrderRows = [];
+  for (const l of lines) {
+    const pm = l.match(/^(\d{7,})\s*\([A-Za-z]+\)([A-Z].+?)(\d{1,2})\s*$/);
+    if (pm) prefixedOrderRows.push({ order_no: pm[1], customer_name: pm[2].trim() });
+  }
+  const preHeaderAmounts = [];
+  for (const l of lines) {
+    const am = l.match(/^([\d,]+)\s+([\d,]+\.\d{2})$/);
+    if (am && pn(am[1]) > 100) preHeaderAmounts.push(pn(am[2]));
+  }
+  prefixedOrderRows.forEach((o, idx) => {
+    if (idx < preHeaderAmounts.length && newOrderNos.has(o.order_no)) {
+      orderAmounts[o.order_no] = r2((orderAmounts[o.order_no] || 0) + preHeaderAmounts[idx]);
+    }
+  });
+
   const SECTION_STARTS = [
     'Sales Commission (Rental - 100% Payout)',
     'Sales Commission (Rental - 70% Payout)',
