@@ -153,6 +153,25 @@ function parseCowayPayslip(text) {
   const allowances = [];
   const new_orders_detail = []; // { order_no, customer_name, com_from_payslip }
 
+  // Global running index for pairing "months=1" rows with bonusOrders, in document
+  // order. A new order's current-month payout can physically land in the 100%
+  // Payout section, the 70% Payout section, or the 1st-Installment section
+  // depending on how Coway lays out the PDF — but across the WHOLE payslip there
+  // is exactly one months=1 row per bonus order, in the same relative order as
+  // bonusOrders. Using one running index (instead of restarting at 0 in each
+  // section) prevents a row that "spills over" into a later section from being
+  // mis-paired with bonusOrders[0] again.
+  let months1Idx = 0;
+  const pairMonths1 = (amt) => {
+    if (months1Idx < bonusOrders.length) {
+      const order_no = bonusOrders[months1Idx].order_no;
+      orderAmounts[order_no] = r2((orderAmounts[order_no] || 0) + amt);
+    } else {
+      passive_and_tbc_total = r2(passive_and_tbc_total + amt);
+    }
+    months1Idx++;
+  };
+
   for (let si = 0; si < secBounds.length; si++) {
     const sec = secBounds[si];
     const nextIdx = secBounds[si+1]?.idx ?? lines.length;
@@ -300,37 +319,24 @@ function parseCowayPayslip(text) {
       // months=1 rows = this month's payout for NEW orders (whether the 70% portion
       //   landed in the 70% section, or the 100% portion landed in the 100% section —
       //   Coway sometimes places a new order's current-month payout row inside the
-      //   100% Payout section even when the order itself is 70%/30% split).
+      //   100% Payout section even when the order itself is 70%/30% split, and
+      //   occasionally a months=1 row "spills over" into the next section too).
       // months>1 rows = trailing/passive payouts for OLD orders.
       const newAmt = numRows.filter(n => n.months === 1).map(n => n.amount);
       const trailing = numRows.filter(n => n.months > 1).reduce((s,n) => r2(s+n.amount), 0);
       passive_and_tbc_total = r2(passive_and_tbc_total + trailing);
-      // Assign new order amounts to bonus orders by position
-      // Both are in same sequence (new orders appear at end of each section)
-      newAmt.forEach((amt, idx) => {
-        if (idx < bonusOrders.length) {
-          orderAmounts[bonusOrders[idx].order_no] = r2((orderAmounts[bonusOrders[idx].order_no] || 0) + amt);
-        } else {
-          passive_and_tbc_total = r2(passive_and_tbc_total + amt);
-        }
-      });
+      newAmt.forEach(pairMonths1);
     } else if (isOtherInstall) {
       // The "1st Installment Month" and "Other Installment Month" sections share one
       // combined block of numRows + orderRows (their headers appear back-to-back in
       // the PDF text, so secBounds collapses them into this single section).
       // months=1 rows = this month's 1st-installment payout for NEW orders -> pair
-      //   positionally with bonusOrders (same order they appear in Bonus Commission).
+      //   (continuing the same global running index as the 100%/70% sections).
       // months>1 rows = "Other Installment" trailing payouts for OLD orders -> passive.
       const newAmt1st = numRows.filter(n => n.months === 1).map(n => n.amount);
       const trailingOther = numRows.filter(n => n.months > 1).reduce((s,n) => r2(s+n.amount), 0);
       passive_and_tbc_total = r2(passive_and_tbc_total + trailingOther);
-      newAmt1st.forEach((amt, idx) => {
-        if (idx < bonusOrders.length) {
-          orderAmounts[bonusOrders[idx].order_no] = r2((orderAmounts[bonusOrders[idx].order_no] || 0) + amt);
-        } else {
-          passive_and_tbc_total = r2(passive_and_tbc_total + amt);
-        }
-      });
+      newAmt1st.forEach(pairMonths1);
     } else {
       const count = Math.min(orderRows.length, numRows.length);
       for (let k = 0; k < count; k++) {
