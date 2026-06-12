@@ -271,15 +271,19 @@ function parseCowayPayslip(text) {
     }
 
     // Pair and accumulate
-    if (sec.name.includes('70% Payout') || sec.name.includes('Overidding')) {
-      // In 70% section: classify by months value, not positional order
-      // months=1 rows = new orders (70% payout), months>1 = trailing (30%)
-      const newAmt70 = numRows.filter(n => n.months === 1).map(n => n.amount);
-      const trailing70 = numRows.filter(n => n.months > 1).reduce((s,n) => r2(s+n.amount), 0);
-      passive_and_tbc_total = r2(passive_and_tbc_total + trailing70);
+    if (sec.name.includes('70% Payout') || sec.name.includes('Overidding') || is100) {
+      // In 70%/100% sections: classify by months value, not positional order.
+      // months=1 rows = this month's payout for NEW orders (whether the 70% portion
+      //   landed in the 70% section, or the 100% portion landed in the 100% section —
+      //   Coway sometimes places a new order's current-month payout row inside the
+      //   100% Payout section even when the order itself is 70%/30% split).
+      // months>1 rows = trailing/passive payouts for OLD orders.
+      const newAmt = numRows.filter(n => n.months === 1).map(n => n.amount);
+      const trailing = numRows.filter(n => n.months > 1).reduce((s,n) => r2(s+n.amount), 0);
+      passive_and_tbc_total = r2(passive_and_tbc_total + trailing);
       // Assign new order amounts to bonus orders by position
-      // Both are in same sequence (new orders appear at end of 70% section)
-      newAmt70.forEach((amt, idx) => {
+      // Both are in same sequence (new orders appear at end of each section)
+      newAmt.forEach((amt, idx) => {
         if (idx < bonusOrders.length) {
           orderAmounts[bonusOrders[idx].order_no] = r2((orderAmounts[bonusOrders[idx].order_no] || 0) + amt);
         } else {
