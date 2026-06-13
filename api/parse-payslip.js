@@ -375,9 +375,15 @@ function parseCowayPayslip(text) {
   // but doesn't survive text extraction). When months1Idx never reaches a given
   // bonusOrder, fall back to computing its 70% new-order amount directly from
   // its own PV (captured in bonusAmountPVs): 70% payout = PV * 15% * 70% = PV * 0.105.
+  //
+  // NOTE: orderAmounts already has an entry for every bonusOrder by this point
+  // (set during the bonus-amount pairing step above), so we can't use
+  // `order_no in orderAmounts` to detect "missing" — instead we rely on
+  // months1Idx, which tracks how many bonus orders actually received a
+  // months=1 70%-payout addition.
   for (let idx = months1Idx; idx < bonusOrders.length; idx++) {
     const order_no = bonusOrders[idx].order_no;
-    if (!(order_no in orderAmounts) && idx < bonusAmountPVs.length) {
+    if (idx < bonusAmountPVs.length) {
       const fallbackAmt = r2(bonusAmountPVs[idx] * 0.105);
       orderAmounts[order_no] = r2((orderAmounts[order_no] || 0) + fallbackAmt);
     }
