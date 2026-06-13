@@ -121,9 +121,16 @@ function parseCowayPayslip(text) {
     const am = l.match(/^([\d,]+)\s+([\d,]+\.\d{2})$/);
     if (am && pn(am[1]) > 100) preHeaderAmounts.push(pn(am[2]));
   }
+  // Orders whose current-month 100%-payout amount was already captured via the
+  // prefixedOrderRows/preHeaderAmounts pairing above. These must NOT also receive
+  // the months=1 pairing (pairMonths1) or the PV*0.105 fallback below — both of
+  // those are for the 70%-payout formula, while a prefixed "(SHI)/(Extrade)" order
+  // is a 100%-payout order whose amount = PV * 0.15 (already added in full here).
+  const prefixedPairedOrderNos = new Set();
   prefixedOrderRows.forEach((o, idx) => {
     if (idx < preHeaderAmounts.length && newOrderNos.has(o.order_no)) {
       orderAmounts[o.order_no] = r2((orderAmounts[o.order_no] || 0) + preHeaderAmounts[idx]);
+      prefixedPairedOrderNos.add(o.order_no);
     }
   });
 
@@ -166,6 +173,12 @@ function parseCowayPayslip(text) {
   // mis-paired with bonusOrders[0] again.
   let months1Idx = 0;
   const pairMonths1 = (amt) => {
+    // Skip past any bonusOrder that already received its current-month amount via
+    // the prefixedOrderRows/preHeaderAmounts path (a 100%-payout order) — that
+    // order doesn't get a *second* months=1 (70%-formula) amount.
+    while (months1Idx < bonusOrders.length && prefixedPairedOrderNos.has(bonusOrders[months1Idx].order_no)) {
+      months1Idx++;
+    }
     if (months1Idx < bonusOrders.length) {
       const order_no = bonusOrders[months1Idx].order_no;
       orderAmounts[order_no] = r2((orderAmounts[order_no] || 0) + amt);
@@ -383,6 +396,7 @@ function parseCowayPayslip(text) {
   // months=1 70%-payout addition.
   for (let idx = months1Idx; idx < bonusOrders.length; idx++) {
     const order_no = bonusOrders[idx].order_no;
+    if (prefixedPairedOrderNos.has(order_no)) continue;
     if (idx < bonusAmountPVs.length) {
       const fallbackAmt = r2(bonusAmountPVs[idx] * 0.105);
       orderAmounts[order_no] = r2((orderAmounts[order_no] || 0) + fallbackAmt);
