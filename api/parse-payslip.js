@@ -86,9 +86,12 @@ function parseCowayPayslip(text) {
   // Format: "1 pv bonus_pct amount amount" e.g. "1 1,230 9 110.70 110.70"
   // These appear right before "AmountBONUS%PVMonthStock DescType" line
   const bonusAmountRows = [];
+  const bonusAmountPVs = []; // PV for each bonus order, used as a fallback to compute
+                              // the 70% new-order amount (PV * 0.105) if that row is
+                              // missing from the text extraction entirely.
   for (const l of lines) {
     const bm = l.match(/^(\d{1,2})\s+([\d,]+)\s+(\d{1,2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})$/);
-    if (bm) bonusAmountRows.push(pn(bm[5])); // last column = bonus com
+    if (bm) { bonusAmountRows.push(pn(bm[5])); bonusAmountPVs.push(pn(bm[2])); } // last column = bonus com
   }
   // ── 3. orderAmounts map & pair bonus amounts ──────────────────
   const orderAmounts = {}; // order_no -> bonus com amount
@@ -362,6 +365,21 @@ function parseCowayPayslip(text) {
           passive_and_tbc_total = r2(passive_and_tbc_total + numRows[k].amount);
         }
       }
+    }
+  }
+
+  // ── 3c. Fallback for bonus orders that never got a months=1 pairing ──────
+  // Some PDFs split a table across a page break in a way that makes pdf-parse
+  // drop or merge the LAST customer's (70%)/(30%) numRows entirely (the row is
+  // visibly present in the PDF, e.g. "1 1,230 15 129.15 (70%)" for CHAN KAH WENG,
+  // but doesn't survive text extraction). When months1Idx never reaches a given
+  // bonusOrder, fall back to computing its 70% new-order amount directly from
+  // its own PV (captured in bonusAmountPVs): 70% payout = PV * 15% * 70% = PV * 0.105.
+  for (let idx = months1Idx; idx < bonusOrders.length; idx++) {
+    const order_no = bonusOrders[idx].order_no;
+    if (!(order_no in orderAmounts) && idx < bonusAmountPVs.length) {
+      const fallbackAmt = r2(bonusAmountPVs[idx] * 0.105);
+      orderAmounts[order_no] = r2((orderAmounts[order_no] || 0) + fallbackAmt);
     }
   }
 
