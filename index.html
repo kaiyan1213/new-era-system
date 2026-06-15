@@ -800,13 +800,9 @@
         <div style="font-size:12px;color:var(--muted)" id="uploadConfirmSub">Review above, then confirm to save all invoices</div>
       </div>
       <div style="display:flex;align-items:center;gap:8px">
-        <label style="font-size:12px;color:var(--muted)">Deduct % for everyone:</label>
-        <select id="bulkDeductPct" style="width:90px">
-          <option value="5">-5%</option>
-          <option value="6" selected>-6%</option>
-          <option value="7">-7%</option>
-          <option value="8">-8%</option>
-        </select>
+        <label style="font-size:12px;color:var(--muted)">Adjust % for everyone:</label>
+        <input type="number" id="bulkDeductPct" value="6" step="0.5" style="width:80px" title="Positive = deduct (proxy gets less). Negative = add on top (proxy gets more).">
+        <span style="font-size:12px;color:var(--muted)">% (+ deduct / − add)</span>
         <button class="btn btn-ghost" onclick="clearUpload()">Clear All</button>
         <button class="btn btn-primary" onclick="confirmBulkSave()">✓ Save All Invoices</button>
       </div>
@@ -2859,6 +2855,8 @@ async function confirmBulkSave() {
       }
 
       const invoiceAmount = Math.round(p.total_net_payable * (1 - deductPct/100) * 100) / 100;
+      // deductPct > 0 => deduct (invoice < payslip amount); deductPct < 0 => add on top
+      const adjLabel = deductPct === 0 ? '±0%' : (deductPct > 0 ? `-${deductPct}%` : `+${Math.abs(deductPct)}%`);
       // Save invoice
       await sb('proxy_invoices', {
         method: 'POST',
@@ -2866,11 +2864,11 @@ async function confirmBulkSave() {
           proxy_id: p.proxy_id,
           year, month,
           coway_payslip_amount: p.total_net_payable,
-          invoice_amount: invoiceAmount, // = payslip amount minus the global deduction %, admin can edit per-invoice afterwards
+          invoice_amount: invoiceAmount, // = payslip amount adjusted by the global %, admin can edit per-invoice afterwards
           invoice_number: invoiceNumber,
           status: prevStatus,
           payment_date: prevPaymentDate,
-          notes: `Auto-imported from PDF: ${p.filename} (-${deductPct}%)`
+          notes: `Auto-imported from PDF: ${p.filename} (${adjLabel})`
         }
       });
 
