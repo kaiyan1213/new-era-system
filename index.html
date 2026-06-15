@@ -801,10 +801,10 @@
       </div>
       <div style="display:flex;align-items:center;gap:8px">
         <label style="font-size:12px;color:var(--muted)">Adjust % for everyone:</label>
-        <input type="number" id="bulkDeductPct" value="6" step="0.5" style="width:80px" title="Positive = deduct (proxy gets less). Negative = add on top (proxy gets more).">
-        <span style="font-size:12px;color:var(--muted)">% (+ deduct / − add)</span>
+        <select id="bulkDeductPct" style="width:110px" title="Negative = deduct (proxy gets less). Positive = add on top (proxy gets more)."></select>
+        <span style="font-size:12px;color:var(--muted)">(+ deduct / − add)</span>
         <button class="btn btn-ghost" onclick="clearUpload()">Clear All</button>
-        <button class="btn btn-primary" onclick="confirmBulkSave()">✓ Save All Invoices</button>
+        <button class="btn btn-primary" id="bulkSaveBtn" onclick="confirmBulkSave()">✓ Save All Invoices</button>
       </div>
     </div>
   </div>
@@ -2814,6 +2814,15 @@ async function debugPDF(file) {
 }
 
 async function confirmBulkSave() {
+  const btn = document.getElementById('bulkSaveBtn');
+  if (btn && btn.disabled) return; // already saving — ignore extra clicks
+  if (btn) {
+    btn.disabled = true;
+    btn.dataset.origText = btn.textContent;
+    btn.textContent = 'Saving...';
+  }
+  try {
+
   const year = parseInt(document.getElementById('uploadYear').value);
   const month = parseInt(document.getElementById('uploadMonth').value);
   const deductPct = parseFloat(document.getElementById('bulkDeductPct').value) || 0;
@@ -2854,9 +2863,9 @@ async function confirmBulkSave() {
         created++;
       }
 
-      const invoiceAmount = Math.round(p.total_net_payable * (1 - deductPct/100) * 100) / 100;
-      // deductPct > 0 => deduct (invoice < payslip amount); deductPct < 0 => add on top
-      const adjLabel = deductPct === 0 ? '±0%' : (deductPct > 0 ? `-${deductPct}%` : `+${Math.abs(deductPct)}%`);
+      const invoiceAmount = Math.round(p.total_net_payable * (1 + deductPct/100) * 100) / 100;
+      // deductPct < 0 => deduct (invoice < payslip amount); deductPct > 0 => add on top
+      const adjLabel = deductPct === 0 ? '±0%' : (deductPct > 0 ? `+${deductPct}%` : `${deductPct}%`);
       // Save invoice
       await sb('proxy_invoices', {
         method: 'POST',
@@ -2901,6 +2910,13 @@ async function confirmBulkSave() {
   showToast(`Saved: ${parts.join(', ')} ✓`);
   clearUpload();
   showPage('proxy');
+
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = btn.dataset.origText || '✓ Save All Invoices';
+    }
+  }
 }
 
 // ============ BREAKDOWN PAGE ============
@@ -3014,6 +3030,18 @@ async function showBreakdown(id) {
   }
 }
 window.addEventListener('DOMContentLoaded', () => {
+  // Populate the bulk "Adjust % for everyone" dropdown: -100%..-1% (deduct),
+  // 0%, then +1%..+100% (add on top). Default selected = -6% (the usual case).
+  const sel = document.getElementById('bulkDeductPct');
+  if (sel) {
+    let opts = '';
+    for (let i = -100; i <= 100; i++) {
+      const label = i === 0 ? '0%' : (i > 0 ? `+${i}%` : `${i}%`);
+      opts += `<option value="${i}"${i === -6 ? ' selected' : ''}>${label}</option>`;
+    }
+    sel.innerHTML = opts;
+  }
+
   const saved = sessionStorage.getItem('nec_user');
   if (saved) {
     try {
