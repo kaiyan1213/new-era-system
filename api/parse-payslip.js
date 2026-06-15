@@ -74,7 +74,10 @@ function parseCowayPayslip(text) {
       (l === 'Food Supplements Sales Commission (100%)' || l.includes('Team Building') || l === 'Allowance'));
     const bLines = lines.slice(bonusStart + 1, bonusEnd > 0 ? bonusEnd : bonusStart + 100);
     for (const l of bLines) {
-      const m = l.match(/^(\d{7,})([A-Z].+?)REN/);
+      // App Type is usually "REN" (rental new order) but can be "INS" (outright
+      // sale, e.g. "Sales Commission (Outright) - PV" section like KOK YIAT LEE's
+      // 2 air-purifier units) — both represent a new order that should be counted.
+      const m = l.match(/^(\d{7,})([A-Z].+?)(REN|INS)/);
       if (m) {
         newOrderNos.add(m[1]);
         bonusOrders.push({ order_no: m[1], customer_name: m[2].trim() });
@@ -103,6 +106,35 @@ function parseCowayPayslip(text) {
     }
   });
 
+  // ── 3a. "Sales Commission (Outright) - PV" section (e.g. KOK YIAT LEE buying
+  // 2 air-purifier units outright, App Type "INS" not "REN"). Format:
+  //   "1330 199.50"   <- 2-token PV+amount row (BEFORE the order rows, like the
+  //                       100%-section pattern below)
+  //   "10949551KOK YIAT LEEINSCHP-6210N (NEON-GREEN)15"  <- order row
+  // Pair these positionally, scoped to ONLY this section so they don't collide
+  // with the 100% Payout section's own pre-header amounts.
+  const outrightStart = lines.findIndex(l => l === 'Sales Commission (Outright) - PV');
+  const payout100Start = lines.findIndex(l => l === 'Sales Commission (Rental - 100% Payout)');
+  const outrightOrderNos = new Set();
+  if (outrightStart >= 0) {
+    const sectionEnd = payout100Start > outrightStart ? payout100Start : outrightStart + 50;
+    const oLines = lines.slice(outrightStart + 1, sectionEnd);
+    const outrightAmounts = [];
+    const outrightOrders = [];
+    for (const l of oLines) {
+      const am = l.match(/^([\d,]+)\s+([\d,]+\.\d{2})$/);
+      if (am) outrightAmounts.push(pn(am[2]));
+      const om = l.match(/^(\d{7,})([A-Z].+?)(?:REN|INS)/);
+      if (om) outrightOrders.push(om[1]);
+    }
+    outrightOrders.forEach((order_no, idx) => {
+      if (idx < outrightAmounts.length && newOrderNos.has(order_no)) {
+        orderAmounts[order_no] = r2((orderAmounts[order_no] || 0) + outrightAmounts[idx]);
+        outrightOrderNos.add(order_no);
+      }
+    });
+  }
+
   // ── 3b. 100% Payout new orders with (SHI)/(Extrade)/etc prefix before the name ──
   // Coway sometimes prefixes the customer name with "(SHI)" or "(Extrade)" for
   // certain orders, e.g. "10888859 (SHI)LEONG TUCK HOE15". The normal order-row
@@ -111,22 +143,28 @@ function parseCowayPayslip(text) {
   // as order rows. Their commission amount also appears separately as a
   // standalone "pv amount" 2-token row BEFORE the "100% Payout" section header
   // (e.g. "1,230 184.50"), in the same order as these prefixed order rows.
+  //
+  // Scope both scans to start at the "100% Payout" header so they don't pick up
+  // unrelated 2-token "pv amount" rows from other sections (e.g. the "Outright
+  // - PV" section handled above, which has its own such rows).
+  const scanLines = payout100Start >= 0 ? lines.slice(payout100Start) : lines;
   const prefixedOrderRows = [];
-  for (const l of lines) {
+  for (const l of scanLines) {
     const pm = l.match(/^(\d{7,})\s*\([A-Za-z]+\)([A-Z].+?)(\d{1,2})\s*$/);
     if (pm) prefixedOrderRows.push({ order_no: pm[1], customer_name: pm[2].trim() });
   }
   const preHeaderAmounts = [];
-  for (const l of lines) {
+  for (const l of scanLines) {
     const am = l.match(/^([\d,]+)\s+([\d,]+\.\d{2})$/);
     if (am && pn(am[1]) > 100) preHeaderAmounts.push(pn(am[2]));
   }
   // Orders whose current-month 100%-payout amount was already captured via the
-  // prefixedOrderRows/preHeaderAmounts pairing above. These must NOT also receive
-  // the months=1 pairing (pairMonths1) or the PV*0.105 fallback below — both of
-  // those are for the 70%-payout formula, while a prefixed "(SHI)/(Extrade)" order
-  // is a 100%-payout order whose amount = PV * 0.15 (already added in full here).
-  const prefixedPairedOrderNos = new Set();
+  // prefixedOrderRows/preHeaderAmounts pairing above (or the Outright-PV section
+  // above). These must NOT also receive the months=1 pairing (pairMonths1) or
+  // the PV*0.105 fallback below — both of those are for the 70%-payout formula,
+  // while a prefixed "(SHI)/(Extrade)" or outright order is a 100%-payout order
+  // whose amount = PV * 0.15 (already added in full here).
+  const prefixedPairedOrderNos = new Set(outrightOrderNos);
   prefixedOrderRows.forEach((o, idx) => {
     if (idx < preHeaderAmounts.length && newOrderNos.has(o.order_no)) {
       orderAmounts[o.order_no] = r2((orderAmounts[o.order_no] || 0) + preHeaderAmounts[idx]);
