@@ -338,7 +338,7 @@
       <div class="stat-card">
         <div class="stat-label">YTD PIC Total</div>
         <div class="stat-value yellow" id="statPending">—</div>
-        <div class="stat-sub">total payslip − invoice gap (all proxies)</div>
+        <div class="stat-sub">total owed to NEC by PICs this year</div>
       </div>
     </div>
 
@@ -372,7 +372,7 @@
             <th>Coway Payslip</th>
             <th>Invoice Amount</th>
             <th>PIC (Diff)</th>
-            <th>YTD Gap</th>
+            <th>YTD Profit/Loss</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -1532,12 +1532,13 @@ async function loadInvoices() {
     document.getElementById('statProxyCount').textContent = proxyList.length;
     document.getElementById('statMonthRev').textContent = fmt(monthInvoices.reduce((s,i) => s + parseFloat(i.coway_payslip_amount||0), 0));
     document.getElementById('statYtdRev').textContent = fmt(allYearFull.reduce((s,i) => s + parseFloat(i.coway_payslip_amount||0), 0));
-    document.getElementById('statPending').textContent = fmt(allYearFull.reduce((s,i) => s + (parseFloat(i.coway_payslip_amount||0) - parseFloat(i.invoice_amount||0)), 0));
+    document.getElementById('statPending').textContent = fmt(allYearFull.reduce((s,i) => s + Math.max(0, parseFloat(i.coway_payslip_amount||0) - parseFloat(i.invoice_amount||0)), 0));
 
-    // Build YTD "gap" per proxy: sum over the year of (coway_payslip_amount - invoice_amount).
-    // This represents the cumulative amount that's been "shifted" to that proxy's PIC (manager)
-    // — i.e. how much of the difference between what Coway actually paid and what NEC invoiced
-    // has accumulated for that account this year. Compliance limit is RM5,000/account/year.
+    // Build YTD profit/loss per proxy: sum over the year of (coway_payslip_amount - invoice_amount).
+    // Positive = cumulative "profit" given to this proxy (we billed less than Coway paid them) —
+    //   bill them more next month to balance it out.
+    // Negative = cumulative "loss" (we billed more than Coway paid them) — bill them less next month.
+    // Compliance limit: keep |YTD| under RM5,000 per account per year.
     const ytdMap = {};
     allYearFull.forEach(inv => {
       if (!ytdMap[inv.proxy_id]) ytdMap[inv.proxy_id] = {};
@@ -1567,11 +1568,18 @@ async function loadInvoices() {
       const rows = groups[mgr].sort((a,b) => a.proxy.name.localeCompare(b.proxy.name));
       html += `<tr class="group-row"><td colspan="7" style="background:var(--surface);font-weight:700;color:var(--accent);padding:10px 14px">${mgr} (PIC)</td></tr>`;
       html += rows.map(({inv, proxy}) => {
-        const ytdGap = Object.values(ytdMap[inv.proxy_id] || {}).reduce((s,v) => s + v, 0);
-        const pct = Math.min(100, Math.max(0, (ytdGap / 5000) * 100));
-        const cls = ytdGap >= 5000 ? 'over' : ytdGap >= 4000 ? 'warn' : 'safe';
-        const picDiff = parseFloat(inv.coway_payslip_amount||0) - parseFloat(inv.invoice_amount||0);
-        const picCls = picDiff > 0 ? 'green' : picDiff < 0 ? 'red' : '';
+        // YTD = cumulative (payslip - invoice) across the year for this proxy.
+        // Positive = we've accumulated "profit" given to the proxy (invoice < payslip,
+        //   proxy paid less than they actually received) — next month bill them more.
+        // Negative = we've accumulated "loss" (invoice > payslip) — next month bill them less.
+        const ytd = Object.values(ytdMap[inv.proxy_id] || {}).reduce((s,v) => s + v, 0);
+        const pct = Math.min(100, (Math.abs(ytd) / 5000) * 100);
+        const cls = Math.abs(ytd) >= 5000 ? 'over' : Math.abs(ytd) >= 4000 ? 'warn' : 'safe';
+        const ytdLabel = ytd > 0 ? 'profit' : ytd < 0 ? 'loss' : '—';
+        // PIC only owes the company when invoice < payslip (we collected less than
+        // Coway actually paid out). If invoice >= payslip, PIC owes nothing (0) —
+        // any extra collected is simply company profit, not a PIC liability.
+        const picDiff = Math.max(0, parseFloat(inv.coway_payslip_amount||0) - parseFloat(inv.invoice_amount||0));
         return `
         <tr>
           <td><div class="td-name">${proxy.name}</div><div class="td-muted">${proxy.coway_id || '—'}</div></td>
@@ -1584,11 +1592,11 @@ async function loadInvoices() {
             <span id="ia-${inv.id}">${fmt(inv.invoice_amount)}</span>
             <button class="icon-btn" title="Edit Invoice amount" onclick="editInvoiceField('${inv.id}','invoice_amount','ia-${inv.id}')">✎</button>
           </td>
-          <td class="td-mono" style="color:${picCls === 'green' ? 'var(--green)' : picCls === 'red' ? 'var(--red)' : 'var(--muted)'}">${fmt(picDiff)}</td>
+          <td class="td-mono" style="color:${picDiff > 0 ? 'var(--red)' : 'var(--muted)'}">${fmt(picDiff)}</td>
           <td>
             <div class="profit-bar-wrap">
               <div>
-                <div class="profit-num ${cls}">${fmt(ytdGap)}</div>
+                <div class="profit-num ${cls}">${fmt(ytd)} <span class="td-muted" style="font-size:10px">(${ytdLabel})</span></div>
                 <div class="profit-bar-bg"><div class="profit-bar-fill ${cls}" style="width:${pct}%"></div></div>
               </div>
             </div>
