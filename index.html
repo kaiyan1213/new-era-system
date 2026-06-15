@@ -358,6 +358,7 @@
           <option value="9">September</option><option value="10">October</option>
           <option value="11">November</option><option value="12">December</option>
         </select>
+        <input type="text" id="invoiceSearch" placeholder="🔍 Search name / HP code..." oninput="filterInvoiceTable()" style="min-width:220px">
       </div>
       <button class="btn btn-ghost btn-sm" onclick="loadInvoices()">↻ Refresh</button>
     </div>
@@ -391,6 +392,7 @@
         <div class="page-sub">All proxies grouped by manager — IC, relationship, HP code, monthly payment status</div>
       </div>
       <div style="display:flex;gap:8px">
+        <input type="text" id="directorySearch" placeholder="🔍 Search name / IC / HP code..." oninput="filterDirectoryTable()" style="min-width:240px">
         <select id="dirYear" onchange="loadDirectory()">
           <option value="2025">2025</option>
           <option value="2026" selected>2026</option>
@@ -1566,7 +1568,7 @@ async function loadInvoices() {
     let html = '';
     groupOrder.forEach(mgr => {
       const rows = groups[mgr].sort((a,b) => a.proxy.name.localeCompare(b.proxy.name));
-      html += `<tr class="group-row"><td colspan="7" style="background:var(--surface);font-weight:700;color:var(--accent);padding:10px 14px">${mgr} (PIC)</td></tr>`;
+      html += `<tr class="group-row" data-group-header="${mgr}"><td colspan="7" style="background:var(--surface);font-weight:700;color:var(--accent);padding:10px 14px">${mgr} (PIC)</td></tr>`;
       html += rows.map(({inv, proxy}) => {
         // YTD = cumulative (payslip - invoice) across the year for this proxy.
         // Positive = we've accumulated "profit" given to the proxy (invoice < payslip,
@@ -1581,7 +1583,7 @@ async function loadInvoices() {
         // any extra collected is simply company profit, not a PIC liability.
         const picDiff = Math.max(0, parseFloat(inv.coway_payslip_amount||0) - parseFloat(inv.invoice_amount||0));
         return `
-        <tr>
+        <tr data-search="${(proxy.name + ' ' + (proxy.coway_id||'')).toLowerCase()}" data-group="${mgr}">
           <td><div class="td-name">${proxy.name}</div><div class="td-muted">${proxy.coway_id || '—'}</div></td>
           <td class="td-mono">${MONTHS[inv.month]} ${inv.year}</td>
           <td class="td-mono">
@@ -1616,6 +1618,30 @@ async function loadInvoices() {
     document.getElementById('invoiceTableBody').innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading data. Check Setup tab to create tables first.</div></div></td></tr>`;
     document.getElementById('setupBanner').style.display = 'flex';
   }
+}
+
+function filterInvoiceTable() {
+  const q = document.getElementById('invoiceSearch').value.trim().toLowerCase();
+  const tbody = document.getElementById('invoiceTableBody');
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+
+  // Track which groups have at least one visible data row
+  const groupHasVisible = {};
+
+  rows.forEach(row => {
+    if (row.dataset.group !== undefined) {
+      const match = !q || (row.dataset.search || '').includes(q);
+      row.style.display = match ? '' : 'none';
+      if (match) groupHasVisible[row.dataset.group] = true;
+    }
+  });
+
+  // Show/hide group header rows based on whether their group has visible rows
+  rows.forEach(row => {
+    if (row.dataset.groupHeader !== undefined) {
+      row.style.display = groupHasVisible[row.dataset.groupHeader] ? '' : 'none';
+    }
+  });
 }
 
 async function editInvoiceField(invoiceId, field, spanId) {
@@ -1850,7 +1876,7 @@ async function loadDirectory() {
             ? `<button class="btn btn-green btn-sm" onclick="markDirectoryPaid('${inv.id}')">Mark Paid</button>`
             : `<span class="td-muted">no invoice</span>`;
         return `
-          <tr>
+          <tr data-search="${(p.name + ' ' + (p.ic_number||'') + ' ' + (p.coway_id||'')).toLowerCase()}">
             <td><div class="td-name">${p.name}</div><div class="td-muted">${p.ic_number || '—'}</div></td>
             <td class="td-muted">${p.relationship || '—'}</td>
             <td class="td-mono">${p.coway_id || '—'}</td>
@@ -1863,7 +1889,7 @@ async function loadDirectory() {
       }).join('');
 
       const totalsRow = `
-          <tr style="background:var(--surface2);font-weight:700">
+          <tr class="dir-total-row" style="background:var(--surface2);font-weight:700">
             <td colspan="4">Total</td>
             <td class="td-mono">${fmt(totalPayslip)}</td>
             <td class="td-mono" style="color:var(--accent)">${fmt(totalInvoiced)}</td>
@@ -1872,7 +1898,7 @@ async function loadDirectory() {
           </tr>`;
 
       return `
-        <div class="table-wrap" style="margin-bottom:20px">
+        <div class="table-wrap" data-mgr-block="${m}" style="margin-bottom:20px">
           <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">${m}</div>
           <table>
             <thead>
@@ -1893,10 +1919,33 @@ async function loadDirectory() {
     }).join('');
 
     container.innerHTML = sections || `<div class="empty"><div class="empty-text">No proxies found. Add proxies with a Manager assigned.</div></div>`;
+    filterDirectoryTable(); // re-apply any active search after re-render
   } catch(e) {
     console.error(e);
     container.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading directory: ${e.message}</div></div>`;
   }
+}
+
+function filterDirectoryTable() {
+  const qEl = document.getElementById('directorySearch');
+  const q = qEl ? qEl.value.trim().toLowerCase() : '';
+  const blocks = document.querySelectorAll('[data-mgr-block]');
+
+  blocks.forEach(block => {
+    const rows = Array.from(block.querySelectorAll('tbody tr'));
+    let anyVisible = false;
+    rows.forEach(row => {
+      if (row.classList.contains('dir-total-row')) return; // handle totals row separately
+      const match = !q || (row.dataset.search || '').includes(q);
+      row.style.display = match ? '' : 'none';
+      if (match) anyVisible = true;
+    });
+    // Hide the whole manager block if nothing matches (only when searching)
+    block.style.display = (q && !anyVisible) ? 'none' : '';
+    // Hide totals row while filtering (totals reflect the whole month, not the filtered subset)
+    const totalRow = block.querySelector('.dir-total-row');
+    if (totalRow) totalRow.style.display = q ? 'none' : '';
+  });
 }
 
 async function markDirectoryPaid(invoiceId) {
