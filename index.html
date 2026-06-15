@@ -273,6 +273,7 @@
       <a class="nav-link" onclick="showPage('proxy')">Proxy Inv</a>
       <a class="nav-link" onclick="showPage('directory')">Directory</a>
       <a class="nav-link" onclick="showPage('payroll')">Payroll</a>
+      <a class="nav-link" onclick="showPage('bankdir')">Bank Details</a>
       <a class="nav-link" onclick="showPage('manager')">Manager Sharing</a>
       <a class="nav-link" onclick="showPage('pl')">P&amp;L</a>
       <a class="nav-link" onclick="showPage('export')">Export</a>
@@ -422,6 +423,23 @@
 
     <div id="directoryContainer"></div>
   </div>
+
+  <!-- ========== BANK DETAILS PAGE ========== -->
+  <div id="page-bankdir" class="hidden">
+    <div class="page-header">
+      <div>
+        <div class="page-title">Bank Details Directory</div>
+        <div class="page-sub">Bank accounts for everyone NEC pays — used when generating payslips</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="bankDirSearch" placeholder="🔍 Search name / IC / bank..." oninput="filterBankDirTable()" style="min-width:240px">
+        <button class="btn btn-primary" onclick="openBankEntryModal()">+ Add Person</button>
+      </div>
+    </div>
+
+    <div id="bankDirContainer"></div>
+  </div>
+
   <div id="page-payroll" class="hidden">
     <div class="page-header">
       <div>
@@ -1009,6 +1027,56 @@
   </div>
 </div>
 
+<!-- Bank Entry Modal (used for both Add and Edit) -->
+<div class="modal-bg hidden" id="modalBankEntry">
+  <div class="modal">
+    <div class="modal-title" id="bankModalTitle">Add Person</div>
+    <input type="hidden" id="bankEntryId">
+    <div class="form-grid">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Full Name (as per IC)</label>
+          <input type="text" id="bankName" class="form-input" placeholder="Choong Pei Qi">
+        </div>
+        <div class="form-group">
+          <label class="form-label">IC Number</label>
+          <input type="text" id="bankIC" class="form-input" placeholder="900101-14-1234">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Team</label>
+          <select id="bankTeam" class="form-input">
+            <option value="NEW ERA ADMIN">NEW ERA ADMIN</option>
+            <option value="NEW ERA EDITOR TEAM">NEW ERA EDITOR TEAM</option>
+            <option value="Digital Marketing Team">Digital Marketing Team</option>
+            <option value="Telemarketing Team">Telemarketing Team</option>
+            <option value="Others">Others</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Role / Note (optional)</label>
+          <input type="text" id="bankRole" class="form-input" placeholder="e.g. Admin, Carmen Admin">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Bank Name</label>
+          <input type="text" id="bankBankName" class="form-input" placeholder="Public Bank">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Bank Account Number</label>
+          <input type="text" id="bankAccountNo" class="form-input" placeholder="5110107025">
+        </div>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalBankEntry')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveBankEntry()">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- New Invoice Modal -->
 <div class="modal-bg hidden" id="modalNewInvoice">
   <div class="modal">
@@ -1470,7 +1538,7 @@ function fmt(n) { return 'RM ' + parseFloat(n || 0).toLocaleString('en-MY', {min
 function fmtNum(n) { return parseFloat(n || 0).toLocaleString('en-MY', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 
 function showPage(page) {
-  ['proxy','payroll','manager','pl','export','audit','upload','breakdown','setup','directory'].forEach(p => {
+  ['proxy','payroll','manager','pl','export','audit','upload','breakdown','setup','directory','bankdir'].forEach(p => {
     const el = document.getElementById(`page-${p}`);
     if (el) el.classList.add('hidden');
   });
@@ -1486,6 +1554,7 @@ function showPage(page) {
   if (page === 'breakdown') loadBreakdown();
   if (page === 'setup') loadSetup();
   if (page === 'directory') loadDirectory();
+  if (page === 'bankdir') loadBankDirectory();
 }
 
 function showToast(msg, type = 'success') {
@@ -1924,6 +1993,158 @@ async function loadDirectory() {
     console.error(e);
     container.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading directory: ${e.message}</div></div>`;
   }
+}
+
+const BANK_TEAM_ORDER = ['NEW ERA ADMIN', 'NEW ERA EDITOR TEAM', 'Digital Marketing Team', 'Telemarketing Team', 'Others'];
+let bankDirList = [];
+
+async function loadBankDirectory() {
+  const container = document.getElementById('bankDirContainer');
+  container.innerHTML = `<div class="empty"><div class="empty-text">Loading...</div></div>`;
+  try {
+    bankDirList = await sb('nec_bank_directory', { filter: 'is_active=eq.true' });
+
+    const groups = {};
+    BANK_TEAM_ORDER.forEach(t => groups[t] = []);
+    bankDirList.forEach(p => {
+      const t = BANK_TEAM_ORDER.includes(p.team) ? p.team : 'Others';
+      groups[t].push(p);
+    });
+
+    const sections = BANK_TEAM_ORDER.map(team => {
+      const people = groups[team];
+      if (!people.length) return '';
+      const sorted = [...people].sort((a,b) => a.name.localeCompare(b.name));
+      const rows = sorted.map(p => `
+        <tr data-search="${(p.name + ' ' + (p.ic_number||'') + ' ' + (p.bank_name||'') + ' ' + (p.role||'')).toLowerCase()}">
+          <td><div class="td-name">${p.name}</div>${p.role ? `<div class="td-muted">${p.role}</div>` : ''}</td>
+          <td class="td-mono">${p.ic_number || '—'}</td>
+          <td class="td-muted">${p.bank_name || '—'}</td>
+          <td class="td-mono">${p.bank_account || '—'}</td>
+          <td>
+            <div style="display:flex;gap:4px">
+              <button class="btn btn-ghost btn-sm" onclick="openBankEntryModal('${p.id}')">Edit</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteBankEntry('${p.id}')">✕</button>
+            </div>
+          </td>
+        </tr>`).join('');
+
+      return `
+        <div class="table-wrap" data-team-block="${team}" style="margin-bottom:20px">
+          <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">${team}</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>IC Number</th>
+                <th>Bank Name</th>
+                <th>Bank Account</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    }).join('');
+
+    container.innerHTML = sections || `<div class="empty"><div class="empty-text">No one in the bank directory yet. Click "+ Add Person" to start.</div></div>`;
+    filterBankDirTable();
+  } catch(e) {
+    console.error(e);
+    container.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading bank directory: ${e.message}. Check Setup tab to create the nec_bank_directory table.</div></div>`;
+  }
+}
+
+function filterBankDirTable() {
+  const qEl = document.getElementById('bankDirSearch');
+  const q = qEl ? qEl.value.trim().toLowerCase() : '';
+  document.querySelectorAll('[data-team-block]').forEach(block => {
+    const rows = Array.from(block.querySelectorAll('tbody tr'));
+    let anyVisible = false;
+    rows.forEach(row => {
+      const match = !q || (row.dataset.search || '').includes(q);
+      row.style.display = match ? '' : 'none';
+      if (match) anyVisible = true;
+    });
+    block.style.display = (q && !anyVisible) ? 'none' : '';
+  });
+}
+
+function openBankEntryModal(id) {
+  document.getElementById('bankEntryId').value = '';
+  document.getElementById('bankName').value = '';
+  document.getElementById('bankIC').value = '';
+  document.getElementById('bankRole').value = '';
+  document.getElementById('bankTeam').value = 'NEW ERA ADMIN';
+  document.getElementById('bankBankName').value = '';
+  document.getElementById('bankAccountNo').value = '';
+
+  if (id) {
+    const p = bankDirList.find(x => x.id === id);
+    if (p) {
+      document.getElementById('bankModalTitle').textContent = 'Edit Person';
+      document.getElementById('bankEntryId').value = p.id;
+      document.getElementById('bankName').value = p.name || '';
+      document.getElementById('bankIC').value = p.ic_number || '';
+      document.getElementById('bankRole').value = p.role || '';
+      document.getElementById('bankTeam').value = p.team || 'NEW ERA ADMIN';
+      document.getElementById('bankBankName').value = p.bank_name || '';
+      document.getElementById('bankAccountNo').value = p.bank_account || '';
+    }
+  } else {
+    document.getElementById('bankModalTitle').textContent = 'Add Person';
+  }
+  document.getElementById('modalBankEntry').classList.remove('hidden');
+}
+
+async function saveBankEntry() {
+  const id = document.getElementById('bankEntryId').value;
+  const name = document.getElementById('bankName').value.trim();
+  if (!name) return showToast('Name is required', 'error');
+
+  const body = {
+    name,
+    ic_number: document.getElementById('bankIC').value.trim() || null,
+    role: document.getElementById('bankRole').value.trim() || null,
+    team: document.getElementById('bankTeam').value,
+    bank_name: document.getElementById('bankBankName').value.trim() || null,
+    bank_account: document.getElementById('bankAccountNo').value.trim() || null,
+    is_active: true
+  };
+
+  try {
+    if (id) {
+      const url = `${SUPABASE_URL}/rest/v1/nec_bank_directory?id=eq.${id}`;
+      await fetch(url, {
+        method: 'PATCH',
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      await logAudit('UPDATE', 'nec_bank_directory', `Edited bank details for ${name}`);
+    } else {
+      await sb('nec_bank_directory', { method: 'POST', body });
+      await logAudit('CREATE', 'nec_bank_directory', `Added bank details for ${name} (${body.team})`);
+    }
+    showToast('Saved ✓');
+    closeModal('modalBankEntry');
+    loadBankDirectory();
+  } catch(e) { showToast('Error saving', 'error'); }
+}
+
+async function deleteBankEntry(id) {
+  const p = bankDirList.find(x => x.id === id);
+  if (!confirm(`Remove ${p ? p.name : 'this person'} from the bank directory?`)) return;
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/nec_bank_directory?id=eq.${id}`;
+    await fetch(url, {
+      method: 'PATCH',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_active: false })
+    });
+    await logAudit('DELETE', 'nec_bank_directory', `Removed ${p ? p.name : id} from bank directory`);
+    showToast('Removed');
+    loadBankDirectory();
+  } catch(e) { showToast('Error', 'error'); }
 }
 
 function filterDirectoryTable() {
@@ -2684,6 +2905,18 @@ CREATE TABLE IF NOT EXISTS nec_payslip_breakdown (
   raw_filename text,
   created_at timestamptz DEFAULT now(),
   UNIQUE(proxy_id, year, month)
+);
+
+CREATE TABLE IF NOT EXISTS nec_bank_directory (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  name text NOT NULL,
+  ic_number text,
+  role text,
+  team text,
+  bank_name text,
+  bank_account text,
+  is_active boolean DEFAULT true,
+  created_at timestamptz DEFAULT now()
 );`;
 
 const DEFAULT_MANAGERS = [
@@ -2740,7 +2973,7 @@ async function saveManagers() {
 async function testConnection() {
   const result = document.getElementById('connTestResult');
   result.textContent = 'Testing...';
-  const tables = ['proxy_accounts','proxy_invoices','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_pl_costs','nec_audit_log','nec_payslip_breakdown'];
+  const tables = ['proxy_accounts','proxy_invoices','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_pl_costs','nec_audit_log','nec_payslip_breakdown','nec_bank_directory'];
   const results = [];
   for (const t of tables) {
     try {
