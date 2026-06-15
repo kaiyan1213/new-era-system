@@ -109,6 +109,9 @@
   .profit-num.safe { color: var(--green); }
   .profit-num.warn { color: var(--yellow); }
   .profit-num.over { color: var(--red); }
+  .icon-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; padding: 0 4px; }
+  .icon-btn:hover { color: var(--accent); }
+  .group-row td { border-top: 1px solid var(--border); }
 
   /* MODAL */
   .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1000; backdrop-filter: blur(4px); }
@@ -325,17 +328,17 @@
       <div class="stat-card">
         <div class="stat-label">This Month Revenue</div>
         <div class="stat-value green" id="statMonthRev">—</div>
-        <div class="stat-sub" id="statMonthLabel">invoiced to NEC</div>
+        <div class="stat-sub" id="statMonthLabel">Coway payslip total (actual revenue)</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">YTD Revenue</div>
         <div class="stat-value blue" id="statYtdRev">—</div>
-        <div class="stat-sub" id="statYear">year to date</div>
+        <div class="stat-sub" id="statYear">Coway payslip total, year to date</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Pending Invoices</div>
+        <div class="stat-label">YTD PIC Total</div>
         <div class="stat-value yellow" id="statPending">—</div>
-        <div class="stat-sub">draft / not paid</div>
+        <div class="stat-sub">total payslip − invoice gap (all proxies)</div>
       </div>
     </div>
 
@@ -355,12 +358,6 @@
           <option value="9">September</option><option value="10">October</option>
           <option value="11">November</option><option value="12">December</option>
         </select>
-        <select id="filterStatus" onchange="loadInvoices()">
-          <option value="">All Status</option>
-          <option value="draft">Draft</option>
-          <option value="issued">Issued</option>
-          <option value="paid">Paid</option>
-        </select>
       </div>
       <button class="btn btn-ghost btn-sm" onclick="loadInvoices()">↻ Refresh</button>
     </div>
@@ -374,8 +371,8 @@
             <th>Month</th>
             <th>Coway Payslip</th>
             <th>Invoice Amount</th>
-            <th>YTD Profit</th>
-            <th>Status</th>
+            <th>PIC (Diff)</th>
+            <th>YTD Gap</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -1513,48 +1510,38 @@ async function loadProxies() {
 async function loadInvoices() {
   const year = document.getElementById('filterYear').value;
   const month = document.getElementById('filterMonth').value;
-  const status = document.getElementById('filterStatus').value;
 
   let filter = `year=eq.${year}`;
   if (month) filter += `&month=eq.${month}`;
-  if (status) filter += `&status=eq.${status}`;
 
   try {
     await loadProxies();
     const invoices = await sb('proxy_invoices', {
-      filter, select: 'id,proxy_id,year,month,coway_payslip_amount,invoice_amount,proxy_profit,invoice_number,status,notes,payment_date'
+      filter, select: 'id,proxy_id,year,month,coway_payslip_amount,invoice_amount,invoice_number,notes'
     });
 
-    let filtered = invoices;
+    const filtered = invoices;
 
-    // Update stats
-    const allYearInvoices = await sb('proxy_invoices', { filter: `year=eq.${year}`, select: 'invoice_amount,status' });
+    // Update stats — revenue is based on the actual Coway payslip amount,
+    // not the invoice amount (the invoice amount can be adjusted +/-).
     const currentMonth = new Date().getMonth() + 1;
     const currentYear = new Date().getFullYear();
-    const thisMonthInv = allYearInvoices.filter(i => {
-      // we need month data - use the filtered month invoices
-      return true;
-    });
-
-    const monthInvoices = await sb('proxy_invoices', {
-      filter: `year=eq.${currentYear}&month=eq.${currentMonth}`,
-      select: 'invoice_amount,status'
-    });
+    const allYearFull = await sb('proxy_invoices', { filter: `year=eq.${year}`, select: 'proxy_id,month,coway_payslip_amount,invoice_amount' });
+    const monthInvoices = allYearFull.filter(i => i.month === currentMonth && parseInt(year) === currentYear);
 
     document.getElementById('statProxyCount').textContent = proxyList.length;
-    document.getElementById('statMonthRev').textContent = fmt(monthInvoices.reduce((s,i) => s + parseFloat(i.invoice_amount||0), 0));
-    document.getElementById('statYtdRev').textContent = fmt(allYearInvoices.reduce((s,i) => s + parseFloat(i.invoice_amount||0), 0));
-    document.getElementById('statPending').textContent = allYearInvoices.filter(i => i.status !== 'paid').length;
+    document.getElementById('statMonthRev').textContent = fmt(monthInvoices.reduce((s,i) => s + parseFloat(i.coway_payslip_amount||0), 0));
+    document.getElementById('statYtdRev').textContent = fmt(allYearFull.reduce((s,i) => s + parseFloat(i.coway_payslip_amount||0), 0));
+    document.getElementById('statPending').textContent = fmt(allYearFull.reduce((s,i) => s + (parseFloat(i.coway_payslip_amount||0) - parseFloat(i.invoice_amount||0)), 0));
 
-    // Build YTD per proxy
+    // Build YTD "gap" per proxy: sum over the year of (coway_payslip_amount - invoice_amount).
+    // This represents the cumulative amount that's been "shifted" to that proxy's PIC (manager)
+    // — i.e. how much of the difference between what Coway actually paid and what NEC invoiced
+    // has accumulated for that account this year. Compliance limit is RM5,000/account/year.
     const ytdMap = {};
-    for (const inv of allYearInvoices) {
-      // need month - reload with month
-    }
-    const allYearFull = await sb('proxy_invoices', { filter: `year=eq.${year}`, select: 'proxy_id,month,coway_payslip_amount,invoice_amount' });
     allYearFull.forEach(inv => {
       if (!ytdMap[inv.proxy_id]) ytdMap[inv.proxy_id] = {};
-      ytdMap[inv.proxy_id][inv.month] = parseFloat(inv.coway_payslip_amount) - parseFloat(inv.invoice_amount);
+      ytdMap[inv.proxy_id][inv.month] = parseFloat(inv.coway_payslip_amount||0) - parseFloat(inv.invoice_amount||0);
     });
 
     // Render table
@@ -1564,40 +1551,84 @@ async function loadInvoices() {
       return;
     }
 
-    tbody.innerHTML = filtered.map(inv => {
-      const proxy = proxyList.find(p => p.id === inv.proxy_id) || { name: 'Unknown' };
-      const ytdProfit = Object.values(ytdMap[inv.proxy_id] || {}).reduce((s,v) => s + v, 0);
-      const pct = Math.min(100, (ytdProfit / 5000) * 100);
-      const cls = pct >= 100 ? 'over' : pct >= 80 ? 'warn' : 'safe';
-      return `
+    // Group invoices by the proxy's manager (PIC), in MANAGER_ORDER, then alphabetically
+    // by proxy name within each group. Unassigned proxies go in their own group at the end.
+    const groups = {};
+    filtered.forEach(inv => {
+      const proxy = proxyList.find(p => p.id === inv.proxy_id) || { name: 'Unknown', manager: null };
+      const mgr = proxy.manager || 'Unassigned';
+      if (!groups[mgr]) groups[mgr] = [];
+      groups[mgr].push({ inv, proxy });
+    });
+    const groupOrder = [...MANAGER_ORDER.filter(m => groups[m]), ...Object.keys(groups).filter(m => !MANAGER_ORDER.includes(m)).sort()];
+
+    let html = '';
+    groupOrder.forEach(mgr => {
+      const rows = groups[mgr].sort((a,b) => a.proxy.name.localeCompare(b.proxy.name));
+      html += `<tr class="group-row"><td colspan="7" style="background:var(--surface);font-weight:700;color:var(--accent);padding:10px 14px">${mgr} (PIC)</td></tr>`;
+      html += rows.map(({inv, proxy}) => {
+        const ytdGap = Object.values(ytdMap[inv.proxy_id] || {}).reduce((s,v) => s + v, 0);
+        const pct = Math.min(100, Math.max(0, (ytdGap / 5000) * 100));
+        const cls = ytdGap >= 5000 ? 'over' : ytdGap >= 4000 ? 'warn' : 'safe';
+        const picDiff = parseFloat(inv.coway_payslip_amount||0) - parseFloat(inv.invoice_amount||0);
+        const picCls = picDiff > 0 ? 'green' : picDiff < 0 ? 'red' : '';
+        return `
         <tr>
           <td><div class="td-name">${proxy.name}</div><div class="td-muted">${proxy.coway_id || '—'}</div></td>
           <td class="td-mono">${MONTHS[inv.month]} ${inv.year}</td>
-          <td class="td-mono">${fmt(inv.coway_payslip_amount)}</td>
-          <td class="td-mono" style="color:var(--accent)">${fmt(inv.invoice_amount)}</td>
+          <td class="td-mono">
+            <span id="cp-${inv.id}">${fmt(inv.coway_payslip_amount)}</span>
+            <button class="icon-btn" title="Edit Coway Payslip amount" onclick="editInvoiceField('${inv.id}','coway_payslip_amount','cp-${inv.id}')">✎</button>
+          </td>
+          <td class="td-mono" style="color:var(--accent)">
+            <span id="ia-${inv.id}">${fmt(inv.invoice_amount)}</span>
+            <button class="icon-btn" title="Edit Invoice amount" onclick="editInvoiceField('${inv.id}','invoice_amount','ia-${inv.id}')">✎</button>
+          </td>
+          <td class="td-mono" style="color:${picCls === 'green' ? 'var(--green)' : picCls === 'red' ? 'var(--red)' : 'var(--muted)'}">${fmt(picDiff)}</td>
           <td>
             <div class="profit-bar-wrap">
               <div>
-                <div class="profit-num ${cls}">${fmt(ytdProfit)}</div>
+                <div class="profit-num ${cls}">${fmt(ytdGap)}</div>
                 <div class="profit-bar-bg"><div class="profit-bar-fill ${cls}" style="width:${pct}%"></div></div>
               </div>
             </div>
           </td>
-          <td><span class="badge badge-${inv.status}">${inv.status}</span>${inv.payment_date ? `<div class="td-muted" style="margin-top:2px">${inv.payment_date}</div>` : ''}</td>
           <td>
             <div style="display:flex;gap:4px">
               <button class="btn btn-ghost btn-sm" onclick="previewInvoice('${inv.id}')">Preview</button>
-              <button class="btn btn-green btn-sm" onclick="markPaid('${inv.id}')">✓ Paid</button>
               <button class="btn btn-danger btn-sm" onclick="deleteInvoice('${inv.id}')">✕</button>
             </div>
           </td>
         </tr>`;
-    }).join('');
+      }).join('');
+    });
+    tbody.innerHTML = html;
   } catch(e) {
     console.error(e);
     document.getElementById('invoiceTableBody').innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading data. Check Setup tab to create tables first.</div></div></td></tr>`;
     document.getElementById('setupBanner').style.display = 'flex';
   }
+}
+
+async function editInvoiceField(invoiceId, field, spanId) {
+  const span = document.getElementById(spanId);
+  const current = span.textContent.replace(/[^0-9.\-]/g, '');
+  const label = field === 'coway_payslip_amount' ? 'Coway Payslip amount' : 'Invoice amount';
+  const input = prompt(`Edit ${label} (RM):`, current);
+  if (input === null) return;
+  const val = parseFloat(input);
+  if (isNaN(val)) return showToast('Invalid number', 'error');
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/proxy_invoices?id=eq.${invoiceId}`;
+    await fetch(url, {
+      method: 'PATCH',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [field]: val })
+    });
+    await logAudit('UPDATE', 'proxy_invoices', `Edited ${field} on invoice ${invoiceId} to ${val}`);
+    showToast('Updated ✓');
+    loadInvoices();
+  } catch(e) { showToast('Error updating', 'error'); }
 }
 
 async function openAddProxyModal() {
@@ -1949,16 +1980,14 @@ async function previewInvoice(id) {
 }
 
 // Opens a single print window containing ALL invoices currently shown in the
-// Proxy Invoice table (respecting the active Year/Month/Status filters), each
+// Proxy Invoice table (respecting the active Year/Month filters), each
 // on its own page. Admin can then "Print / Save as PDF" once for everything.
 async function printAllInvoices() {
   const year = document.getElementById('filterYear').value;
   const month = document.getElementById('filterMonth').value;
-  const status = document.getElementById('filterStatus').value;
 
   let filter = `year=eq.${year}`;
   if (month) filter += `&month=eq.${month}`;
-  if (status) filter += `&status=eq.${status}`;
 
   try {
     await loadProxies();
