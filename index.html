@@ -498,6 +498,56 @@
       </div>
     </div>
 
+    <!-- Auto Commission from 收单追踪 -->
+    <div class="table-wrap" style="margin-bottom:20px">
+      <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <span>Auto Commission — from 收单追踪 (Installed orders)</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="acYear" style="width:90px">
+            <option value="2025">2025</option>
+            <option value="2026" selected>2026</option>
+          </select>
+          <select id="acMonth" style="width:130px">
+            <option value="1">January</option><option value="2">February</option>
+            <option value="3">March</option><option value="4">April</option>
+            <option value="5">May</option><option value="6" selected>June</option>
+            <option value="7">July</option><option value="8">August</option>
+            <option value="9">September</option><option value="10">October</option>
+            <option value="11">November</option><option value="12">December</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" onclick="previewAutoCommission()">🔄 Preview</button>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);padding:8px 14px;border-bottom:1px solid var(--border)">
+        Pulls each staff's <code>installed=true</code> orders for the selected month from 收单追踪 (matched via the "收单追踪 Staff Name" set on each staff member below), applies the commission tier (RM50/order for orders 1–20, +RM1000 bonus at the 10th, +RM1000 at the 20th, RM100/order from the 21st onward), then lets you save each as a payroll record and/or generate a printable payslip.
+      </div>
+      <div id="autoCommContainer">
+        <div class="empty"><div class="empty-text">Set each staff's 收单追踪 name below, then click "🔄 Preview".</div></div>
+      </div>
+    </div>
+
+    <!-- Staff List -->
+    <div class="table-wrap" style="margin-bottom:20px">
+      <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">Staff List</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Role</th>
+            <th>Channel</th>
+            <th>Type</th>
+            <th>Comm/Order</th>
+            <th>Base Salary</th>
+            <th>收单追踪 Staff Name</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="staffListTableBody">
+          <tr><td colspan="8"><div class="empty"><div class="empty-text">Loading staff...</div></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+
     <div class="table-wrap">
       <table>
         <thead>
@@ -1206,10 +1256,74 @@
           <input type="number" id="staffSalary" class="form-input" placeholder="0.00">
         </div>
       </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">收单追踪 Staff Name (for auto commission)</label>
+          <input type="text" id="staffLeadName" class="form-input" placeholder="e.g. Elysa, Ze Heng">
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">Must match the "Staff" name exactly as it appears in 收单追踪 (staff_leads.staff_name)</div>
+        </div>
+      </div>
     </div>
     <div class="form-actions">
       <button class="btn btn-ghost" onclick="closeModal('modalAddStaff')">Cancel</button>
       <button class="btn btn-primary" onclick="saveStaff()">Add Staff</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Staff Modal -->
+<div class="modal-bg hidden" id="modalEditStaff">
+  <div class="modal">
+    <div class="modal-title">Edit Staff Member</div>
+    <input type="hidden" id="editStaffId">
+    <div class="form-grid">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Name</label>
+          <input type="text" id="editStaffName" class="form-input" placeholder="Staff name">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Role / Title</label>
+          <input type="text" id="editStaffRole" class="form-input" placeholder="e.g. Closer, Admin">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Staff Type</label>
+          <select id="editStaffType" class="form-input">
+            <option value="sales">Sales (Commission-based)</option>
+            <option value="admin">Admin (Fixed Salary)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Channel</label>
+          <select id="editStaffChannel" class="form-input">
+            <option value="DM">DM</option><option value="TM">TM</option>
+            <option value="XHS">XHS</option><option value="OTHER">Other/Admin</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Commission per Order (RM)</label>
+          <input type="number" id="editStaffComm" class="form-input" placeholder="0.00">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Base Salary (RM)</label>
+          <input type="number" id="editStaffSalary" class="form-input" placeholder="0.00">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">收单追踪 Staff Name (for auto commission)</label>
+          <input type="text" id="editStaffLeadName" class="form-input" placeholder="e.g. Elysa, Ze Heng">
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">Must match the "Staff" name exactly as it appears in 收单追踪 (staff_leads.staff_name)</div>
+        </div>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalEditStaff')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEditStaff()">Save Changes</button>
     </div>
   </div>
 </div>
@@ -2357,6 +2471,7 @@ async function loadPayroll() {
 
   try {
     await loadStaff();
+    renderStaffList();
     let filter = `year=eq.${year}`;
     if (month) filter += `&month=eq.${month}`;
     const records = await sb('nec_payroll', { filter, select: '*' });
@@ -2417,6 +2532,7 @@ async function saveStaff() {
     channel: document.getElementById('staffChannel').value,
     commission_per_order: parseFloat(document.getElementById('staffComm').value) || 0,
     base_salary: parseFloat(document.getElementById('staffSalary').value) || 0,
+    lead_staff_name: document.getElementById('staffLeadName').value.trim() || null,
   };
   if (!body.name) return showToast('Name required', 'error');
   try {
@@ -2426,6 +2542,272 @@ async function saveStaff() {
     await logAudit('CREATE', 'nec_staff', `Added staff: ${body.name} (${body.staff_type}, ${body.channel})`);
     loadPayroll();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+function renderStaffList() {
+  const tbody = document.getElementById('staffListTableBody');
+  if (!tbody) return;
+  if (!staffList.length) {
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-text">No staff yet. Click "+ Add Staff" above.</div></div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = staffList.map(s => `
+    <tr>
+      <td class="td-name">${s.name}</td>
+      <td class="td-muted">${s.role || '—'}</td>
+      <td><span class="badge badge-${(s.channel||'dm').toLowerCase()}">${s.channel || '—'}</span></td>
+      <td><span class="badge badge-${s.staff_type === 'sales' ? 'dm' : 'other'}">${s.staff_type}</span></td>
+      <td class="td-mono">${fmt(s.commission_per_order)}</td>
+      <td class="td-mono">${fmt(s.base_salary)}</td>
+      <td class="td-mono">${s.lead_staff_name || '<span class="td-muted">— not mapped —</span>'}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="openEditStaffModal('${s.id}')">Edit</button></td>
+    </tr>`).join('');
+}
+
+function openEditStaffModal(id) {
+  const s = staffList.find(x => x.id === id);
+  if (!s) return;
+  document.getElementById('editStaffId').value = s.id;
+  document.getElementById('editStaffName').value = s.name || '';
+  document.getElementById('editStaffRole').value = s.role || '';
+  document.getElementById('editStaffType').value = s.staff_type || 'sales';
+  document.getElementById('editStaffChannel').value = s.channel || 'DM';
+  document.getElementById('editStaffComm').value = s.commission_per_order || 0;
+  document.getElementById('editStaffSalary').value = s.base_salary || 0;
+  document.getElementById('editStaffLeadName').value = s.lead_staff_name || '';
+  openModal('modalEditStaff');
+}
+
+async function saveEditStaff() {
+  const id = document.getElementById('editStaffId').value;
+  const body = {
+    name: document.getElementById('editStaffName').value,
+    role: document.getElementById('editStaffRole').value,
+    staff_type: document.getElementById('editStaffType').value,
+    channel: document.getElementById('editStaffChannel').value,
+    commission_per_order: parseFloat(document.getElementById('editStaffComm').value) || 0,
+    base_salary: parseFloat(document.getElementById('editStaffSalary').value) || 0,
+    lead_staff_name: document.getElementById('editStaffLeadName').value.trim() || null,
+  };
+  if (!body.name) return showToast('Name required', 'error');
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/nec_staff?id=eq.${id}`;
+    await fetch(url, {
+      method: 'PATCH',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    await logAudit('UPDATE', 'nec_staff', `Edited staff: ${body.name}`);
+    closeModal('modalEditStaff');
+    showToast('Saved ✓');
+    loadPayroll();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// Commission tier:
+//   Orders 1-20: RM50/order, plus a RM1000 bonus at the 10th order and another
+//   RM1000 bonus at the 20th order (so hitting exactly 10 orders = 10*50 + 1000 = 1500,
+//   hitting exactly 20 orders = 20*50 + 1000 + 1000 = 3000).
+//   From the 21st order onward: RM100/order (no further milestone bonuses).
+function calcCommissionTier(orderCount) {
+  if (orderCount <= 0) return { commission: 0, breakdown: 'No installed orders this month' };
+  const tier1 = Math.min(orderCount, 20);
+  let total = tier1 * 50;
+  let breakdownParts = [`${tier1} orders × RM50 = RM${(tier1*50).toFixed(2)}`];
+  if (orderCount >= 10) { total += 1000; breakdownParts.push('Milestone bonus (10 orders): +RM1,000'); }
+  if (orderCount >= 20) { total += 1000; breakdownParts.push('Milestone bonus (20 orders): +RM1,000'); }
+  if (orderCount > 20) {
+    const extra = orderCount - 20;
+    total += extra * 100;
+    breakdownParts.push(`${extra} orders (21st onward) × RM100 = RM${(extra*100).toFixed(2)}`);
+  }
+  return { commission: total, breakdown: breakdownParts.join(' | ') };
+}
+
+let autoCommissionData = [];
+
+// Pulls installed orders for the selected month from 收单追踪 (staff_leads),
+// grouped by staff_name, then maps each group to a nec_staff record via
+// lead_staff_name and computes the commission tier.
+async function previewAutoCommission() {
+  const year = parseInt(document.getElementById('acYear').value);
+  const month = parseInt(document.getElementById('acMonth').value);
+  const container = document.getElementById('autoCommContainer');
+  container.innerHTML = `<div class="empty"><div class="empty-text">Loading from 收单追踪...</div></div>`;
+
+  try {
+    await loadStaff();
+    const start = `${year}-${String(month).padStart(2,'0')}-01`;
+    const endMonth = month === 12 ? 1 : month + 1;
+    const endYear = month === 12 ? year + 1 : year;
+    const end = `${endYear}-${String(endMonth).padStart(2,'0')}-01`;
+
+    const leads = await sb('staff_leads', {
+      filter: `installed=eq.true&install_date=gte.${start}&install_date=lt.${end}`,
+      select: 'staff_name,customer_name,product_model,install_date,team'
+    });
+
+    // Group by staff_name
+    const byStaff = {};
+    leads.forEach(l => {
+      const key = l.staff_name || 'Unknown';
+      if (!byStaff[key]) byStaff[key] = [];
+      byStaff[key].push(l);
+    });
+
+    const salesStaff = staffList.filter(s => s.staff_type === 'sales');
+    autoCommissionData = salesStaff
+      .filter(s => s.lead_staff_name)
+      .map(s => {
+        const orders = byStaff[s.lead_staff_name] || [];
+        const { commission, breakdown } = calcCommissionTier(orders.length);
+        return { staff: s, orders, commission, breakdown, year, month };
+      });
+
+    // Also surface any 收单追踪 staff names that don't map to a nec_staff —
+    // so the admin knows to add the mapping.
+    const mappedLeadNames = salesStaff.map(s => s.lead_staff_name).filter(Boolean);
+    const unmapped = Object.keys(byStaff).filter(n => !mappedLeadNames.includes(n));
+
+    if (!autoCommissionData.length) {
+      container.innerHTML = `<div class="empty"><div class="empty-text">No sales staff have a 收单追踪 Staff Name set yet. Edit a staff member below and fill in "收单追踪 Staff Name".</div></div>`;
+      return;
+    }
+
+    let html = `
+      <table>
+        <thead>
+          <tr>
+            <th>Staff</th>
+            <th>收单追踪 Name</th>
+            <th>Installed Orders</th>
+            <th>Commission</th>
+            <th>Breakdown</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>`;
+    autoCommissionData.forEach((row, idx) => {
+      html += `
+          <tr>
+            <td class="td-name">${row.staff.name}</td>
+            <td class="td-mono">${row.staff.lead_staff_name}</td>
+            <td class="td-mono">${row.orders.length}</td>
+            <td class="td-mono" style="color:var(--green);font-weight:600">${fmt(row.commission)}</td>
+            <td class="td-muted" style="font-size:11px">${row.breakdown}</td>
+            <td>
+              <div style="display:flex;gap:4px;flex-wrap:wrap">
+                <button class="btn btn-ghost btn-sm" onclick="viewAutoCommOrders(${idx})">View Orders</button>
+                <button class="btn btn-primary btn-sm" onclick="saveAutoCommissionRow(${idx})">Save to Payroll</button>
+                <button class="btn btn-ghost btn-sm" onclick="generateStaffPayslip(${idx})">🖨 Payslip</button>
+              </div>
+            </td>
+          </tr>`;
+    });
+    html += `</tbody></table>`;
+
+    if (unmapped.length) {
+      html += `<div style="padding:10px 14px;font-size:11px;color:var(--yellow)">⚠ 收单追踪 has orders from staff names not mapped to anyone: ${unmapped.map(n=>`"${n}"`).join(', ')}. Add these as "收单追踪 Staff Name" on the matching staff member below if they should be included.</div>`;
+    }
+
+    container.innerHTML = html;
+  } catch(e) {
+    console.error(e);
+    container.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading from 收单追踪: ${e.message}</div></div>`;
+  }
+}
+
+function viewAutoCommOrders(idx) {
+  const row = autoCommissionData[idx];
+  if (!row) return;
+  const list = row.orders.map((o,i) => `${i+1}. ${o.customer_name || '—'} — ${o.product_model || '—'} (installed ${o.install_date})`).join('\n');
+  alert(`${row.staff.name} — ${MONTHS[row.month]} ${row.year}\n${row.orders.length} installed orders:\n\n${list || '(none)'}`);
+}
+
+async function saveAutoCommissionRow(idx) {
+  const row = autoCommissionData[idx];
+  if (!row) return;
+  const body = {
+    staff_id: row.staff.id,
+    year: row.year,
+    month: row.month,
+    orders_count: row.orders.length,
+    commission_earned: row.commission,
+    base_salary: row.staff.base_salary || 0,
+    bonus: 0,
+    deductions: 0,
+  };
+  try {
+    // Overwrite any existing payroll record for this staff/year/month so
+    // re-syncing doesn't create duplicates.
+    const existing = await sb('nec_payroll', { filter: `staff_id=eq.${row.staff.id}&year=eq.${row.year}&month=eq.${row.month}`, select: 'id' });
+    for (const e of existing) await sbDelete('nec_payroll', `id=eq.${e.id}`);
+
+    await sb('nec_payroll', { method: 'POST', body });
+    await logAudit('CREATE', 'nec_payroll', `Auto-generated payroll for ${row.staff.name} — ${MONTHS[body.month]} ${body.year} — ${body.orders_count} orders, commission RM${body.commission_earned.toFixed(2)}`);
+    showToast(`Saved payroll for ${row.staff.name} ✓`);
+    loadPayroll();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// Generates a simple printable payslip for a staff member based on the
+// auto-calculated commission for the selected month.
+function generateStaffPayslip(idx) {
+  const row = autoCommissionData[idx];
+  if (!row) return;
+  const { staff, orders, commission, breakdown, year, month } = row;
+  const baseSalary = parseFloat(staff.base_salary || 0);
+  const total = commission + baseSalary;
+
+  const orderRows = orders.map((o,i) => `
+    <tr>
+      <td style="padding:4px 8px;border-bottom:1px solid #eee">${i+1}</td>
+      <td style="padding:4px 8px;border-bottom:1px solid #eee">${o.customer_name || '—'}</td>
+      <td style="padding:4px 8px;border-bottom:1px solid #eee">${o.product_model || '—'}</td>
+      <td style="padding:4px 8px;border-bottom:1px solid #eee">${o.install_date || '—'}</td>
+    </tr>`).join('');
+
+  const html = `
+    <div style="max-width:680px;margin:0 auto;font-family:Inter,sans-serif;color:#111;background:#fff;padding:32px;border-radius:8px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:16px;margin-bottom:16px">
+        <div>
+          <div style="font-size:20px;font-weight:800">New Era Consulting Enterprise</div>
+          <div style="font-size:12px;color:#666">Staff Commission Payslip</div>
+        </div>
+        <div style="text-align:right;font-size:12px;color:#666">
+          <div>${MONTHS[month]} ${year}</div>
+          <div>Generated: ${new Date().toISOString().slice(0,10)}</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;margin-bottom:16px">
+        <div><strong>Name:</strong> ${staff.name}</div>
+        <div><strong>Role:</strong> ${staff.role || '—'}</div>
+        <div><strong>Channel:</strong> ${staff.channel || '—'}</div>
+        <div><strong>Installed Orders:</strong> ${orders.length}</div>
+      </div>
+      <div style="background:#f5f5f5;border-radius:6px;padding:12px;margin-bottom:16px;font-size:13px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Base Salary</span><span>RM ${fmtNum(baseSalary)}</span></div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Commission (${orders.length} installed orders)</span><span>RM ${fmtNum(commission)}</span></div>
+        <div style="font-size:11px;color:#666;margin-top:4px">${breakdown}</div>
+        <div style="display:flex;justify-content:space-between;font-weight:800;font-size:15px;border-top:1px solid #ccc;margin-top:8px;padding-top:8px"><span>Total Pay</span><span>RM ${fmtNum(total)}</span></div>
+      </div>
+      <div style="font-size:12px;font-weight:700;margin-bottom:6px">Installed Orders Detail</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:#f0f0f0">
+          <th style="padding:4px 8px;text-align:left">#</th>
+          <th style="padding:4px 8px;text-align:left">Customer</th>
+          <th style="padding:4px 8px;text-align:left">Product</th>
+          <th style="padding:4px 8px;text-align:left">Install Date</th>
+        </tr></thead>
+        <tbody>${orderRows || `<tr><td colspan="4" style="padding:8px;color:#999">No installed orders this month</td></tr>`}</tbody>
+      </table>
+    </div>`;
+
+  const win = window.open('', '_blank', 'width=760,height=900');
+  win.document.write(`<html><head><title>Payslip - ${staff.name} - ${MONTHS[month]} ${year}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>body{margin:24px;background:#f5f5f5}@media print{body{margin:0;background:#fff}}</style></head>
+    <body>${html}<button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#4f7cff;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
 }
 
 async function openPayrollEntryModal() {
@@ -2832,9 +3214,12 @@ CREATE TABLE IF NOT EXISTS nec_staff (
   channel text,
   base_salary numeric(10,2) DEFAULT 0,
   commission_per_order numeric(10,2) DEFAULT 0,
+  lead_staff_name text,
   is_active boolean DEFAULT true,
   created_at timestamptz DEFAULT now()
 );
+
+ALTER TABLE nec_staff ADD COLUMN IF NOT EXISTS lead_staff_name text;
 
 CREATE TABLE IF NOT EXISTS nec_payroll (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -2974,7 +3359,7 @@ async function saveManagers() {
 async function testConnection() {
   const result = document.getElementById('connTestResult');
   result.textContent = 'Testing...';
-  const tables = ['proxy_accounts','proxy_invoices','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_pl_costs','nec_audit_log','nec_payslip_breakdown','nec_bank_directory'];
+  const tables = ['proxy_accounts','proxy_invoices','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_pl_costs','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads'];
   const results = [];
   for (const t of tables) {
     try {
