@@ -1765,17 +1765,17 @@ async function saveInvoice() {
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
-async function markPaid(id) {
+async function markPaid(id, customDate) {
   try {
     const url = `${SUPABASE_URL}/rest/v1/proxy_invoices?id=eq.${id}`;
-    const today = new Date().toISOString().slice(0,10);
+    const dateStr = customDate || new Date().toISOString().slice(0,10);
     await fetch(url, {
       method: 'PATCH',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'paid', payment_date: today })
+      body: JSON.stringify({ status: 'paid', payment_date: dateStr })
     });
     showToast('Marked as paid');
-    await logAudit('UPDATE', 'proxy_invoices', `Marked invoice ${id} as paid (payment date: ${today})`);
+    await logAudit('UPDATE', 'proxy_invoices', `Marked invoice ${id} as paid (payment date: ${dateStr})`);
     loadInvoices();
   } catch(e) { showToast('Error', 'error'); }
 }
@@ -1820,10 +1820,29 @@ async function loadDirectory() {
     const sections = [...MANAGER_ORDER, 'Unassigned'].map(m => {
       const people = groups[m];
       if (!people.length) return '';
-      const rows = people.map(p => {
+
+      // Sort: proxies with an invoice this month first (so the ones that need
+      // attention/payment are at the top), no-invoice proxies after.
+      const sorted = [...people].sort((a, b) => {
+        const aHas = directoryInvoiceMap[a.id] ? 1 : 0;
+        const bHas = directoryInvoiceMap[b.id] ? 1 : 0;
+        if (aHas !== bHas) return bHas - aHas;
+        return a.name.localeCompare(b.name);
+      });
+
+      let totalPayslip = 0, totalInvoiced = 0, totalPic = 0;
+
+      const rows = sorted.map(p => {
         const inv = directoryInvoiceMap[p.id];
         const payslip = inv ? fmt(inv.coway_payslip_amount) : '—';
         const invoiced = inv ? fmt(inv.invoice_amount) : '—';
+        // PIC = amount the PIC (manager) owes the company when invoice < payslip; 0 otherwise.
+        const picAmt = inv ? Math.max(0, parseFloat(inv.coway_payslip_amount||0) - parseFloat(inv.invoice_amount||0)) : 0;
+        if (inv) {
+          totalPayslip += parseFloat(inv.coway_payslip_amount||0);
+          totalInvoiced += parseFloat(inv.invoice_amount||0);
+          totalPic += picAmt;
+        }
         const paid = inv && inv.payment_date;
         const paymentCell = paid
           ? `<span class="badge badge-paid">${inv.payment_date}</span>`
@@ -1838,9 +1857,19 @@ async function loadDirectory() {
             <td class="td-muted">${p.direct || '—'}</td>
             <td class="td-mono">${payslip}</td>
             <td class="td-mono" style="color:var(--accent)">${invoiced}</td>
+            <td class="td-mono" style="color:${picAmt > 0 ? 'var(--red)' : 'var(--muted)'}">${inv ? fmt(picAmt) : '—'}</td>
             <td>${paymentCell}</td>
           </tr>`;
       }).join('');
+
+      const totalsRow = `
+          <tr style="background:var(--surface2);font-weight:700">
+            <td colspan="4">Total</td>
+            <td class="td-mono">${fmt(totalPayslip)}</td>
+            <td class="td-mono" style="color:var(--accent)">${fmt(totalInvoiced)}</td>
+            <td class="td-mono" style="color:${totalPic > 0 ? 'var(--red)' : 'var(--muted)'}">${fmt(totalPic)}</td>
+            <td></td>
+          </tr>`;
 
       return `
         <div class="table-wrap" style="margin-bottom:20px">
@@ -1854,10 +1883,11 @@ async function loadDirectory() {
                 <th>Direct</th>
                 <th>Coway Payslip</th>
                 <th>Invoiced (NEC)</th>
+                <th>PIC</th>
                 <th>Payment</th>
               </tr>
             </thead>
-            <tbody>${rows}</tbody>
+            <tbody>${rows}${totalsRow}</tbody>
           </table>
         </div>`;
     }).join('');
@@ -1870,7 +1900,13 @@ async function loadDirectory() {
 }
 
 async function markDirectoryPaid(invoiceId) {
-  await markPaid(invoiceId);
+  const today = new Date().toISOString().slice(0,10);
+  const input = prompt('Bank-in date (YYYY-MM-DD):', today);
+  if (input === null) return; // cancelled
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.trim())) {
+    return showToast('Invalid date format — use YYYY-MM-DD', 'error');
+  }
+  await markPaid(invoiceId, input.trim());
   loadDirectory();
 }
 
