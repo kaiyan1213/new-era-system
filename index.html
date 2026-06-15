@@ -1047,6 +1047,7 @@
         <div class="form-group">
           <label class="form-label">Team</label>
           <select id="bankTeam" class="form-input">
+            <option value="Manager">Manager</option>
             <option value="NEW ERA ADMIN">NEW ERA ADMIN</option>
             <option value="NEW ERA EDITOR TEAM">NEW ERA EDITOR TEAM</option>
             <option value="Digital Marketing Team">Digital Marketing Team</option>
@@ -1995,7 +1996,7 @@ async function loadDirectory() {
   }
 }
 
-const BANK_TEAM_ORDER = ['NEW ERA ADMIN', 'NEW ERA EDITOR TEAM', 'Digital Marketing Team', 'Telemarketing Team', 'Others'];
+const BANK_TEAM_ORDER = ['Manager', 'NEW ERA ADMIN', 'NEW ERA EDITOR TEAM', 'Digital Marketing Team', 'Telemarketing Team', 'Others'];
 let bankDirList = [];
 
 async function loadBankDirectory() {
