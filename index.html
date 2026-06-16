@@ -2733,6 +2733,11 @@ async function previewAutoCommission() {
       filter: `month_year=eq.${monthLabel}`,
       select: 'staff_name,customer_name,product_model,install_date,order_date,team'
     });
+    console.log('[AutoComm DEBUG] year/month:', year, month, 'monthLabel:', monthLabel);
+    console.log('[AutoComm DEBUG] breakdowns rows:', breakdowns.length, 'payslipOrders:', payslipOrders.length);
+    console.log('[AutoComm DEBUG] leads rows:', leads.length);
+    console.log('[AutoComm DEBUG] sample payslipOrders:', payslipOrders.slice(0,3));
+    console.log('[AutoComm DEBUG] sample leads:', leads.slice(0,3));
     const leadsByNormName = {};
     leads.forEach(l => {
       const key = normName(l.customer_name);
@@ -2749,6 +2754,8 @@ async function previewAutoCommission() {
     const salesStaff = staffList.filter(s => s.staff_type === 'sales');
     const staffByLeadName = {};
     salesStaff.forEach(s => { if (s.lead_staff_name) staffByLeadName[normName(s.lead_staff_name)] = s; });
+    console.log('[AutoComm DEBUG] salesStaff count:', salesStaff.length, 'staffByLeadName keys:', Object.keys(staffByLeadName));
+    console.log('[AutoComm DEBUG] leadsByNormName keys (first 10):', Object.keys(leadsByNormName).slice(0,10));
 
     // 4/5. Walk every payslip order, resolve which staff it belongs to.
     const matchedByStaffId = {}; // staff_id -> [{order_no, customer_name, ...}]
