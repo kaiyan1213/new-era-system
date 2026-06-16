@@ -519,10 +519,22 @@
         </div>
       </div>
       <div style="font-size:11px;color:var(--muted);padding:8px 14px;border-bottom:1px solid var(--border)">
-        Pulls every new order from this month's Coway payslips (the authoritative list, across all proxies) and cross-checks it against 收单追踪's claims, matched purely by customer name (any "(nickname)" or other notes staff add after the name are ignored) — via the "收单追踪 Staff Name" set on each staff member below. Only orders verified against an actual payslip count toward commission (RM50/order for orders 1–20, +RM1000 bonus at the 10th, +RM1000 at the 20th, RM100/order from the 21st onward). Payslip orders with no matching staff claim show up below for manual assignment; 收单追踪 claims with no matching payslip order are flagged as unverified and excluded.
+        Pulls every new order from this month's Coway payslips (the authoritative list, across all proxies) and cross-checks it against 收单追踪's claims, matched purely by customer name (any "(nickname)" or other notes staff add after the name are ignored) — via the "收单追踪 Staff Name" set on each staff member below. Only orders verified against an actual payslip count toward commission (RM50/order for orders 1–20, +RM1000 bonus at the 10th, +RM1000 at the 20th, RM100/order from the 21st onward). Payslip orders with no matching staff claim show up below for manual assignment.
       </div>
       <div id="autoCommContainer">
         <div class="empty"><div class="empty-text">Set each staff's 收单追踪 name below, then click "🔄 Preview".</div></div>
+      </div>
+      <div style="border-top:1px solid var(--border);padding:14px">
+        <div style="font-weight:700;margin-bottom:6px">Bulk Manual Match</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Paste a list of customer names (one per line) and pick a staff member — the system will search this month's Coway payslips for each name and assign any match to that staff. Names that don't match any payslip order for this month are skipped and reported back.</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start">
+          <textarea id="bulkMatchNames" rows="5" placeholder="One customer name per line..." style="flex:1;min-width:260px;font-family:var(--mono);font-size:12px;padding:8px"></textarea>
+          <div style="display:flex;flex-direction:column;gap:8px;min-width:180px">
+            <select id="bulkMatchStaff" style="width:100%"></select>
+            <button class="btn btn-primary btn-sm" onclick="bulkManualMatch()">Match &amp; Assign</button>
+          </div>
+        </div>
+        <div id="bulkMatchResult" style="margin-top:10px;font-size:12px"></div>
       </div>
     </div>
 
@@ -2472,6 +2484,7 @@ async function loadPayroll() {
   try {
     await loadStaff();
     renderStaffList();
+    populateBulkMatchStaffSelect();
     let filter = `year=eq.${year}`;
     if (month) filter += `&month=eq.${month}`;
     const records = await sb('nec_payroll', { filter, select: '*' });
@@ -2626,7 +2639,6 @@ function calcCommissionTier(orderCount) {
 
 let autoCommissionData = [];
 let unmatchedPayslipOrders = []; // orphan orders needing manual staff assignment
-let unverifiedLeadClaims = [];   // 收单追踪 claims with no matching payslip order
 
 // Strips trailing parenthetical notes and any non-name remarks staff add
 // after the real customer name purely for their own reference, e.g.
@@ -2717,7 +2729,7 @@ async function previewAutoCommission() {
 
     const salesStaff = staffList.filter(s => s.staff_type === 'sales');
     const staffByLeadName = {};
-    salesStaff.forEach(s => { if (s.lead_staff_name) staffByLeadName[s.lead_staff_name] = s; });
+    salesStaff.forEach(s => { if (s.lead_staff_name) staffByLeadName[normName(s.lead_staff_name)] = s; });
 
     // 4/5. Walk every payslip order, resolve which staff it belongs to.
     const matchedByStaffId = {}; // staff_id -> [{order_no, customer_name, ...}]
@@ -2734,8 +2746,16 @@ async function previewAutoCommission() {
       } else {
         const claims = leadsByNormName[po.norm_name];
         if (claims && claims.length) {
-          const leadStaffName = claims[0].staff_name;
-          staff = staffByLeadName[leadStaffName];
+          // Prefer a claim whose staff_name actually resolves to a mapped
+          // sales staff (in case the same customer name was logged by
+          // multiple people, or duplicate rows exist) — fall back to the
+          // first claim if none resolve.
+          let resolved = null;
+          for (const c of claims) {
+            const candidate = staffByLeadName[normName(c.staff_name)];
+            if (candidate) { resolved = candidate; break; }
+          }
+          staff = resolved;
         }
       }
 
@@ -2746,12 +2766,6 @@ async function previewAutoCommission() {
       } else {
         unmatchedPayslipOrders.push(po);
       }
-    });
-
-    // 6. 收单追踪 claims with no matching payslip order at all (informational only).
-    unverifiedLeadClaims = leads.filter(l => {
-      const key = normName(l.customer_name);
-      return !payslipOrders.some(po => po.norm_name === key);
     });
 
     autoCommissionData = salesStaff
@@ -2831,27 +2845,6 @@ async function previewAutoCommission() {
         </div>`;
     }
 
-    // Unverified 收单追踪 claims — informational, not counted.
-    if (unverifiedLeadClaims.length) {
-      html += `
-        <div style="margin-top:14px;padding:14px;border:1px solid var(--border);border-radius:8px">
-          <div style="font-weight:700;color:var(--muted);margin-bottom:8px">ℹ Unverified 收单追踪 Claims (${unverifiedLeadClaims.length}) — not counted in commission</div>
-          <div style="font-size:11px;color:var(--muted);margin-bottom:10px">These were claimed in 收单追踪 but no matching customer name was found in this month's Coway payslips.</div>
-          <table>
-            <thead><tr><th>Customer</th><th>Staff (claimed)</th><th>Product</th><th>Install Date</th></tr></thead>
-            <tbody>
-              ${unverifiedLeadClaims.map(l => `
-                <tr>
-                  <td class="td-name">${l.customer_name || '—'}</td>
-                  <td class="td-muted">${l.staff_name || '—'}</td>
-                  <td class="td-muted">${l.product_model || '—'}</td>
-                  <td class="td-muted">${l.install_date || '—'}</td>
-                </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>`;
-    }
-
     container.innerHTML = html;
   } catch(e) {
     console.error(e);
@@ -2882,6 +2875,83 @@ async function assignOrphanOrder(i) {
     showToast('Assigned ✓');
     previewAutoCommission();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+function populateBulkMatchStaffSelect() {
+  const sel = document.getElementById('bulkMatchStaff');
+  if (!sel) return;
+  const salesStaff = staffList.filter(s => s.staff_type === 'sales');
+  sel.innerHTML = `<option value="">— select staff —</option>` +
+    salesStaff.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+}
+
+// Bulk manual match: takes a list of pasted customer names, searches this
+// month's Coway payslip orders (across all proxies) for each name, and
+// assigns any match to the chosen staff via nec_order_assignments. Reports
+// back which names matched and which didn't.
+async function bulkManualMatch() {
+  const staffId = document.getElementById('bulkMatchStaff').value;
+  const resultEl = document.getElementById('bulkMatchResult');
+  const raw = document.getElementById('bulkMatchNames').value;
+  const names = raw.split('\n').map(s => s.trim()).filter(Boolean);
+
+  if (!staffId) { showToast('Pick a staff member first', 'error'); return; }
+  if (!names.length) { showToast('Paste at least one customer name', 'error'); return; }
+
+  const staff = staffList.find(s => s.id === staffId);
+  const year = parseInt(document.getElementById('acYear').value);
+  const month = parseInt(document.getElementById('acMonth').value);
+  resultEl.innerHTML = `<span style="color:var(--muted)">Searching this month's Coway payslips...</span>`;
+
+  try {
+    const breakdowns = await sb('nec_payslip_breakdown', { filter: `year=eq.${year}&month=eq.${month}`, select: '*' });
+    let payslipOrders = [];
+    breakdowns.forEach(b => {
+      const orders = flattenBreakdownOrders(b.categories_json);
+      orders.forEach(o => payslipOrders.push({
+        order_no: o.order_no,
+        customer_name: o.customer_name,
+        norm_name: normName(o.customer_name),
+        proxy_id: b.proxy_id
+      }));
+    });
+
+    const matched = [];
+    const notFound = [];
+    for (const name of names) {
+      const key = normName(name);
+      const hit = payslipOrders.find(po => po.norm_name === key);
+      if (hit) matched.push({ name, order: hit });
+      else notFound.push(name);
+    }
+
+    for (const m of matched) {
+      await sb('nec_order_assignments', {
+        method: 'POST',
+        body: {
+          year, month,
+          order_no: m.order.order_no,
+          customer_name: m.order.customer_name,
+          proxy_id: m.order.proxy_id,
+          staff_id: staffId,
+          source: 'manual'
+        }
+      });
+    }
+
+    if (matched.length) {
+      await logAudit('CREATE', 'nec_order_assignments', `Bulk-assigned ${matched.length} order(s) to ${staff?.name || staffId} — ${MONTHS[month]} ${year}`);
+    }
+
+    resultEl.innerHTML = `
+      <div style="color:var(--green);margin-bottom:4px">✓ Matched &amp; assigned ${matched.length} of ${names.length} name(s) to ${staff?.name || '—'}.</div>
+      ${notFound.length ? `<div style="color:var(--yellow)">⚠ ${notFound.length} name(s) not found in this month's payslips: ${notFound.map(n=>`"${n}"`).join(', ')}</div>` : ''}
+    `;
+    showToast(`Matched ${matched.length}/${names.length} ✓`);
+    previewAutoCommission();
+  } catch(e) {
+    resultEl.innerHTML = `<span style="color:var(--red)">Error: ${e.message}</span>`;
+  }
 }
 
 function viewAutoCommOrders(idx) {
