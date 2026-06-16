@@ -619,11 +619,11 @@
 
     <div class="toolbar">
       <div class="toolbar-left">
-        <select id="mgrYear" onchange="loadManagerSharing()">
+        <select id="mgrYear" onchange="loadManagerSharing(); loadMgrPayslips();">
           <option value="2025">2025</option>
           <option value="2026" selected>2026</option>
         </select>
-        <select id="mgrMonth" onchange="loadManagerSharing()">
+        <select id="mgrMonth" onchange="loadManagerSharing(); loadMgrPayslips();">
           <option value="">All Months</option>
           <option value="1">January</option><option value="2">February</option>
           <option value="3">March</option><option value="4">April</option>
@@ -633,6 +633,32 @@
           <option value="11">November</option><option value="12">December</option>
         </select>
       </div>
+    </div>
+
+    <div class="table-wrap" style="margin-bottom:20px">
+      <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <span>Manager Payslips — pool inputs (Overriding 1st Install + Allowance)</span>
+        <button class="btn btn-primary btn-sm" onclick="openMgrPayslipUploadModal()">Upload Manager Payslip</button>
+      </div>
+      <div style="padding:10px 14px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)">
+        Only KY, Chloe, Carine, and Jess upload here — these are never treated as proxy accounts and never count toward PIC liability. The Manager Comm pool for a period = the sum of all 4 managers' (Overriding 1st Install total + Allowance total) here, split by each manager's share %.
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Manager</th>
+            <th>Month</th>
+            <th>Overriding 1st Install</th>
+            <th>Allowance</th>
+            <th>Pool Contribution</th>
+            <th>Source File</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="mgrPayslipTableBody">
+          <tr><td colspan="7"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+        </tbody>
+      </table>
     </div>
 
     <div class="table-wrap">
@@ -1433,7 +1459,8 @@
 <!-- Manager Entry Modal -->
 <div class="modal-bg hidden" id="modalManagerEntry">
   <div class="modal">
-    <div class="modal-title">Record Manager Coway Payslips</div>
+    <div class="modal-title">Record Manager Comm — Pooled Split</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Pulls each manager's uploaded payslip pool contribution for this period, sums all 4 into one pool, then splits the pool by each manager's share %. Upload missing manager payslips first if any total below reads RM 0.00.</div>
     <div class="form-grid">
       <div class="form-row">
         <div class="form-group">
@@ -1442,7 +1469,7 @@
         </div>
         <div class="form-group">
           <label class="form-label">Month</label>
-          <select id="meMonth" class="form-input">
+          <select id="meMonth" class="form-input" onchange="loadMgrEntryPreview()">
             <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
             <option value="4">Apr</option><option value="5">May</option><option value="6" selected>Jun</option>
             <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
@@ -1453,10 +1480,60 @@
       <div id="managerEntryFields" style="display:grid;gap:10px">
         <!-- filled by JS -->
       </div>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px">
+        <div style="display:flex;justify-content:space-between;font-weight:700"><span>Total Pool (sum of all 4 managers)</span><span id="mePoolTotal" style="font-family:var(--mono)">RM 0.00</span></div>
+      </div>
     </div>
     <div class="form-actions">
       <button class="btn btn-ghost" onclick="closeModal('modalManagerEntry')">Cancel</button>
       <button class="btn btn-primary" onclick="saveManagerSharing()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Manager Payslip Upload Modal -->
+<div class="modal-bg hidden" id="modalMgrPayslipUpload">
+  <div class="modal">
+    <div class="modal-title">Upload Manager Payslip</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Only for KY, Chloe, Carine, or Jess's own Coway payslip. This is never treated as a proxy account — it only feeds the Manager Comm pool calculation.</div>
+    <div class="form-grid">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Manager</label>
+          <select id="mpManager" class="form-input">
+            <!-- filled by JS, restricted to KY/Chloe/Carine/Jess -->
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Year</label>
+          <select id="mpYear" class="form-input"><option value="2025">2025</option><option value="2026" selected>2026</option></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Month</label>
+          <select id="mpMonth" class="form-input">
+            <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
+            <option value="4">Apr</option><option value="5">May</option><option value="6" selected>Jun</option>
+            <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
+            <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Coway Payslip PDF</label>
+        <input type="file" id="mpFile" class="form-input" accept="application/pdf">
+      </div>
+      <div id="mpResult" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Overriding 1st Install Total</span><span id="mpOverriding" style="font-family:var(--mono)">RM 0.00</span></div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Allowance Total</span><span id="mpAllowance" style="font-family:var(--mono)">RM 0.00</span></div>
+        <div style="display:flex;justify-content:space-between;font-weight:700;border-top:1px solid var(--border);margin-top:6px;padding-top:6px"><span>Pool Contribution</span><span id="mpPoolContrib" style="font-family:var(--mono)">RM 0.00</span></div>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalMgrPayslipUpload')">Cancel</button>
+      <button class="btn btn-primary" id="mpParseBtn" onclick="parseMgrPayslip()">Parse PDF</button>
+      <button class="btn btn-primary hidden" id="mpSaveBtn" onclick="saveMgrPayslip()">Save</button>
     </div>
   </div>
 </div>
@@ -1701,7 +1778,7 @@ function showPage(page) {
   event?.target?.classList.add('active');
   if (page === 'proxy') loadInvoices();
   if (page === 'payroll') loadPayroll();
-  if (page === 'manager') loadManagerSharing();
+  if (page === 'manager') { loadManagerSharing(); loadMgrPayslips(); }
   if (page === 'pl') loadPL();
   if (page === 'audit') loadAuditLog();
   if (page === 'breakdown') loadBreakdown();
@@ -3295,44 +3372,199 @@ async function loadManagers() {
 
 async function openManagerEntryModal() {
   await loadManagers();
-  const container = document.getElementById('managerEntryFields');
-  container.innerHTML = managerList.map(m => `
+  document.getElementById('managerEntryFields').innerHTML = managerList.map(m => `
     <div style="display:flex;align-items:center;gap:10px">
       <div style="font-weight:500;min-width:100px">${m.name}</div>
       <div style="font-size:11px;color:var(--muted);min-width:60px">${m.share_percentage}% share</div>
-      <div style="flex:1;display:flex;align-items:center;gap:6px">
-        <label style="font-size:12px;color:var(--muted)">Coway Payslip (RM)</label>
-        <input type="number" id="mePayslip_${m.id}" class="form-input" placeholder="0.00" style="flex:1" oninput="calcMgrShare('${m.id}','${m.share_percentage}')">
-        <span style="font-size:12px;color:var(--accent)" id="meResult_${m.id}">→ RM 0.00</span>
+      <div style="flex:1;display:flex;align-items:center;justify-content:space-between;gap:6px">
+        <span style="font-size:11px;color:var(--muted)" id="mePoolContrib_${m.id}">Pool contribution: RM 0.00</span>
+        <span style="font-size:12px;color:var(--accent);font-weight:700" id="meResult_${m.id}">→ RM 0.00</span>
       </div>
     </div>`).join('');
   openModal('modalManagerEntry');
+  loadMgrEntryPreview();
 }
 
-function calcMgrShare(id, pct) {
-  const payslip = parseFloat(document.getElementById(`mePayslip_${id}`).value) || 0;
-  const amount = payslip * (parseFloat(pct) / 100);
-  document.getElementById(`meResult_${id}`).textContent = `→ ${fmt(amount)}`;
+// Pulls each manager's uploaded pool_contribution for the selected period
+// from nec_manager_payslips, sums all of them into one pool, then splits
+// that pool by each manager's share_percentage — this is the actual rule
+// (NOT each manager's own contribution times their own %).
+async function loadMgrEntryPreview() {
+  const year = parseInt(document.getElementById('meYear').value);
+  const month = parseInt(document.getElementById('meMonth').value);
+  if (!managerList.length) await loadManagers();
+  let payslips = [];
+  try {
+    payslips = await sb('nec_manager_payslips', { filter: `year=eq.${year}&month=eq.${month}` });
+  } catch(e) { /* table may not exist yet */ }
+
+  const pool = managerList.reduce((sum, m) => {
+    const p = payslips.find(x => x.manager_id === m.id);
+    return sum + parseFloat(p?.pool_contribution || 0);
+  }, 0);
+
+  managerList.forEach(m => {
+    const p = payslips.find(x => x.manager_id === m.id);
+    const contrib = parseFloat(p?.pool_contribution || 0);
+    const share = pool * (parseFloat(m.share_percentage) / 100);
+    const contribEl = document.getElementById(`mePoolContrib_${m.id}`);
+    const resultEl = document.getElementById(`meResult_${m.id}`);
+    if (contribEl) contribEl.textContent = `Pool contribution: RM ${fmtNum(contrib)}${p ? '' : ' (not uploaded)'}`;
+    if (resultEl) resultEl.textContent = `→ RM ${fmtNum(share)}`;
+  });
+  const poolTotalEl = document.getElementById('mePoolTotal');
+  if (poolTotalEl) poolTotalEl.textContent = `RM ${fmtNum(pool)}`;
 }
 
 async function saveManagerSharing() {
   const year = parseInt(document.getElementById('meYear').value);
   const month = parseInt(document.getElementById('meMonth').value);
   try {
+    const payslips = await sb('nec_manager_payslips', { filter: `year=eq.${year}&month=eq.${month}` });
+    const pool = managerList.reduce((sum, m) => {
+      const p = payslips.find(x => x.manager_id === m.id);
+      return sum + parseFloat(p?.pool_contribution || 0);
+    }, 0);
+    if (pool <= 0) return showToast('No manager payslips uploaded for this period yet', 'error');
     for (const m of managerList) {
-      const payslip = parseFloat(document.getElementById(`mePayslip_${m.id}`)?.value) || 0;
-      if (payslip <= 0) continue;
-      const amount = payslip * (m.share_percentage / 100);
+      const amount = pool * (m.share_percentage / 100);
       await sb('nec_manager_sharing', {
         method: 'POST',
-        body: { manager_id: m.id, year, month, coway_payslip_amount: payslip, share_percentage: m.share_percentage, amount_received: amount }
+        body: { manager_id: m.id, year, month, coway_payslip_amount: pool, share_percentage: m.share_percentage, amount_received: amount }
       });
     }
     closeModal('modalManagerEntry');
     showToast('Manager sharing saved');
-    await logAudit('CREATE', 'nec_manager_sharing', `Recorded manager sharing for ${MONTHS[month]} ${year}`);
+    await logAudit('CREATE', 'nec_manager_sharing', `Recorded pooled manager sharing for ${MONTHS[month]} ${year} — pool RM${pool.toFixed(2)}`);
     loadManagerSharing();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ---- Manager Payslip Upload (pool inputs) ----
+
+// Restricted to the 4 profit-sharing managers — Zehao does not participate
+// in this pool. Matched by manager NAME against nec_managers rows containing
+// "KY"/"Kai Yan", "Chloe", "Carine", "Jess" (case-insensitive substring).
+function isPoolManager(name) {
+  const n = (name || '').toLowerCase();
+  return ['ky', 'kai yan', 'chloe', 'carine', 'jess'].some(k => n.includes(k));
+}
+
+async function openMgrPayslipUploadModal() {
+  await loadManagers();
+  const sel = document.getElementById('mpManager');
+  const poolManagers = managerList.filter(m => isPoolManager(m.name));
+  sel.innerHTML = '<option value="">Select manager...</option>' +
+    poolManagers.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+  document.getElementById('mpFile').value = '';
+  document.getElementById('mpResult').style.display = 'none';
+  document.getElementById('mpParseBtn').classList.remove('hidden');
+  document.getElementById('mpSaveBtn').classList.add('hidden');
+  openModal('modalMgrPayslipUpload');
+}
+
+let mgrPayslipParsed = null;
+
+async function parseMgrPayslip() {
+  const file = document.getElementById('mpFile').files[0];
+  if (!file) return showToast('Choose a PDF first', 'error');
+  if (!document.getElementById('mpManager').value) return showToast('Select a manager', 'error');
+  try {
+    showToast('Parsing PDF...');
+    const base64 = await new Promise((res, rej) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        const comma = result.indexOf(',');
+        res(result.substring(comma + 1));
+      };
+      reader.onerror = () => rej(new Error('FileReader error'));
+      reader.readAsDataURL(file);
+    });
+    const response = await fetch('/api/parse-payslip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ base64, filename: file.name })
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'API error');
+    }
+    const { data } = await response.json();
+    mgrPayslipParsed = { ...data, filename: file.name };
+    document.getElementById('mpOverriding').textContent = `RM ${fmtNum(data.overriding_1st_install_total || 0)}`;
+    document.getElementById('mpAllowance').textContent = `RM ${fmtNum(data.allowance_total || 0)}`;
+    document.getElementById('mpPoolContrib').textContent = `RM ${fmtNum((data.overriding_1st_install_total || 0) + (data.allowance_total || 0))}`;
+    document.getElementById('mpResult').style.display = 'block';
+    document.getElementById('mpParseBtn').classList.add('hidden');
+    document.getElementById('mpSaveBtn').classList.remove('hidden');
+    showToast('Parsed ✓ — review then Save');
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function saveMgrPayslip() {
+  if (!mgrPayslipParsed) return showToast('Parse a PDF first', 'error');
+  const managerId = document.getElementById('mpManager').value;
+  const year = parseInt(document.getElementById('mpYear').value);
+  const month = parseInt(document.getElementById('mpMonth').value);
+  if (!managerId) return showToast('Select a manager', 'error');
+  const body = {
+    manager_id: managerId,
+    year, month,
+    overriding_total: mgrPayslipParsed.overriding_1st_install_total || 0,
+    allowance_total: mgrPayslipParsed.allowance_total || 0,
+    total_net_payable: mgrPayslipParsed.total_net_payable || 0,
+    distributor_code: mgrPayslipParsed.distributor_code || null,
+    raw_filename: mgrPayslipParsed.filename
+  };
+  try {
+    // Upsert: delete any existing row for this manager/year/month first (UNIQUE constraint)
+    await sbDelete('nec_manager_payslips', `manager_id=eq.${managerId}&year=eq.${year}&month=eq.${month}`);
+    await sb('nec_manager_payslips', { method: 'POST', body });
+    const mgrName = managerList.find(m => m.id === managerId)?.name || managerId;
+    await logAudit('CREATE', 'nec_manager_payslips', `Uploaded manager payslip: ${mgrName} — ${MONTHS[month]} ${year} — pool contribution RM${(body.overriding_total + body.allowance_total).toFixed(2)}`);
+    closeModal('modalMgrPayslipUpload');
+    showToast('Manager payslip saved ✓');
+    loadMgrPayslips();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function loadMgrPayslips() {
+  const year = document.getElementById('mgrYear').value;
+  const month = document.getElementById('mgrMonth').value;
+  const tbody = document.getElementById('mgrPayslipTableBody');
+  if (!tbody) return;
+  try {
+    if (!managerList.length) await loadManagers();
+    let filter = `year=eq.${year}`;
+    if (month) filter += `&month=eq.${month}`;
+    const rows = await sb('nec_manager_payslips', { filter });
+    if (rows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-text">No manager payslips uploaded for this period</div></div></td></tr>`;
+      return;
+    }
+    tbody.innerHTML = rows.map(r => {
+      const mgr = managerList.find(m => m.id === r.manager_id) || { name: 'Unknown' };
+      return `<tr>
+        <td class="td-name">${mgr.name}</td>
+        <td class="td-mono">${MONTHS[r.month]} ${r.year}</td>
+        <td class="td-mono">${fmt(r.overriding_total)}</td>
+        <td class="td-mono">${fmt(r.allowance_total)}</td>
+        <td class="td-mono" style="font-weight:600;color:var(--green)">${fmt(r.pool_contribution)}</td>
+        <td class="td-muted" style="font-size:11px">${r.raw_filename || '—'}</td>
+        <td><button class="btn btn-danger btn-sm" onclick="deleteMgrPayslip('${r.id}')">✕</button></td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Table not set up yet. Go to Setup tab.</div></div></td></tr>`;
+  }
+}
+
+async function deleteMgrPayslip(id) {
+  if (!confirm('Delete this manager payslip record?')) return;
+  await sbDelete('nec_manager_payslips', `id=eq.${id}`);
+  showToast('Deleted');
+  loadMgrPayslips();
 }
 
 async function loadManagerSharing() {
@@ -3685,6 +3917,31 @@ CREATE TABLE IF NOT EXISTS nec_manager_sharing (
   created_at timestamptz DEFAULT now()
 );
 
+-- Manager Comm pool inputs: each of the 4 profit-sharing managers
+-- (KY/Chloe/Carine/Jess) uploads their OWN Coway payslip here. Unlike
+-- proxy_accounts payslips, these are never treated as a proxy account or
+-- counted toward PIC liability — they only exist to compute the Manager
+-- Comm pool. Per-manager pool_contribution = (sum of every "Sales
+-- Overidding Commission (HM Rental & 1st Installment Month)" section
+-- subtotal in the PDF, since this section can appear multiple times) +
+-- (allowance_total). The pool is the SUM of pool_contribution across all
+-- 4 managers for the period, then split by each manager's share_percentage
+-- — not each manager's own contribution times their own percentage.
+CREATE TABLE IF NOT EXISTS nec_manager_payslips (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  manager_id uuid REFERENCES nec_managers(id),
+  year int NOT NULL,
+  month int NOT NULL,
+  overriding_total numeric(10,2) DEFAULT 0,
+  allowance_total numeric(10,2) DEFAULT 0,
+  pool_contribution numeric(10,2) GENERATED ALWAYS AS (overriding_total + allowance_total) STORED,
+  total_net_payable numeric(10,2) DEFAULT 0,
+  distributor_code text,
+  raw_filename text,
+  created_at timestamptz DEFAULT now(),
+  UNIQUE(manager_id, year, month)
+);
+
 CREATE TABLE IF NOT EXISTS nec_pl_costs (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   year int NOT NULL,
@@ -3749,10 +4006,10 @@ CREATE TABLE IF NOT EXISTS nec_bank_directory (
 );`;
 
 const DEFAULT_MANAGERS = [
-  { name: 'Kai Yan', share_percentage: 25 },
-  { name: 'Chloe', share_percentage: 25 },
-  { name: 'Carine', share_percentage: 25 },
-  { name: 'Jess', share_percentage: 25 },
+  { name: 'Kai Yan', share_percentage: 29 },
+  { name: 'Chloe', share_percentage: 28 },
+  { name: 'Carine', share_percentage: 28 },
+  { name: 'Jess', share_percentage: 15 },
 ];
 
 function loadSetup() {
@@ -3802,7 +4059,7 @@ async function saveManagers() {
 async function testConnection() {
   const result = document.getElementById('connTestResult');
   result.textContent = 'Testing...';
-  const tables = ['proxy_accounts','proxy_invoices','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_pl_costs','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads','nec_order_assignments','monthly_config'];
+  const tables = ['proxy_accounts','proxy_invoices','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_manager_payslips','nec_pl_costs','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads','nec_order_assignments','monthly_config'];
   const results = [];
   for (const t of tables) {
     try {
