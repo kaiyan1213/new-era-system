@@ -2647,8 +2647,16 @@ let unmatchedPayslipOrders = []; // orphan orders needing manual staff assignmen
 // for matching against the payslip.
 function normName(s) {
   let v = (s || '').toString();
-  const parenIdx = v.indexOf('(');
-  if (parenIdx > -1) v = v.slice(0, parenIdx);
+  // Cut at the first opening paren — ASCII "(" or fullwidth "（" — since
+  // everything after it is a staff-added note (WA name, Chinese nickname,
+  // device suffix like 第一台/第二单, promo tags), not part of the actual
+  // customer name.
+  const parenIdx = Math.min(
+    ...['(', '（'].map(c => { const i = v.indexOf(c); return i === -1 ? Infinity : i; })
+  );
+  if (parenIdx !== Infinity) v = v.slice(0, parenIdx);
+  // Also strip a trailing "第X台" / "第X单" that appears without parens.
+  v = v.replace(/第[一二三四五六七八九十\d]+[台单]\s*$/, '');
   return v.trim().toUpperCase().replace(/\s+/g, ' ');
 }
 
@@ -2695,8 +2703,15 @@ async function previewAutoCommission() {
     // 1. Authoritative payslip orders for this month, across all proxies.
     const breakdowns = await sb('nec_payslip_breakdown', { filter: `year=eq.${year}&month=eq.${month}`, select: '*' });
     let payslipOrders = [];
+    const emptyParsePayslips = []; // payslips with a payable amount but no orders extracted — likely a failed PDF parse
     breakdowns.forEach(b => {
       const orders = flattenBreakdownOrders(b.categories_json);
+      if (!orders.length && b.total_net_payable) {
+        emptyParsePayslips.push({
+          proxy_name: (proxyList.find(p => p.id === b.proxy_id) || {}).name || b.distributor_code || '—',
+          amount: b.total_net_payable
+        });
+      }
       orders.forEach(o => payslipOrders.push({
         order_no: o.order_no,
         customer_name: o.customer_name,
@@ -2804,7 +2819,15 @@ async function previewAutoCommission() {
       return;
     }
 
-    let html = `
+    let html = '';
+    if (emptyParsePayslips.length) {
+      html += `
+        <div style="margin-bottom:14px;padding:12px 14px;border:1px solid var(--red);border-radius:8px;background:rgba(220,38,38,0.08)">
+          <div style="font-weight:700;color:var(--red);margin-bottom:6px">⚠ ${emptyParsePayslips.length} payslip(s) failed to parse — orders missing from this reconciliation</div>
+          <div style="font-size:11px;color:var(--muted)">These have a payable amount but no orders were extracted from the PDF, so none of their commissions can be matched yet. Re-upload/re-parse these payslips: ${emptyParsePayslips.map(p => `${p.proxy_name} (RM ${fmtNum(p.amount)})`).join(', ')}</div>
+        </div>`;
+    }
+    html += `
       <table>
         <thead>
           <tr>
