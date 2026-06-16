@@ -2706,17 +2706,19 @@ async function previewAutoCommission() {
       }));
     });
 
-    // 2. 收单追踪 claims — scoped to this month's actual Coway commission
-    // window (monthly_config.closing_start/closing_end), not the calendar
-    // month, since Coway's cycle doesn't align to the 1st–end of month.
-    // Matched purely by customer name (staff's own notes after the name,
-    // e.g. "(nickname)" or "第二台", are stripped by normName).
+    // 2. 收单追踪 claims — scoped to this month exactly the way 收单追踪
+    // itself does it (tracker.js): filter staff_leads by order_date against
+    // monthly_config's closing_start/closing_end for this month_label. Not
+    // install_date — that's a different field and isn't what 收单追踪 uses
+    // for its own month filter. Matched purely by customer name (staff's
+    // own notes after the name, e.g. "(nickname)" or "第二台", stripped by
+    // normName).
     const monthLabel = `${year}-${String(month).padStart(2,'0')}`;
     const configRows = await sb('monthly_config', { filter: `month_label=eq.${monthLabel}`, select: 'closing_start,closing_end' });
     let leadsFilter = '';
     if (configRows.length) {
       const { closing_start, closing_end } = configRows[0];
-      leadsFilter = `install_date=gte.${closing_start}&install_date=lte.${closing_end}`;
+      leadsFilter = `order_date=gte.${closing_start}&order_date=lte.${closing_end}`;
     } else {
       // Fallback to the Coway calendar convention (28th of previous month
       // to 27th of selected month) if no monthly_config row exists yet.
@@ -2724,11 +2726,11 @@ async function previewAutoCommission() {
       const prevYear = month === 1 ? year - 1 : year;
       const fbStart = `${prevYear}-${String(prevMonth).padStart(2,'0')}-28`;
       const fbEnd = `${year}-${String(month).padStart(2,'0')}-27`;
-      leadsFilter = `install_date=gte.${fbStart}&install_date=lte.${fbEnd}`;
+      leadsFilter = `order_date=gte.${fbStart}&order_date=lte.${fbEnd}`;
     }
     const leads = await sb('staff_leads', {
       filter: leadsFilter,
-      select: 'staff_name,customer_name,product_model,install_date,team'
+      select: 'staff_name,customer_name,product_model,install_date,order_date,team'
     });
     const leadsByNormName = {};
     leads.forEach(l => {
