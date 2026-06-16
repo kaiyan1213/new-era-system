@@ -2678,11 +2678,11 @@ function flattenBreakdownOrders(categoriesJson) {
 
 // Reconciliation workflow:
 // 1. Pull every new-order from this month's Coway payslips (all proxies) — the authoritative list.
-// 2. Pull 收单追踪 claims (customer_name + staff_name), ignoring any installed/status flag.
-// 3. Match by normalized customer_name (staff's own parenthetical notes stripped), same month only (payslip is already scoped to the selected month).
+// 2. Pull 收单追踪 claims (customer_name + staff_name) scoped to this month's actual Coway commission window (monthly_config.closing_start/closing_end), not the calendar month.
+// 3. Match by normalized customer_name (staff's own parenthetical notes stripped).
 // 4. Matched payslip order -> counts toward that staff's commission.
 // 5. Payslip order with no matching claim -> "orphan", needs manual staff assignment (persisted in nec_order_assignments).
-// 6. 收单追踪 claim with no matching payslip order -> unverified, not counted.
+// 6. 收单追踪 claim with no matching payslip order -> unverified, not counted (no longer surfaced in the UI, but excluded from commission).
 async function previewAutoCommission() {
   const year = parseInt(document.getElementById('acYear').value);
   const month = parseInt(document.getElementById('acMonth').value);
@@ -2706,12 +2706,28 @@ async function previewAutoCommission() {
       }));
     });
 
-    // 2. 收单追踪 claims — match purely by customer name (staff may add their
-    // own notes after the name, e.g. "(nickname)" or "第二台", which are
-    // stripped by normName). No installed/date filter: if the name matches
-    // a payslip order for this month, it counts — the payslip's own
-    // year/month scoping is what determines "this month".
+    // 2. 收单追踪 claims — scoped to this month's actual Coway commission
+    // window (monthly_config.closing_start/closing_end), not the calendar
+    // month, since Coway's cycle doesn't align to the 1st–end of month.
+    // Matched purely by customer name (staff's own notes after the name,
+    // e.g. "(nickname)" or "第二台", are stripped by normName).
+    const monthLabel = `${year}-${String(month).padStart(2,'0')}`;
+    const configRows = await sb('monthly_config', { filter: `month_label=eq.${monthLabel}`, select: 'closing_start,closing_end' });
+    let leadsFilter = '';
+    if (configRows.length) {
+      const { closing_start, closing_end } = configRows[0];
+      leadsFilter = `install_date=gte.${closing_start}&install_date=lte.${closing_end}`;
+    } else {
+      // Fallback to the Coway calendar convention (28th of previous month
+      // to 27th of selected month) if no monthly_config row exists yet.
+      const prevMonth = month === 1 ? 12 : month - 1;
+      const prevYear = month === 1 ? year - 1 : year;
+      const fbStart = `${prevYear}-${String(prevMonth).padStart(2,'0')}-28`;
+      const fbEnd = `${year}-${String(month).padStart(2,'0')}-27`;
+      leadsFilter = `install_date=gte.${fbStart}&install_date=lte.${fbEnd}`;
+    }
     const leads = await sb('staff_leads', {
+      filter: leadsFilter,
       select: 'staff_name,customer_name,product_model,install_date,team'
     });
     const leadsByNormName = {};
@@ -3609,7 +3625,7 @@ async function saveManagers() {
 async function testConnection() {
   const result = document.getElementById('connTestResult');
   result.textContent = 'Testing...';
-  const tables = ['proxy_accounts','proxy_invoices','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_pl_costs','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads','nec_order_assignments'];
+  const tables = ['proxy_accounts','proxy_invoices','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_pl_costs','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads','nec_order_assignments','monthly_config'];
   const results = [];
   for (const t of tables) {
     try {
