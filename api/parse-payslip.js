@@ -246,6 +246,32 @@ function parseCowayPayslip(text) {
       // (total followed by individual amounts, one per label)
       // So by the time we reach Allowance section, the amounts are already parsed above
       // Instead, look BACKWARDS from Allowance header for the amounts, then match with descriptions
+      //
+      // NEWER LAYOUT (seen on manager payslips, e.g. Carine's): each
+      // allowance line item appears WITHIN the section itself, either as
+      // "LABEL  AMOUNT" on one line or LABEL/AMOUNT on adjacent lines —
+      // and the label isn't always one of the old hardcoded strings (e.g.
+      // "15W50S" isn't "SPECIAL WS"/"HP NEW PI"/"CASH INCENTIVE"). Try this
+      // general parse first; it doesn't depend on a fixed label list.
+      for (let j = 0; j < sLines.length; j++) {
+        const l = sLines[j];
+        if (l === 'Description' || l === 'Amount' || l === 'Description Amount' || /^[\d,]+\.\d{2}$/.test(l)) continue;
+        const sameLine = l.match(/^(.+?)\s+([\d,]+\.\d{2})$/);
+        if (sameLine) {
+          allowances.push({ description: sameLine[1].trim(), amount: pn(sameLine[2]) });
+          continue;
+        }
+        const nextLine = sLines[j+1];
+        if (nextLine && /^[\d,]+\.\d{2}$/.test(nextLine) && l.length > 0 && !/^[\d,]+\.\d{2}$/.test(l)) {
+          allowances.push({ description: l, amount: pn(nextLine) });
+          j++;
+        }
+      }
+
+      // Fallback to the older backward-scan approach (fixed label list,
+      // amounts before the header) only if the general parse above found
+      // nothing — preserves behavior for older-format payslips.
+      if (allowances.length === 0) {
       const descLabels = [];
       for (const l of sLines) {
         if (l === 'SPECIAL WS' || l === 'HP NEW PI' || l === 'CASH INCENTIVE') descLabels.push(l);
@@ -287,6 +313,7 @@ function parseCowayPayslip(text) {
             if (nm) { allowances.push({ description: l, amount: pn(nm[1]) }); j++; }
           }
         }
+      }
       }
       continue;
     }
@@ -330,7 +357,13 @@ function parseCowayPayslip(text) {
       // managers (KY/Chloe/Carine/Jess) rather than a regular proxy account.
       for (let j = sLines.length-1; j >= 0; j--) {
         const m = sLines[j].match(/^([\d,]+\.\d{2})$/);
-        if (m && pn(m[1]) < 500) { // subtotal should be modest
+        // Sanity cap raised from 500 to 50000: a section with many order
+        // rows (e.g. Carine's 2nd "Overidding ... 1st Installment Month"
+        // occurrence, subtotal 2,653.50) can legitimately exceed the old
+        // 500 cap. The cap still guards against accidentally grabbing
+        // total_net_payable or some other much larger running total that
+        // might appear within this section's line range.
+        if (m && pn(m[1]) < 50000) {
           passive_and_tbc_total = r2(passive_and_tbc_total + pn(m[1]));
           if (sec.name.includes('Overidding')) {
             overriding_1st_install_total = r2(overriding_1st_install_total + pn(m[1]));
