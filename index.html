@@ -2640,24 +2640,36 @@ function calcCommissionTier(orderCount) {
 let autoCommissionData = [];
 let unmatchedPayslipOrders = []; // orphan orders needing manual staff assignment
 
-// Strips trailing parenthetical notes and any non-name remarks staff add
-// after the real customer name purely for their own reference, e.g.
-// "THIEN NYET CHING (thiennyetching1010) 第二台" or "NATALIE CHIN KHIT WAI (Nut🐭)"
-// or "LOH AH KIM (Wendy Loh)" — only the name before the first "(" is used
-// for matching against the payslip.
+// 收单追踪 customer_name values are inconsistent: the real IC/legal name
+// (which is what matches the payslip) can be either BEFORE or INSIDE a
+// "（）"/"()" pair — staff put nicknames, WA names, device-suffix notes
+// (第一台/第二单) on either side with no fixed convention. Rather than
+// guessing which side is the real name, this returns every plausible
+// candidate (the part before parens, the part(s) inside parens, and the
+// fully-stripped whole string) so the caller can check each one against
+// the payslip's clean names and use whichever actually matches.
+function nameCandidates(s) {
+  const raw = (s || '').toString();
+  if (!raw.trim()) return [];
+  const clean = v => v.replace(/第[一二三四五六七八九十\d]+[台单]\s*$/, '').trim().toUpperCase().replace(/\s+/g, ' ');
+  const candidates = new Set();
+  const beforeParen = raw.split(/[（(]/)[0];
+  if (beforeParen) candidates.add(clean(beforeParen));
+  const parenMatches = raw.matchAll(/[（(]([^）)]*)[）)]/g);
+  for (const m of parenMatches) { if (m[1]) candidates.add(clean(m[1])); }
+  const stripped = raw.replace(/[（(][^）)]*[）)]/g, '');
+  if (stripped) candidates.add(clean(stripped));
+  candidates.delete('');
+  return [...candidates];
+}
+
+// Single best-effort normalization, kept for cases that just need "a" name
+// (e.g. the bulk manual match textbox, or display) rather than exhaustive
+// matching — picks the first candidate (before-parens, or the whole
+// cleaned string if there's no parens).
 function normName(s) {
-  let v = (s || '').toString();
-  // Cut at the first opening paren — ASCII "(" or fullwidth "（" — since
-  // everything after it is a staff-added note (WA name, Chinese nickname,
-  // device suffix like 第一台/第二单, promo tags), not part of the actual
-  // customer name.
-  const parenIdx = Math.min(
-    ...['(', '（'].map(c => { const i = v.indexOf(c); return i === -1 ? Infinity : i; })
-  );
-  if (parenIdx !== Infinity) v = v.slice(0, parenIdx);
-  // Also strip a trailing "第X台" / "第X单" that appears without parens.
-  v = v.replace(/第[一二三四五六七八九十\d]+[台单]\s*$/, '');
-  return v.trim().toUpperCase().replace(/\s+/g, ' ');
+  const cands = nameCandidates(s);
+  return cands[0] || '';
 }
 
 // Defensively flattens nec_payslip_breakdown.categories_json into a flat
@@ -2733,17 +2745,14 @@ async function previewAutoCommission() {
       filter: `month_year=eq.${monthLabel}`,
       select: 'staff_name,customer_name,product_model,install_date,order_date,team'
     });
-    console.log('[AutoComm DEBUG] year/month:', year, month, 'monthLabel:', monthLabel);
-    console.log('[AutoComm DEBUG] breakdowns rows:', breakdowns.length, 'payslipOrders:', payslipOrders.length);
-    console.log('[AutoComm DEBUG] leads rows:', leads.length);
-    console.log('[AutoComm DEBUG] sample payslipOrders:', payslipOrders.slice(0,3));
-    console.log('[AutoComm DEBUG] sample leads:', leads.slice(0,3));
     const leadsByNormName = {};
     leads.forEach(l => {
-      const key = normName(l.customer_name);
-      if (!key) return;
-      if (!leadsByNormName[key]) leadsByNormName[key] = [];
-      leadsByNormName[key].push(l);
+      const cands = nameCandidates(l.customer_name);
+      cands.forEach(key => {
+        if (!key) return;
+        if (!leadsByNormName[key]) leadsByNormName[key] = [];
+        leadsByNormName[key].push(l);
+      });
     });
 
     // 3. Existing manual assignments for orphan orders this month.
@@ -2754,8 +2763,6 @@ async function previewAutoCommission() {
     const salesStaff = staffList.filter(s => s.staff_type === 'sales');
     const staffByLeadName = {};
     salesStaff.forEach(s => { if (s.lead_staff_name) staffByLeadName[normName(s.lead_staff_name)] = s; });
-    console.log('[AutoComm DEBUG] salesStaff count:', salesStaff.length, 'staffByLeadName keys:', Object.keys(staffByLeadName));
-    console.log('[AutoComm DEBUG] leadsByNormName keys (first 10):', Object.keys(leadsByNormName).slice(0,10));
 
     // 4/5. Walk every payslip order, resolve which staff it belongs to.
     const matchedByStaffId = {}; // staff_id -> [{order_no, customer_name, ...}]
