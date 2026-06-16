@@ -519,7 +519,7 @@
         </div>
       </div>
       <div style="font-size:11px;color:var(--muted);padding:8px 14px;border-bottom:1px solid var(--border)">
-        Pulls every new order from this month's Coway payslips (the authoritative list, across all proxies) and cross-checks it against 收单追踪's <code>installed=true</code> claims (matched by customer name, same month — via the "收单追踪 Staff Name" set on each staff member below). Only orders verified against an actual payslip count toward commission (RM50/order for orders 1–20, +RM1000 bonus at the 10th, +RM1000 at the 20th, RM100/order from the 21st onward). Payslip orders with no matching staff claim show up below for manual assignment; 收单追踪 claims with no matching payslip order are flagged as unverified and excluded.
+        Pulls every new order from this month's Coway payslips (the authoritative list, across all proxies) and cross-checks it against 收单追踪's claims, matched purely by customer name (any "(nickname)" or other notes staff add after the name are ignored) — via the "收单追踪 Staff Name" set on each staff member below. Only orders verified against an actual payslip count toward commission (RM50/order for orders 1–20, +RM1000 bonus at the 10th, +RM1000 at the 20th, RM100/order from the 21st onward). Payslip orders with no matching staff claim show up below for manual assignment; 收单追踪 claims with no matching payslip order are flagged as unverified and excluded.
       </div>
       <div id="autoCommContainer">
         <div class="empty"><div class="empty-text">Set each staff's 收单追踪 name below, then click "🔄 Preview".</div></div>
@@ -2628,8 +2628,16 @@ let autoCommissionData = [];
 let unmatchedPayslipOrders = []; // orphan orders needing manual staff assignment
 let unverifiedLeadClaims = [];   // 收单追踪 claims with no matching payslip order
 
+// Strips trailing parenthetical notes and any non-name remarks staff add
+// after the real customer name purely for their own reference, e.g.
+// "THIEN NYET CHING (thiennyetching1010) 第二台" or "NATALIE CHIN KHIT WAI (Nut🐭)"
+// or "LOH AH KIM (Wendy Loh)" — only the name before the first "(" is used
+// for matching against the payslip.
 function normName(s) {
-  return (s || '').toString().trim().toUpperCase().replace(/\s+/g, ' ');
+  let v = (s || '').toString();
+  const parenIdx = v.indexOf('(');
+  if (parenIdx > -1) v = v.slice(0, parenIdx);
+  return v.trim().toUpperCase().replace(/\s+/g, ' ');
 }
 
 // Defensively flattens nec_payslip_breakdown.categories_json into a flat
@@ -2658,8 +2666,8 @@ function flattenBreakdownOrders(categoriesJson) {
 
 // Reconciliation workflow:
 // 1. Pull every new-order from this month's Coway payslips (all proxies) — the authoritative list.
-// 2. Pull this month's 收单追踪 installed=true claims (customer_name + staff_name).
-// 3. Match by normalized customer_name, same month only.
+// 2. Pull 收单追踪 claims (customer_name + staff_name), ignoring any installed/status flag.
+// 3. Match by normalized customer_name (staff's own parenthetical notes stripped), same month only (payslip is already scoped to the selected month).
 // 4. Matched payslip order -> counts toward that staff's commission.
 // 5. Payslip order with no matching claim -> "orphan", needs manual staff assignment (persisted in nec_order_assignments).
 // 6. 收单追踪 claim with no matching payslip order -> unverified, not counted.
@@ -2686,13 +2694,12 @@ async function previewAutoCommission() {
       }));
     });
 
-    // 2. 收单追踪 installed=true claims for this month.
-    const start = `${year}-${String(month).padStart(2,'0')}-01`;
-    const endMonth = month === 12 ? 1 : month + 1;
-    const endYear = month === 12 ? year + 1 : year;
-    const end = `${endYear}-${String(endMonth).padStart(2,'0')}-01`;
+    // 2. 收单追踪 claims — match purely by customer name (staff may add their
+    // own notes after the name, e.g. "(nickname)" or "第二台", which are
+    // stripped by normName). No installed/date filter: if the name matches
+    // a payslip order for this month, it counts — the payslip's own
+    // year/month scoping is what determines "this month".
     const leads = await sb('staff_leads', {
-      filter: `installed=eq.true&install_date=gte.${start}&install_date=lt.${end}`,
       select: 'staff_name,customer_name,product_model,install_date,team'
     });
     const leadsByNormName = {};
@@ -2802,7 +2809,7 @@ async function previewAutoCommission() {
       html += `
         <div style="margin-top:18px;padding:14px;border:1px solid var(--yellow);border-radius:8px">
           <div style="font-weight:700;color:var(--yellow);margin-bottom:8px">⚠ Unmatched Payslip Orders (${unmatchedPayslipOrders.length}) — every order must belong to someone</div>
-          <div style="font-size:11px;color:var(--muted);margin-bottom:10px">These orders appeared in this month's Coway payslips but no 收单追踪 installed=true claim matched the customer name. Assign each to a staff member manually.</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:10px">These orders appeared in this month's Coway payslips but no 收单追踪 claim matched the customer name. Assign each to a staff member manually.</div>
           <table>
             <thead><tr><th>Order No</th><th>Customer</th><th>Proxy</th><th>Assign To</th></tr></thead>
             <tbody>
@@ -2829,7 +2836,7 @@ async function previewAutoCommission() {
       html += `
         <div style="margin-top:14px;padding:14px;border:1px solid var(--border);border-radius:8px">
           <div style="font-weight:700;color:var(--muted);margin-bottom:8px">ℹ Unverified 收单追踪 Claims (${unverifiedLeadClaims.length}) — not counted in commission</div>
-          <div style="font-size:11px;color:var(--muted);margin-bottom:10px">These were marked installed=true in 收单追踪 but no matching customer name was found in this month's Coway payslips.</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:10px">These were claimed in 收单追踪 but no matching customer name was found in this month's Coway payslips.</div>
           <table>
             <thead><tr><th>Customer</th><th>Staff (claimed)</th><th>Product</th><th>Install Date</th></tr></thead>
             <tbody>
