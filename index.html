@@ -1275,6 +1275,12 @@
           <div style="font-size:11px;color:var(--muted);margin-top:4px">Must match the "Staff" name exactly as it appears in 收单追踪 (staff_leads.staff_name)</div>
         </div>
       </div>
+      <div class="form-row">
+        <div class="form-group" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="staffEpf" style="width:auto">
+          <label class="form-label" style="margin:0" for="staffEpf">EPF applicable (employee 11% / employer 13%, calculated on base salary only)</label>
+        </div>
+      </div>
     </div>
     <div class="form-actions">
       <button class="btn btn-ghost" onclick="closeModal('modalAddStaff')">Cancel</button>
@@ -1332,6 +1338,12 @@
           <div style="font-size:11px;color:var(--muted);margin-top:4px">Must match the "Staff" name exactly as it appears in 收单追踪 (staff_leads.staff_name)</div>
         </div>
       </div>
+      <div class="form-row">
+        <div class="form-group" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="editStaffEpf" style="width:auto">
+          <label class="form-label" style="margin:0" for="editStaffEpf">EPF applicable (employee 11% / employer 13%, calculated on base salary only)</label>
+        </div>
+      </div>
     </div>
     <div class="form-actions">
       <button class="btn btn-ghost" onclick="closeModal('modalEditStaff')">Cancel</button>
@@ -1373,24 +1385,38 @@
         </div>
         <div class="form-group">
           <label class="form-label">Commission Earned (RM)</label>
-          <input type="number" id="prComm" class="form-input" placeholder="0.00">
+          <input type="number" id="prComm" class="form-input" placeholder="0.00" oninput="calcPayroll()">
+        </div>
+      </div>
+      <div class="form-row" id="prCommTypeRow">
+        <div class="form-group">
+          <label class="form-label">Commission Type</label>
+          <select id="prCommType" class="form-input" onchange="toggleCommType()">
+            <option value="tiered">Tiered (RM50/RM100 per order)</option>
+            <option value="outsider">Outsider (full payslip commission — not from ads, e.g. staff/admin/manager's own contact)</option>
+          </select>
         </div>
       </div>
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Base Salary (RM)</label>
-          <input type="number" id="prSalary" class="form-input" placeholder="0.00">
+          <input type="number" id="prSalary" class="form-input" placeholder="0.00" oninput="calcPayroll()">
         </div>
         <div class="form-group">
           <label class="form-label">Bonus (RM)</label>
-          <input type="number" id="prBonus" class="form-input" placeholder="0.00">
+          <input type="number" id="prBonus" class="form-input" placeholder="0.00" oninput="calcPayroll()">
         </div>
       </div>
       <div class="form-group">
         <label class="form-label">Deductions (RM)</label>
-        <input type="number" id="prDeduct" class="form-input" placeholder="0.00">
+        <input type="number" id="prDeduct" class="form-input" placeholder="0.00" oninput="calcPayroll()">
       </div>
+      <div id="prEpfNote" style="display:none;font-size:11px;color:var(--muted)">This staff member has EPF applicable — employee 11% of base salary will be deducted automatically below, employer 13% is recorded separately for company records.</div>
       <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <span style="color:var(--muted);font-size:12px">EPF Employee Deduction (11%)</span>
+          <span style="font-family:var(--mono);font-weight:600;font-size:13px;color:var(--red)" id="prEpfAmount">RM 0.00</span>
+        </div>
         <div style="display:flex;justify-content:space-between">
           <span style="color:var(--muted);font-size:12px">Total Pay</span>
           <span style="font-family:var(--mono);font-weight:700;font-size:16px" id="prTotal">RM 0.00</span>
@@ -2513,11 +2539,11 @@ async function loadPayroll() {
       return `<tr>
         <td class="td-name">${staff.name}</td>
         <td><span class="badge badge-${(staff.channel||'dm').toLowerCase()}">${staff.channel}</span></td>
-        <td><span class="badge badge-${staff.staff_type === 'sales' ? 'dm' : 'other'}">${staff.staff_type}</span></td>
+        <td><span class="badge badge-${staff.staff_type === 'sales' ? 'dm' : 'other'}">${staff.staff_type}</span>${r.commission_type === 'outsider' ? ' <span class="badge badge-other" title="Full payslip commission, not from ads">Outsider</span>' : ''}</td>
         <td class="td-mono">${MONTHS[r.month]} ${r.year}</td>
         <td class="td-mono">${r.orders_count || 0}</td>
         <td class="td-mono">${fmt(r.commission_earned)}</td>
-        <td class="td-mono">${fmt(r.base_salary)}</td>
+        <td class="td-mono">${fmt(r.base_salary)}${parseFloat(r.epf_employee||0) > 0 ? `<div style="font-size:10px;color:var(--red)">−EPF ${fmt(r.epf_employee)}</div>` : ''}</td>
         <td class="td-mono">${fmt(r.bonus)}</td>
         <td class="td-mono" style="color:var(--green);font-weight:600">${fmt(r.total_pay)}</td>
         <td><span class="badge badge-${r.status}">${r.status}</span></td>
@@ -2546,6 +2572,7 @@ async function saveStaff() {
     commission_per_order: parseFloat(document.getElementById('staffComm').value) || 0,
     base_salary: parseFloat(document.getElementById('staffSalary').value) || 0,
     lead_staff_name: document.getElementById('staffLeadName').value.trim() || null,
+    epf_applicable: document.getElementById('staffEpf').checked,
   };
   if (!body.name) return showToast('Name required', 'error');
   try {
@@ -2569,7 +2596,7 @@ function renderStaffList() {
       <td class="td-name">${s.name}</td>
       <td class="td-muted">${s.role || '—'}</td>
       <td><span class="badge badge-${(s.channel||'dm').toLowerCase()}">${s.channel || '—'}</span></td>
-      <td><span class="badge badge-${s.staff_type === 'sales' ? 'dm' : 'other'}">${s.staff_type}</span></td>
+      <td><span class="badge badge-${s.staff_type === 'sales' ? 'dm' : 'other'}">${s.staff_type}</span>${s.epf_applicable ? ' <span class="badge badge-other" title="EPF applicable">EPF</span>' : ''}</td>
       <td class="td-mono">${fmt(s.commission_per_order)}</td>
       <td class="td-mono">${fmt(s.base_salary)}</td>
       <td class="td-mono">${s.lead_staff_name || '<span class="td-muted">— not mapped —</span>'}</td>
@@ -2588,6 +2615,7 @@ function openEditStaffModal(id) {
   document.getElementById('editStaffComm').value = s.commission_per_order || 0;
   document.getElementById('editStaffSalary').value = s.base_salary || 0;
   document.getElementById('editStaffLeadName').value = s.lead_staff_name || '';
+  document.getElementById('editStaffEpf').checked = !!s.epf_applicable;
   openModal('modalEditStaff');
 }
 
@@ -2601,6 +2629,7 @@ async function saveEditStaff() {
     commission_per_order: parseFloat(document.getElementById('editStaffComm').value) || 0,
     base_salary: parseFloat(document.getElementById('editStaffSalary').value) || 0,
     lead_staff_name: document.getElementById('editStaffLeadName').value.trim() || null,
+    epf_applicable: document.getElementById('editStaffEpf').checked,
   };
   if (!body.name) return showToast('Name required', 'error');
   try {
@@ -3092,8 +3121,17 @@ async function openPayrollEntryModal() {
   await loadStaff();
   const sel = document.getElementById('prStaff');
   sel.innerHTML = '<option value="">Select staff...</option>' +
-    staffList.map(s => `<option value="${s.id}" data-type="${s.staff_type}" data-comm="${s.commission_per_order}" data-salary="${s.base_salary}">${s.name} (${s.staff_type})</option>`).join('');
+    staffList.map(s => `<option value="${s.id}" data-type="${s.staff_type}" data-comm="${s.commission_per_order}" data-salary="${s.base_salary}" data-epf="${s.epf_applicable ? '1' : '0'}">${s.name} (${s.staff_type})</option>`).join('');
   openModal('modalPayrollEntry');
+}
+
+// Standard Malaysia EPF rates: employee 11%, employer 13% — applied to
+// base salary only (not commission/bonus), and only when the staff
+// member has epf_applicable set.
+function calcEpf(baseSalary) {
+  const employee = baseSalary * 0.11;
+  const employer = baseSalary * 0.13;
+  return { employee, employer };
 }
 
 function loadStaffPayrollDefaults() {
@@ -3106,9 +3144,22 @@ function loadStaffPayrollDefaults() {
   document.getElementById('prSalary').value = salary || 0;
   if (type === 'admin') {
     document.getElementById('prOrdersRow').style.opacity = '0.3';
+    document.getElementById('prCommTypeRow').style.opacity = '0.3';
   } else {
     document.getElementById('prOrdersRow').style.opacity = '1';
+    document.getElementById('prCommTypeRow').style.opacity = '1';
   }
+  document.getElementById('prEpfNote').style.display = opt.dataset.epf === '1' ? 'block' : 'none';
+  document.getElementById('prCommType').value = 'tiered';
+  toggleCommType();
+  calcPayroll();
+}
+
+function toggleCommType() {
+  const isOutsider = document.getElementById('prCommType').value === 'outsider';
+  document.getElementById('prOrders').disabled = isOutsider;
+  document.getElementById('prComm').readOnly = !isOutsider;
+  document.getElementById('prComm').placeholder = isOutsider ? 'Full payslip commission amount' : '0.00';
   calcPayroll();
 }
 
@@ -3116,24 +3167,48 @@ function calcPayroll() {
   const sel = document.getElementById('prStaff');
   const opt = sel.options[sel.selectedIndex];
   if (!opt) return;
-  const commPerOrder = parseFloat(opt.dataset.comm || 0);
-  const orders = parseInt(document.getElementById('prOrders').value) || 0;
-  const comm = orders * commPerOrder;
-  document.getElementById('prComm').value = comm.toFixed(2);
-  const total = comm + (parseFloat(document.getElementById('prSalary').value)||0) + (parseFloat(document.getElementById('prBonus').value)||0) - (parseFloat(document.getElementById('prDeduct').value)||0);
+  const isOutsider = document.getElementById('prCommType')?.value === 'outsider';
+  if (!isOutsider) {
+    const commPerOrder = parseFloat(opt.dataset.comm || 0);
+    const orders = parseInt(document.getElementById('prOrders').value) || 0;
+    const comm = orders * commPerOrder;
+    document.getElementById('prComm').value = comm.toFixed(2);
+  }
+  const comm = parseFloat(document.getElementById('prComm').value) || 0;
+  const salary = parseFloat(document.getElementById('prSalary').value) || 0;
+  const bonus = parseFloat(document.getElementById('prBonus').value) || 0;
+  const deduct = parseFloat(document.getElementById('prDeduct').value) || 0;
+  let epfEmployee = 0;
+  if (opt.dataset.epf === '1') {
+    epfEmployee = calcEpf(salary).employee;
+  }
+  document.getElementById('prEpfAmount').textContent = fmt(epfEmployee);
+  const total = comm + salary + bonus - deduct - epfEmployee;
   document.getElementById('prTotal').textContent = fmt(total);
 }
 
 async function savePayroll() {
+  const sel = document.getElementById('prStaff');
+  const opt = sel.options[sel.selectedIndex];
+  const salary = parseFloat(document.getElementById('prSalary').value) || 0;
+  let epfEmployee = 0, epfEmployer = 0;
+  if (opt?.dataset.epf === '1') {
+    const epf = calcEpf(salary);
+    epfEmployee = epf.employee;
+    epfEmployer = epf.employer;
+  }
   const body = {
     staff_id: document.getElementById('prStaff').value,
     year: parseInt(document.getElementById('prYear').value),
     month: parseInt(document.getElementById('prMonth').value),
     orders_count: parseInt(document.getElementById('prOrders').value) || 0,
     commission_earned: parseFloat(document.getElementById('prComm').value) || 0,
-    base_salary: parseFloat(document.getElementById('prSalary').value) || 0,
+    commission_type: document.getElementById('prCommType').value,
+    base_salary: salary,
     bonus: parseFloat(document.getElementById('prBonus').value) || 0,
     deductions: parseFloat(document.getElementById('prDeduct').value) || 0,
+    epf_employee: epfEmployee,
+    epf_employer: epfEmployer,
   };
   if (!body.staff_id) return showToast('Select staff', 'error');
   try {
@@ -3141,7 +3216,7 @@ async function savePayroll() {
     closeModal('modalPayrollEntry');
     showToast('Payroll saved');
     const staffName = staffList.find(s => s.id === body.staff_id)?.name || body.staff_id;
-    await logAudit('CREATE', 'nec_payroll', `Payroll for ${staffName} — ${MONTHS[body.month]} ${body.year} — RM${(body.commission_earned + body.base_salary + body.bonus - body.deductions).toFixed(2)}`);
+    await logAudit('CREATE', 'nec_payroll', `Payroll for ${staffName} — ${MONTHS[body.month]} ${body.year} — RM${(body.commission_earned + body.base_salary + body.bonus - body.deductions - body.epf_employee).toFixed(2)}${body.commission_type === 'outsider' ? ' (outsider, full commission)' : ''}`);
     loadPayroll();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
@@ -3493,11 +3568,13 @@ CREATE TABLE IF NOT EXISTS nec_staff (
   base_salary numeric(10,2) DEFAULT 0,
   commission_per_order numeric(10,2) DEFAULT 0,
   lead_staff_name text,
+  epf_applicable boolean DEFAULT false,
   is_active boolean DEFAULT true,
   created_at timestamptz DEFAULT now()
 );
 
 ALTER TABLE nec_staff ADD COLUMN IF NOT EXISTS lead_staff_name text;
+ALTER TABLE nec_staff ADD COLUMN IF NOT EXISTS epf_applicable boolean DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS nec_payroll (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -3506,13 +3583,34 @@ CREATE TABLE IF NOT EXISTS nec_payroll (
   month int NOT NULL,
   orders_count int DEFAULT 0,
   commission_earned numeric(10,2) DEFAULT 0,
+  commission_type text DEFAULT 'tiered',
   base_salary numeric(10,2) DEFAULT 0,
   bonus numeric(10,2) DEFAULT 0,
   deductions numeric(10,2) DEFAULT 0,
-  total_pay numeric(10,2) GENERATED ALWAYS AS (commission_earned + base_salary + bonus - deductions) STORED,
+  epf_employee numeric(10,2) DEFAULT 0,
+  epf_employer numeric(10,2) DEFAULT 0,
+  total_pay numeric(10,2) GENERATED ALWAYS AS (commission_earned + base_salary + bonus - deductions - epf_employee) STORED,
   status text DEFAULT 'draft',
   created_at timestamptz DEFAULT now()
 );
+
+ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS commission_type text DEFAULT 'tiered';
+ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS epf_employee numeric(10,2) DEFAULT 0;
+ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS epf_employer numeric(10,2) DEFAULT 0;
+-- If nec_payroll already existed before epf_employee was added, total_pay's
+-- generated formula won't include it automatically — drop and recreate the
+-- column so existing deployments pick up the new formula.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'nec_payroll' AND column_name = 'total_pay'
+  ) THEN
+    ALTER TABLE nec_payroll DROP COLUMN total_pay;
+  END IF;
+  ALTER TABLE nec_payroll ADD COLUMN total_pay numeric(10,2)
+    GENERATED ALWAYS AS (commission_earned + base_salary + bonus - deductions - epf_employee) STORED;
+END $$;
 
 CREATE TABLE IF NOT EXISTS nec_managers (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
