@@ -185,11 +185,19 @@ function parseCowayPayslip(text) {
     'Allowance',
   ];
 
-  // Find section boundaries
+  // Find section boundaries. Coway's PDF text extraction is inconsistent
+  // about whitespace inside section headers — e.g. "1st  Installment" with
+  // a double space sometimes, single space other times — so compare with
+  // whitespace collapsed to avoid silently missing a section occurrence
+  // (which previously caused some "Overidding ... 1st Installment Month"
+  // sections to be swallowed into a neighboring section instead of being
+  // recognized on their own).
+  const normWs = s => s.replace(/\s+/g, ' ').trim();
   const secBounds = [];
   for (let i = 0; i < lines.length; i++) {
+    const normLine = normWs(lines[i]);
     for (const s of SECTION_STARTS) {
-      if (lines[i] === s || lines[i].includes(s)) {
+      if (normLine === s || normLine.includes(s)) {
         secBounds.push({ name: s, idx: i }); break;
       }
     }
@@ -198,6 +206,7 @@ function parseCowayPayslip(text) {
   // For each section except TBC, Allowance, Food: collect numRows & orderRows
   let passive_and_tbc_total = 0;
   let tbc_total = 0;
+  let overriding_1st_install_total = 0;
   const allowances = [];
   const new_orders_detail = []; // { order_no, customer_name, com_from_payslip }
 
@@ -314,11 +323,18 @@ function parseCowayPayslip(text) {
         sec.name === 'Sales Overidding Commission ( HM Rental & 1st Installment Month)') {
       // 1st Install section - contains: subtotal, regular "1 pv amount" rows, and order rows
       // Regular rows (month=1, no bonus_pct) go to passive (already counted in 70% section)
-      // Just add subtotal to passive
+      // Add subtotal to passive. Separately, for the "Overidding" variant specifically,
+      // also capture this section's own subtotal as overriding_1st_install_total — this
+      // is one of the two figures (along with allowance_total) used to compute a
+      // manager's Manager Comm pool when this payslip belongs to one of the four
+      // managers (KY/Chloe/Carine/Jess) rather than a regular proxy account.
       for (let j = sLines.length-1; j >= 0; j--) {
         const m = sLines[j].match(/^([\d,]+\.\d{2})$/);
         if (m && pn(m[1]) < 500) { // subtotal should be modest
           passive_and_tbc_total = r2(passive_and_tbc_total + pn(m[1]));
+          if (sec.name.includes('Overidding')) {
+            overriding_1st_install_total = r2(overriding_1st_install_total + pn(m[1]));
+          }
           break;
         }
       }
@@ -477,6 +493,7 @@ function parseCowayPayslip(text) {
     allowance_per_order: allowancePerOrder,
     passive_and_tbc_total: passive_derived,
     tbc_total,
+    overriding_1st_install_total,
     allowances,
     new_orders: new_orders_detail,
     _verify_total: verify_total,
