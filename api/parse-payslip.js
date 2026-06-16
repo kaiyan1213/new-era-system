@@ -241,42 +241,9 @@ function parseCowayPayslip(text) {
     const sLines = lines.slice(sec.idx + 1, nextIdx);
 
     if (sec.name === 'Allowance') {
-      // From raw text: amounts appear BEFORE the Allowance header in the Food Supplements section
-      // Structure is: " 6,100.00\n 2,000.00\n 4,100.00\nAmount\nDescription\nAllowance\nSPECIAL WS\nHP NEW PI"
-      // (total followed by individual amounts, one per label)
-      // So by the time we reach Allowance section, the amounts are already parsed above
-      // Instead, look BACKWARDS from Allowance header for the amounts, then match with descriptions
-      //
-      // NEWER LAYOUT (seen on manager payslips, e.g. Carine's): each
-      // allowance line item appears WITHIN the section itself, either as
-      // "LABEL  AMOUNT" on one line or LABEL/AMOUNT on adjacent lines —
-      // and the label isn't always one of the old hardcoded strings (e.g.
-      // "15W50S" isn't "SPECIAL WS"/"HP NEW PI"/"CASH INCENTIVE"). Try this
-      // general parse first; it doesn't depend on a fixed label list.
-      for (let j = 0; j < sLines.length; j++) {
-        const l = sLines[j];
-        if (l === 'Description' || l === 'Amount' || l === 'Description Amount' || /^[\d,]+\.\d{2}$/.test(l)) continue;
-        const sameLine = l.match(/^(.+?)\s+([\d,]+\.\d{2})$/);
-        if (sameLine) {
-          allowances.push({ description: sameLine[1].trim(), amount: pn(sameLine[2]) });
-          continue;
-        }
-        const nextLine = sLines[j+1];
-        if (nextLine && /^[\d,]+\.\d{2}$/.test(nextLine) && l.length > 0 && !/^[\d,]+\.\d{2}$/.test(l)) {
-          allowances.push({ description: l, amount: pn(nextLine) });
-          j++;
-        }
-      }
-
-      // Fallback to the older backward-scan approach (fixed label list,
-      // amounts before the header) only if the general parse above found
-      // nothing — preserves behavior for older-format payslips.
-      if (allowances.length === 0) {
-      const descLabels = [];
-      for (const l of sLines) {
-        if (l === 'SPECIAL WS' || l === 'HP NEW PI' || l === 'CASH INCENTIVE') descLabels.push(l);
-      }
-      // Find amounts just before Allowance header in the full lines array
+      // pdf-parse layout: amounts appear BEFORE the Allowance header; look
+      // backward to collect them. Labels appear AFTER the header in
+      // sLines, each on its own line (not merged with the amount).
       const allowHeaderIdx = sec.idx;
       const amountsBefore = [];
       for (let k = allowHeaderIdx - 1; k >= Math.max(0, allowHeaderIdx - 15); k--) {
@@ -284,36 +251,28 @@ function parseCowayPayslip(text) {
         if (m) amountsBefore.unshift(pn(m[1]));
         else if (lines[k].includes('Food Supplements') || lines[k].includes('Order No')) break;
       }
-      // The first amount is the total/subtotal; the remaining amounts (one per label) are the individual items.
-      // amountsBefore.length should be descLabels.length + 1 (total + each item).
-      // Drop the leading total, keep the rest in order — this works even when an
-      // individual amount happens to equal the total (single-item case).
-      if (amountsBefore.length === descLabels.length + 1) {
-        const indivAmounts = amountsBefore.slice(1);
-        descLabels.forEach((desc, i) => {
-          allowances.push({ description: desc, amount: indivAmounts[i] });
-        });
-      } else if (amountsBefore.length > 1) {
-        // Fallback to old "drop one max value" approach for mismatched counts
+      if (amountsBefore.length > 1) {
         const maxVal = Math.max(...amountsBefore);
-        const maxIdx = amountsBefore.indexOf(maxVal);
-        const indivAmounts = amountsBefore.filter((_, i) => i !== maxIdx);
+        const indivAmounts = amountsBefore.filter(n => n !== maxVal);
+        // Collect description labels from sLines: any non-numeric,
+        // non-header line before the first order-number-like line.
+        const descLabels = [];
+        for (const l of sLines) {
+          if (l === 'Description' || l === 'Amount') continue;
+          if (l.match(/^[\d,]+\.\d{2}$/) || l.match(/^\d+$/)) continue;
+          if (l.match(/^\d{4,}/)) break;
+          descLabels.push(l);
+        }
         descLabels.forEach((desc, i) => {
           if (i < indivAmounts.length) allowances.push({ description: desc, amount: indivAmounts[i] });
         });
-      } else if (amountsBefore.length === 1 && descLabels.length === 1) {
-        allowances.push({ description: descLabels[0], amount: amountsBefore[0] });
-      }
-      // Fallback: if no amounts found before, check after
-      if (allowances.length === 0) {
-        for (let j = 0; j < sLines.length; j++) {
-          const l = sLines[j];
-          if (l === 'SPECIAL WS' || l === 'HP NEW PI' || l === 'CASH INCENTIVE') {
-            const nm = sLines[j+1]?.match(/^([\d,]+\.\d{2})$/);
-            if (nm) { allowances.push({ description: l, amount: pn(nm[1]) }); j++; }
-          }
+      } else if (amountsBefore.length === 1) {
+        for (const l of sLines) {
+          if (l === 'Description' || l === 'Amount' || l.match(/^[\d,]+\.?\d*$/) || l.match(/^\d+$/)) continue;
+          if (l.match(/^\d{4,}/)) break;
+          allowances.push({ description: l, amount: amountsBefore[0] });
+          break;
         }
-      }
       }
       continue;
     }
@@ -355,20 +314,28 @@ function parseCowayPayslip(text) {
       // is one of the two figures (along with allowance_total) used to compute a
       // manager's Manager Comm pool when this payslip belongs to one of the four
       // managers (KY/Chloe/Carine/Jess) rather than a regular proxy account.
-      for (let j = sLines.length-1; j >= 0; j--) {
+      //
+      // The section's own subtotal is the LAST value in the leading run of
+      // standalone decimals at the very start of sLines (before the first
+      // num/order row) — NOT simply "the last standalone decimal in the
+      // section", since a value from the PRECEDING section (e.g. 438.62,
+      // the closing subtotal of whatever section came right before this
+      // header) can appear as the first line here due to how secBounds
+      // slices line ranges, and must be excluded. Walking forward through
+      // the leading cluster and keeping the last one seen gives exactly
+      // this section's own subtotal (84.00 for Carine's case, where the
+      // leading cluster is [438.62, 84.00] — 438.62 belongs to the prior
+      // section and gets overwritten/skipped by taking the LAST value).
+      let leadingTotal = null;
+      for (let j = 0; j < sLines.length; j++) {
         const m = sLines[j].match(/^([\d,]+\.\d{2})$/);
-        // Sanity cap raised from 500 to 50000: a section with many order
-        // rows (e.g. Carine's 2nd "Overidding ... 1st Installment Month"
-        // occurrence, subtotal 2,653.50) can legitimately exceed the old
-        // 500 cap. The cap still guards against accidentally grabbing
-        // total_net_payable or some other much larger running total that
-        // might appear within this section's line range.
-        if (m && pn(m[1]) < 50000) {
-          passive_and_tbc_total = r2(passive_and_tbc_total + pn(m[1]));
-          if (sec.name.includes('Overidding')) {
-            overriding_1st_install_total = r2(overriding_1st_install_total + pn(m[1]));
-          }
-          break;
+        if (m) { leadingTotal = pn(m[1]); }
+        else { break; }
+      }
+      if (leadingTotal !== null) {
+        passive_and_tbc_total = r2(passive_and_tbc_total + leadingTotal);
+        if (sec.name.includes('Overidding')) {
+          overriding_1st_install_total = r2(overriding_1st_install_total + leadingTotal);
         }
       }
       continue;
@@ -429,6 +396,15 @@ function parseCowayPayslip(text) {
       const trailing = numRows.filter(n => n.months > 1).reduce((s,n) => r2(s+n.amount), 0);
       passive_and_tbc_total = r2(passive_and_tbc_total + trailing);
       newAmt.forEach(pairMonths1);
+      // For "Overidding" sections specifically (e.g. the "Other Installment
+      // Month" variant, whose section-ending subtotal is computed above as
+      // `subtotal`), also capture it into overriding_1st_install_total —
+      // this is one of the two figures (with allowance_total) used for a
+      // manager's Manager Comm pool. Doesn't affect the bonus-order
+      // pairing logic above, which is unchanged.
+      if (sec.name.includes('Overidding')) {
+        overriding_1st_install_total = r2(overriding_1st_install_total + subtotal);
+      }
     } else if (isOtherInstall) {
       // The "1st Installment Month" and "Other Installment Month" sections share one
       // combined block of numRows + orderRows (their headers appear back-to-back in
