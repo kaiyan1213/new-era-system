@@ -519,7 +519,7 @@
         </div>
       </div>
       <div style="font-size:11px;color:var(--muted);padding:8px 14px;border-bottom:1px solid var(--border)">
-        Pulls each staff's <code>installed=true</code> orders for the selected month from 收单追踪 (matched via the "收单追踪 Staff Name" set on each staff member below), applies the commission tier (RM50/order for orders 1–20, +RM1000 bonus at the 10th, +RM1000 at the 20th, RM100/order from the 21st onward), then lets you save each as a payroll record and/or generate a printable payslip.
+        Pulls every new order from this month's Coway payslips (the authoritative list, across all proxies) and cross-checks it against 收单追踪's <code>installed=true</code> claims (matched by customer name, same month — via the "收单追踪 Staff Name" set on each staff member below). Only orders verified against an actual payslip count toward commission (RM50/order for orders 1–20, +RM1000 bonus at the 10th, +RM1000 at the 20th, RM100/order from the 21st onward). Payslip orders with no matching staff claim show up below for manual assignment; 收单追踪 claims with no matching payslip order are flagged as unverified and excluded.
       </div>
       <div id="autoCommContainer">
         <div class="empty"><div class="empty-text">Set each staff's 收单追踪 name below, then click "🔄 Preview".</div></div>
@@ -2625,49 +2625,140 @@ function calcCommissionTier(orderCount) {
 }
 
 let autoCommissionData = [];
+let unmatchedPayslipOrders = []; // orphan orders needing manual staff assignment
+let unverifiedLeadClaims = [];   // 收单追踪 claims with no matching payslip order
 
-// Pulls installed orders for the selected month from 收单追踪 (staff_leads),
-// grouped by staff_name, then maps each group to a nec_staff record via
-// lead_staff_name and computes the commission tier.
+function normName(s) {
+  return (s || '').toString().trim().toUpperCase().replace(/\s+/g, ' ');
+}
+
+// Defensively flattens nec_payslip_breakdown.categories_json into a flat
+// list of {order_no, customer_name}. Handles both the current flat-array
+// shape (each element IS an order) and an older nested shape (each element
+// is a category containing its own new_orders array), in case any rows
+// were saved under a different code path.
+function flattenBreakdownOrders(categoriesJson) {
+  let cats;
+  try { cats = JSON.parse(categoriesJson || '[]'); } catch(e) { return []; }
+  if (!Array.isArray(cats)) return [];
+  const out = [];
+  for (const c of cats) {
+    if (c && Array.isArray(c.new_orders)) {
+      // nested shape: category -> new_orders[]
+      for (const o of c.new_orders) {
+        if (o && (o.order_no || o.customer_name)) out.push({ order_no: o.order_no || null, customer_name: o.customer_name || '' });
+      }
+    } else if (c && (c.order_no || c.customer_name)) {
+      // flat shape: c itself is an order
+      out.push({ order_no: c.order_no || null, customer_name: c.customer_name || '' });
+    }
+  }
+  return out;
+}
+
+// Reconciliation workflow:
+// 1. Pull every new-order from this month's Coway payslips (all proxies) — the authoritative list.
+// 2. Pull this month's 收单追踪 installed=true claims (customer_name + staff_name).
+// 3. Match by normalized customer_name, same month only.
+// 4. Matched payslip order -> counts toward that staff's commission.
+// 5. Payslip order with no matching claim -> "orphan", needs manual staff assignment (persisted in nec_order_assignments).
+// 6. 收单追踪 claim with no matching payslip order -> unverified, not counted.
 async function previewAutoCommission() {
   const year = parseInt(document.getElementById('acYear').value);
   const month = parseInt(document.getElementById('acMonth').value);
   const container = document.getElementById('autoCommContainer');
-  container.innerHTML = `<div class="empty"><div class="empty-text">Loading from 收单追踪...</div></div>`;
+  container.innerHTML = `<div class="empty"><div class="empty-text">Reconciling Coway payslips against 收单追踪...</div></div>`;
 
   try {
     await loadStaff();
+
+    // 1. Authoritative payslip orders for this month, across all proxies.
+    const breakdowns = await sb('nec_payslip_breakdown', { filter: `year=eq.${year}&month=eq.${month}`, select: '*' });
+    let payslipOrders = [];
+    breakdowns.forEach(b => {
+      const orders = flattenBreakdownOrders(b.categories_json);
+      orders.forEach(o => payslipOrders.push({
+        order_no: o.order_no,
+        customer_name: o.customer_name,
+        norm_name: normName(o.customer_name),
+        proxy_id: b.proxy_id,
+        proxy_name: (proxyList.find(p => p.id === b.proxy_id) || {}).name || b.distributor_code || '—'
+      }));
+    });
+
+    // 2. 收单追踪 installed=true claims for this month.
     const start = `${year}-${String(month).padStart(2,'0')}-01`;
     const endMonth = month === 12 ? 1 : month + 1;
     const endYear = month === 12 ? year + 1 : year;
     const end = `${endYear}-${String(endMonth).padStart(2,'0')}-01`;
-
     const leads = await sb('staff_leads', {
       filter: `installed=eq.true&install_date=gte.${start}&install_date=lt.${end}`,
       select: 'staff_name,customer_name,product_model,install_date,team'
     });
-
-    // Group by staff_name
-    const byStaff = {};
+    const leadsByNormName = {};
     leads.forEach(l => {
-      const key = l.staff_name || 'Unknown';
-      if (!byStaff[key]) byStaff[key] = [];
-      byStaff[key].push(l);
+      const key = normName(l.customer_name);
+      if (!key) return;
+      if (!leadsByNormName[key]) leadsByNormName[key] = [];
+      leadsByNormName[key].push(l);
     });
 
+    // 3. Existing manual assignments for orphan orders this month.
+    const assignments = await sb('nec_order_assignments', { filter: `year=eq.${year}&month=eq.${month}` });
+    const assignByKey = {};
+    assignments.forEach(a => { assignByKey[`${a.proxy_id}|${a.order_no}|${normName(a.customer_name)}`] = a; });
+
     const salesStaff = staffList.filter(s => s.staff_type === 'sales');
+    const staffByLeadName = {};
+    salesStaff.forEach(s => { if (s.lead_staff_name) staffByLeadName[s.lead_staff_name] = s; });
+
+    // 4/5. Walk every payslip order, resolve which staff it belongs to.
+    const matchedByStaffId = {}; // staff_id -> [{order_no, customer_name, ...}]
+    unmatchedPayslipOrders = [];
+    const matchedNormNamesUsed = new Set();
+
+    payslipOrders.forEach(po => {
+      const assignKey = `${po.proxy_id}|${po.order_no}|${po.norm_name}`;
+      const manualAssign = assignByKey[assignKey];
+      let staff = null;
+
+      if (manualAssign) {
+        staff = staffList.find(s => s.id === manualAssign.staff_id);
+      } else {
+        const claims = leadsByNormName[po.norm_name];
+        if (claims && claims.length) {
+          const leadStaffName = claims[0].staff_name;
+          staff = staffByLeadName[leadStaffName];
+        }
+      }
+
+      if (staff) {
+        if (!matchedByStaffId[staff.id]) matchedByStaffId[staff.id] = [];
+        matchedByStaffId[staff.id].push(po);
+        matchedNormNamesUsed.add(po.norm_name);
+      } else {
+        unmatchedPayslipOrders.push(po);
+      }
+    });
+
+    // 6. 收单追踪 claims with no matching payslip order at all (informational only).
+    unverifiedLeadClaims = leads.filter(l => {
+      const key = normName(l.customer_name);
+      return !payslipOrders.some(po => po.norm_name === key);
+    });
+
     autoCommissionData = salesStaff
       .filter(s => s.lead_staff_name)
       .map(s => {
-        const orders = byStaff[s.lead_staff_name] || [];
+        const orders = (matchedByStaffId[s.id] || []).map(o => ({
+          customer_name: o.customer_name,
+          order_no: o.order_no,
+          product_model: o.proxy_name, // reused field for display in payslip/orders modal
+          install_date: ''
+        }));
         const { commission, breakdown } = calcCommissionTier(orders.length);
         return { staff: s, orders, commission, breakdown, year, month };
       });
-
-    // Also surface any 收单追踪 staff names that don't map to a nec_staff —
-    // so the admin knows to add the mapping.
-    const mappedLeadNames = salesStaff.map(s => s.lead_staff_name).filter(Boolean);
-    const unmapped = Object.keys(byStaff).filter(n => !mappedLeadNames.includes(n));
 
     if (!autoCommissionData.length) {
       container.innerHTML = `<div class="empty"><div class="empty-text">No sales staff have a 收单追踪 Staff Name set yet. Edit a staff member below and fill in "收单追踪 Staff Name".</div></div>`;
@@ -2680,7 +2771,7 @@ async function previewAutoCommission() {
           <tr>
             <th>Staff</th>
             <th>收单追踪 Name</th>
-            <th>Installed Orders</th>
+            <th>Verified Orders</th>
             <th>Commission</th>
             <th>Breakdown</th>
             <th>Actions</th>
@@ -2706,22 +2797,91 @@ async function previewAutoCommission() {
     });
     html += `</tbody></table>`;
 
-    if (unmapped.length) {
-      html += `<div style="padding:10px 14px;font-size:11px;color:var(--yellow)">⚠ 收单追踪 has orders from staff names not mapped to anyone: ${unmapped.map(n=>`"${n}"`).join(', ')}. Add these as "收单追踪 Staff Name" on the matching staff member below if they should be included.</div>`;
+    // Unmatched payslip orders — every order must belong to someone.
+    if (unmatchedPayslipOrders.length) {
+      html += `
+        <div style="margin-top:18px;padding:14px;border:1px solid var(--yellow);border-radius:8px">
+          <div style="font-weight:700;color:var(--yellow);margin-bottom:8px">⚠ Unmatched Payslip Orders (${unmatchedPayslipOrders.length}) — every order must belong to someone</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:10px">These orders appeared in this month's Coway payslips but no 收单追踪 installed=true claim matched the customer name. Assign each to a staff member manually.</div>
+          <table>
+            <thead><tr><th>Order No</th><th>Customer</th><th>Proxy</th><th>Assign To</th></tr></thead>
+            <tbody>
+              ${unmatchedPayslipOrders.map((o, i) => `
+                <tr>
+                  <td class="td-mono">${o.order_no || '—'}</td>
+                  <td class="td-name">${o.customer_name || '—'}</td>
+                  <td class="td-muted">${o.proxy_name}</td>
+                  <td>
+                    <select id="orphanAssign_${i}" style="font-size:12px;padding:4px 6px">
+                      <option value="">— select staff —</option>
+                      ${salesStaff.map(s => `<option value="${s.id}">${s.name}</option>`).join('')}
+                    </select>
+                    <button class="btn btn-primary btn-sm" onclick="assignOrphanOrder(${i})">Assign</button>
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    }
+
+    // Unverified 收单追踪 claims — informational, not counted.
+    if (unverifiedLeadClaims.length) {
+      html += `
+        <div style="margin-top:14px;padding:14px;border:1px solid var(--border);border-radius:8px">
+          <div style="font-weight:700;color:var(--muted);margin-bottom:8px">ℹ Unverified 收单追踪 Claims (${unverifiedLeadClaims.length}) — not counted in commission</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:10px">These were marked installed=true in 收单追踪 but no matching customer name was found in this month's Coway payslips.</div>
+          <table>
+            <thead><tr><th>Customer</th><th>Staff (claimed)</th><th>Product</th><th>Install Date</th></tr></thead>
+            <tbody>
+              ${unverifiedLeadClaims.map(l => `
+                <tr>
+                  <td class="td-name">${l.customer_name || '—'}</td>
+                  <td class="td-muted">${l.staff_name || '—'}</td>
+                  <td class="td-muted">${l.product_model || '—'}</td>
+                  <td class="td-muted">${l.install_date || '—'}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
     }
 
     container.innerHTML = html;
   } catch(e) {
     console.error(e);
-    container.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading from 收单追踪: ${e.message}</div></div>`;
+    container.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Error reconciling: ${e.message}</div></div>`;
   }
+}
+
+async function assignOrphanOrder(i) {
+  const o = unmatchedPayslipOrders[i];
+  const sel = document.getElementById(`orphanAssign_${i}`);
+  const staffId = sel?.value;
+  if (!staffId) { showToast('Pick a staff member first', 'error'); return; }
+  const year = parseInt(document.getElementById('acYear').value);
+  const month = parseInt(document.getElementById('acMonth').value);
+  try {
+    await sb('nec_order_assignments', {
+      method: 'POST',
+      body: {
+        year, month,
+        order_no: o.order_no,
+        customer_name: o.customer_name,
+        proxy_id: o.proxy_id,
+        staff_id: staffId,
+        source: 'manual'
+      }
+    });
+    await logAudit('CREATE', 'nec_order_assignments', `Assigned order ${o.order_no || o.customer_name} to staff`);
+    showToast('Assigned ✓');
+    previewAutoCommission();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
 function viewAutoCommOrders(idx) {
   const row = autoCommissionData[idx];
   if (!row) return;
-  const list = row.orders.map((o,i) => `${i+1}. ${o.customer_name || '—'} — ${o.product_model || '—'} (installed ${o.install_date})`).join('\n');
-  alert(`${row.staff.name} — ${MONTHS[row.month]} ${row.year}\n${row.orders.length} installed orders:\n\n${list || '(none)'}`);
+  const list = row.orders.map((o,i) => `${i+1}. ${o.customer_name || '—'} — Order ${o.order_no || '—'} (${o.product_model || '—'})`).join('\n');
+  alert(`${row.staff.name} — ${MONTHS[row.month]} ${row.year}\n${row.orders.length} payslip-verified orders:\n\n${list || '(none)'}`);
 }
 
 async function saveAutoCommissionRow(idx) {
@@ -2763,8 +2923,8 @@ function generateStaffPayslip(idx) {
     <tr>
       <td style="padding:4px 8px;border-bottom:1px solid #eee">${i+1}</td>
       <td style="padding:4px 8px;border-bottom:1px solid #eee">${o.customer_name || '—'}</td>
+      <td style="padding:4px 8px;border-bottom:1px solid #eee">${o.order_no || '—'}</td>
       <td style="padding:4px 8px;border-bottom:1px solid #eee">${o.product_model || '—'}</td>
-      <td style="padding:4px 8px;border-bottom:1px solid #eee">${o.install_date || '—'}</td>
     </tr>`).join('');
 
   const html = `
@@ -2783,23 +2943,23 @@ function generateStaffPayslip(idx) {
         <div><strong>Name:</strong> ${staff.name}</div>
         <div><strong>Role:</strong> ${staff.role || '—'}</div>
         <div><strong>Channel:</strong> ${staff.channel || '—'}</div>
-        <div><strong>Installed Orders:</strong> ${orders.length}</div>
+        <div><strong>Verified Orders:</strong> ${orders.length}</div>
       </div>
       <div style="background:#f5f5f5;border-radius:6px;padding:12px;margin-bottom:16px;font-size:13px">
         <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Base Salary</span><span>RM ${fmtNum(baseSalary)}</span></div>
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Commission (${orders.length} installed orders)</span><span>RM ${fmtNum(commission)}</span></div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Commission (${orders.length} payslip-verified orders)</span><span>RM ${fmtNum(commission)}</span></div>
         <div style="font-size:11px;color:#666;margin-top:4px">${breakdown}</div>
         <div style="display:flex;justify-content:space-between;font-weight:800;font-size:15px;border-top:1px solid #ccc;margin-top:8px;padding-top:8px"><span>Total Pay</span><span>RM ${fmtNum(total)}</span></div>
       </div>
-      <div style="font-size:12px;font-weight:700;margin-bottom:6px">Installed Orders Detail</div>
+      <div style="font-size:12px;font-weight:700;margin-bottom:6px">Verified Orders Detail</div>
       <table style="width:100%;border-collapse:collapse;font-size:12px">
         <thead><tr style="background:#f0f0f0">
           <th style="padding:4px 8px;text-align:left">#</th>
           <th style="padding:4px 8px;text-align:left">Customer</th>
-          <th style="padding:4px 8px;text-align:left">Product</th>
-          <th style="padding:4px 8px;text-align:left">Install Date</th>
+          <th style="padding:4px 8px;text-align:left">Order No</th>
+          <th style="padding:4px 8px;text-align:left">Proxy</th>
         </tr></thead>
-        <tbody>${orderRows || `<tr><td colspan="4" style="padding:8px;color:#999">No installed orders this month</td></tr>`}</tbody>
+        <tbody>${orderRows || `<tr><td colspan="4" style="padding:8px;color:#999">No verified orders this month</td></tr>`}</tbody>
       </table>
     </div>`;
 
@@ -3293,6 +3453,19 @@ CREATE TABLE IF NOT EXISTS nec_payslip_breakdown (
   UNIQUE(proxy_id, year, month)
 );
 
+CREATE TABLE IF NOT EXISTS nec_order_assignments (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  year int NOT NULL,
+  month int NOT NULL,
+  order_no text,
+  customer_name text NOT NULL,
+  proxy_id uuid REFERENCES proxy_accounts(id),
+  staff_id uuid REFERENCES nec_staff(id),
+  source text DEFAULT 'manual',
+  created_at timestamptz DEFAULT now(),
+  UNIQUE(year, month, proxy_id, order_no, customer_name)
+);
+
 CREATE TABLE IF NOT EXISTS nec_bank_directory (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   name text NOT NULL,
@@ -3359,7 +3532,7 @@ async function saveManagers() {
 async function testConnection() {
   const result = document.getElementById('connTestResult');
   result.textContent = 'Testing...';
-  const tables = ['proxy_accounts','proxy_invoices','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_pl_costs','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads'];
+  const tables = ['proxy_accounts','proxy_invoices','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_pl_costs','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads','nec_order_assignments'];
   const results = [];
   for (const t of tables) {
     try {
