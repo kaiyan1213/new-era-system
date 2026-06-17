@@ -1409,11 +1409,11 @@
             <option value="admin">Admin (Fixed Salary)</option>
           </select>
         </div>
-        <div class="form-group">
-          <label class="form-label">Channel</label>
+        <div class="form-group" id="channelField">
+          <label class="form-label">Channel (also the commission algorithm)</label>
           <select id="staffChannel" class="form-input">
-            <option value="DM">DM</option><option value="TM">TM</option>
-            <option value="XHS">XHS</option><option value="OTHER">Other/Admin</option>
+            <option value="DM">DM (RM50/order tiered + milestone bonuses)</option>
+            <option value="TM">TM (50/70/90% split of payslip commission)</option>
           </select>
         </div>
       </div>
@@ -1432,14 +1432,6 @@
           <label class="form-label">收单追踪 Staff Name (for auto commission)</label>
           <input type="text" id="staffLeadName" class="form-input" placeholder="e.g. Elysa, Ze Heng">
           <div style="font-size:11px;color:var(--muted);margin-top:4px">Must match the "Staff" name exactly as it appears in 收单追踪 (staff_leads.staff_name)</div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Default Commission Algorithm</label>
-          <select id="staffDefaultAlgo" class="form-input">
-            <option value="dm">DM (RM50/order tiered + milestone bonuses)</option>
-            <option value="tm">TM (50/70/90% split of payslip commission)</option>
-          </select>
-          <div style="font-size:11px;color:var(--muted);margin-top:4px">Pre-fills the algorithm when assigning this staff's orders in Auto Commission Matching. DM and TM never mix on one staff — only individual orders can still be flipped to Outsider there.</div>
         </div>
       </div>
       <div class="form-row">
@@ -1475,16 +1467,16 @@
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Staff Type</label>
-          <select id="editStaffType" class="form-input">
+          <select id="editStaffType" class="form-input" onchange="toggleEditStaffFields()">
             <option value="sales">Sales (Commission-based)</option>
             <option value="admin">Admin (Fixed Salary)</option>
           </select>
         </div>
-        <div class="form-group">
-          <label class="form-label">Channel</label>
+        <div class="form-group" id="editChannelField">
+          <label class="form-label">Channel (also the commission algorithm)</label>
           <select id="editStaffChannel" class="form-input">
-            <option value="DM">DM</option><option value="TM">TM</option>
-            <option value="XHS">XHS</option><option value="OTHER">Other/Admin</option>
+            <option value="DM">DM (RM50/order tiered + milestone bonuses)</option>
+            <option value="TM">TM (50/70/90% split of payslip commission)</option>
           </select>
         </div>
       </div>
@@ -1503,13 +1495,6 @@
           <label class="form-label">收单追踪 Staff Name (for auto commission)</label>
           <input type="text" id="editStaffLeadName" class="form-input" placeholder="e.g. Elysa, Ze Heng">
           <div style="font-size:11px;color:var(--muted);margin-top:4px">Must match the "Staff" name exactly as it appears in 收单追踪 (staff_leads.staff_name)</div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Default Commission Algorithm</label>
-          <select id="editStaffDefaultAlgo" class="form-input">
-            <option value="dm">DM (RM50/order tiered + milestone bonuses)</option>
-            <option value="tm">TM (50/70/90% split of payslip commission)</option>
-          </select>
         </div>
       </div>
       <div class="form-row">
@@ -2856,6 +2841,14 @@ function toggleStaffFields() {
   const type = document.getElementById('staffType').value;
   document.getElementById('commField').style.opacity = type === 'sales' ? '1' : '0.3';
   document.getElementById('salaryField').style.opacity = type === 'admin' ? '1' : '0.3';
+  const channelField = document.getElementById('channelField');
+  if (channelField) channelField.style.display = type === 'sales' ? '' : 'none';
+}
+
+function toggleEditStaffFields() {
+  const type = document.getElementById('editStaffType').value;
+  const channelField = document.getElementById('editChannelField');
+  if (channelField) channelField.style.display = type === 'sales' ? '' : 'none';
 }
 
 async function saveStaff() {
@@ -2868,7 +2861,6 @@ async function saveStaff() {
     base_salary: parseFloat(document.getElementById('staffSalary').value) || 0,
     lead_staff_name: document.getElementById('staffLeadName').value.trim() || null,
     epf_applicable: document.getElementById('staffEpf').checked,
-    default_commission_algo: document.getElementById('staffDefaultAlgo')?.value || 'dm',
   };
   if (!body.name) return showToast('Name required', 'error');
   try {
@@ -2892,7 +2884,7 @@ function renderStaffList() {
       <td class="td-name">${s.name}</td>
       <td class="td-muted">${s.role || '—'}</td>
       <td><span class="badge badge-${(s.channel||'dm').toLowerCase()}">${s.channel || '—'}</span></td>
-      <td><span class="badge badge-${s.staff_type === 'sales' ? 'dm' : 'other'}">${s.staff_type}</span>${s.epf_applicable ? ' <span class="badge badge-other" title="EPF applicable">EPF</span>' : ''}${s.staff_type === 'sales' ? ` <span class="badge badge-other" title="Default commission algorithm">${(s.default_commission_algo || 'dm').toUpperCase()}</span>` : ''}</td>
+      <td><span class="badge badge-${s.staff_type === 'sales' ? 'dm' : 'other'}">${s.staff_type}</span>${s.epf_applicable ? ' <span class="badge badge-other" title="EPF applicable">EPF</span>' : ''}</td>
       <td class="td-mono">${fmt(s.commission_per_order)}</td>
       <td class="td-mono">${fmt(s.base_salary)}</td>
       <td class="td-mono">${s.lead_staff_name || '<span class="td-muted">— not mapped —</span>'}</td>
@@ -2912,7 +2904,7 @@ function openEditStaffModal(id) {
   document.getElementById('editStaffSalary').value = s.base_salary || 0;
   document.getElementById('editStaffLeadName').value = s.lead_staff_name || '';
   document.getElementById('editStaffEpf').checked = !!s.epf_applicable;
-  if (document.getElementById('editStaffDefaultAlgo')) document.getElementById('editStaffDefaultAlgo').value = s.default_commission_algo || 'dm';
+  toggleEditStaffFields();
   openModal('modalEditStaff');
 }
 
@@ -2927,7 +2919,6 @@ async function saveEditStaff() {
     base_salary: parseFloat(document.getElementById('editStaffSalary').value) || 0,
     lead_staff_name: document.getElementById('editStaffLeadName').value.trim() || null,
     epf_applicable: document.getElementById('editStaffEpf').checked,
-    default_commission_algo: document.getElementById('editStaffDefaultAlgo')?.value || 'dm',
   };
   if (!body.name) return showToast('Name required', 'error');
   try {
@@ -3157,10 +3148,12 @@ async function previewAutoCommission() {
         if (!matchedByStaffId[staff.id]) matchedByStaffId[staff.id] = [];
         // commission_algo resolution: an explicit per-order choice
         // recorded on the assignment (set via the algo dropdown in the UI)
-        // takes precedence; otherwise fall back to the staff's own
-        // default_commission_algo (dm/tm). This is what lets the same
-        // staff have a mix of e.g. 90% DM orders + a few Outsider orders.
-        const algo = (manualAssign && manualAssign.commission_algo) || staff.default_commission_algo || 'dm';
+        // takes precedence; otherwise fall back to the staff's own Channel
+        // (DM/TM) — Channel IS the commission algorithm for sales staff,
+        // not a separate concept, so there's no dedicated
+        // default_commission_algo field. This is what lets the same staff
+        // have a mix of e.g. mostly-DM orders + a few Outsider orders.
+        const algo = (manualAssign && manualAssign.commission_algo) || (staff.channel || 'DM').toLowerCase();
         matchedByStaffId[staff.id].push({ ...po, commission_algo: algo });
         matchedNormNamesUsed.add(po.norm_name);
       } else {
@@ -3261,7 +3254,7 @@ async function previewAutoCommission() {
                   <td>
                     <select id="orphanAssign_${i}" style="font-size:12px;padding:4px 6px" onchange="updateOrphanAlgoDefault(${i})">
                       <option value="">— select staff —</option>
-                      ${salesStaff.map(s => `<option value="${s.id}" data-algo="${s.default_commission_algo || 'dm'}">${s.name}</option>`).join('')}
+                      ${salesStaff.map(s => `<option value="${s.id}" data-algo="${(s.channel || 'DM').toLowerCase()}">${s.name}</option>`).join('')}
                     </select>
                     <select id="orphanAlgo_${i}" style="font-size:12px;padding:4px 6px">
                       <option value="dm">DM</option>
@@ -3284,9 +3277,9 @@ async function previewAutoCommission() {
 }
 
 // When a staff is picked in the orphan-order assignment row, default the
-// adjacent algorithm dropdown to that staff's own default_commission_algo
-// — the person assigning can still override it to Outsider for this
-// specific order.
+// adjacent algorithm dropdown to that staff's own Channel (DM/TM) — the
+// person assigning can still override it to Outsider for this specific
+// order.
 function updateOrphanAlgoDefault(i) {
   const sel = document.getElementById(`orphanAssign_${i}`);
   const algoSel = document.getElementById(`orphanAlgo_${i}`);
@@ -3333,12 +3326,13 @@ function populateBulkMatchStaffSelect() {
   if (!sel) return;
   const salesStaff = staffList.filter(s => s.staff_type === 'sales');
   sel.innerHTML = `<option value="">— select staff —</option>` +
-    salesStaff.map(s => `<option value="${s.id}" data-algo="${s.default_commission_algo || 'dm'}">${s.name}</option>`).join('');
+    salesStaff.map(s => `<option value="${s.id}" data-algo="${(s.channel || 'DM').toLowerCase()}">${s.name}</option>`).join('');
 }
 
 // When a staff is picked for Bulk Manual Match, default the algorithm
-// dropdown to that staff's own default_commission_algo — can still be
-// overridden to Outsider if this whole pasted batch is non-ad-sourced.
+// dropdown to that staff's own Channel (DM/TM — Channel IS the algorithm,
+// not a separate concept) — can still be overridden to Outsider if this
+// whole pasted batch is non-ad-sourced.
 function updateBulkMatchAlgoDefault() {
   const sel = document.getElementById('bulkMatchStaff');
   const algoSel = document.getElementById('bulkMatchAlgo');
@@ -4486,17 +4480,17 @@ CREATE TABLE IF NOT EXISTS nec_staff (
   lead_staff_name text,
   epf_applicable boolean DEFAULT false,
   is_active boolean DEFAULT true,
-  created_at timestamptz DEFAULT now(),
-  default_commission_algo text DEFAULT 'dm'
+  created_at timestamptz DEFAULT now()
 );
 
 ALTER TABLE nec_staff ADD COLUMN IF NOT EXISTS lead_staff_name text;
 ALTER TABLE nec_staff ADD COLUMN IF NOT EXISTS epf_applicable boolean DEFAULT false;
--- Each sales staff has a default commission algorithm ('dm' or 'tm') used
--- to pre-fill the per-order algorithm choice in Auto Commission Matching.
--- DM and TM never mix on the same staff member; only Outsider can be
--- applied per-order on top of either default, for specific non-ad orders.
-ALTER TABLE nec_staff ADD COLUMN IF NOT EXISTS default_commission_algo text DEFAULT 'dm';
+-- NOTE: Channel (DM/TM) on a sales staff IS the commission algorithm —
+-- there is intentionally no separate "default commission algorithm"
+-- field. A staff's Channel determines which formula applies by default
+-- (DM: RM50/order tiered; TM: 50/70/90% split of payslip commission);
+-- individual orders can still be overridden to Outsider (100% of payslip
+-- commission) via the per-order commission_algo on nec_order_assignments.
 
 CREATE TABLE IF NOT EXISTS nec_payroll (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -4653,7 +4647,8 @@ CREATE TABLE IF NOT EXISTS nec_order_assignments (
 -- Per-order commission algorithm: 'dm' (RM50/order tiered), 'tm' (50/70/90%
 -- split of the payslip commission, tiered by TM order count only), or
 -- 'outsider' (100% of the payslip commission, no split). Defaults to the
--- assigned staff's default_commission_algo at assignment time, but can be
+-- assigned staff's Channel (DM/TM — Channel IS the commission algorithm
+-- for a sales staff, not a separate field) at assignment time, but can be
 -- overridden per order to 'outsider' for non-ad-sourced customers — this
 -- is why the choice lives per-order here rather than only on nec_staff.
 ALTER TABLE nec_order_assignments ADD COLUMN IF NOT EXISTS commission_algo text;
