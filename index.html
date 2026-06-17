@@ -2498,6 +2498,47 @@ function filterBankDirTable() {
   });
 }
 
+// Bank Details is the master people directory — every active person
+// there gets a mirrored nec_staff row (linked via bank_directory_id) so
+// they're selectable in order-assignment dropdowns and show up in
+// Payroll's Staff List automatically, with no separate manual step.
+// DM/TM teams map to sales staff with that Channel; everyone else
+// (Manager/Admin/Editor/Others) defaults to admin type with no base
+// salary set — anyone can have it filled in later in Payroll, and
+// anyone can still receive Outsider commission regardless of type.
+function inferStaffTypeFromTeam(team) {
+  if (team === 'Digital Marketing Team') return { staff_type: 'sales', channel: 'DM' };
+  if (team === 'Telemarketing Team') return { staff_type: 'sales', channel: 'TM' };
+  return { staff_type: 'admin', channel: null };
+}
+
+async function syncStaffFromBankEntry(bankId, name, team) {
+  if (!bankId) return;
+  try {
+    const linked = await sb('nec_staff', { filter: `bank_directory_id=eq.${bankId}`, select: 'id,name' });
+    if (linked.length) {
+      // Already synced before — keep the name current (Bank Details is
+      // the source of truth for identity) but leave staff_type/channel/
+      // base_salary alone, since those may have been deliberately tuned
+      // afterward in Payroll's own Edit Staff modal.
+      await sb('nec_staff', { method: 'PATCH', filter: `id=eq.${linked[0].id}`, body: { name } });
+      return;
+    }
+    // Not linked yet — check for a pre-existing nec_staff row with the
+    // same name (covers people seeded into nec_staff before this
+    // linkage existed) before creating a brand-new duplicate.
+    const byName = await sb('nec_staff', { filter: `name=eq.${encodeURIComponent(name)}`, select: 'id' });
+    if (byName.length) {
+      await sb('nec_staff', { method: 'PATCH', filter: `id=eq.${byName[0].id}`, body: { bank_directory_id: bankId } });
+      return;
+    }
+    const { staff_type, channel } = inferStaffTypeFromTeam(team);
+    await sb('nec_staff', { method: 'POST', body: { name, staff_type, channel, base_salary: 0, bank_directory_id: bankId, is_active: true } });
+  } catch(e) {
+    console.error('Staff sync from Bank Details failed:', e);
+  }
+}
+
 function openBankEntryModal(id) {
   document.getElementById('bankEntryId').value = '';
   document.getElementById('bankName').value = '';
@@ -2541,6 +2582,7 @@ async function saveBankEntry() {
   };
 
   try {
+    let bankId = id;
     if (id) {
       const url = `${SUPABASE_URL}/rest/v1/nec_bank_directory?id=eq.${id}`;
       await fetch(url, {
@@ -2550,9 +2592,12 @@ async function saveBankEntry() {
       });
       await logAudit('UPDATE', 'nec_bank_directory', `Edited bank details for ${name}`);
     } else {
-      await sb('nec_bank_directory', { method: 'POST', body });
+      const created = await sb('nec_bank_directory', { method: 'POST', body });
+      bankId = created?.[0]?.id;
       await logAudit('CREATE', 'nec_bank_directory', `Added bank details for ${name} (${body.team})`);
     }
+    // Keep nec_staff in sync — see syncStaffFromBankEntry for why.
+    await syncStaffFromBankEntry(bankId, name, body.team);
     showToast('Saved ✓');
     closeModal('modalBankEntry');
     loadBankDirectory();
@@ -2569,6 +2614,9 @@ async function deleteBankEntry(id) {
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ is_active: false })
     });
+    // Deactivate the linked nec_staff row too, so this person also drops
+    // out of order-assignment dropdowns and Payroll's Staff List.
+    await sb('nec_staff', { method: 'PATCH', filter: `bank_directory_id=eq.${id}`, body: { is_active: false } });
     await logAudit('DELETE', 'nec_bank_directory', `Removed ${p ? p.name : id} from bank directory`);
     showToast('Removed');
     loadBankDirectory();
@@ -3115,6 +3163,11 @@ async function previewAutoCommission() {
     const salesStaff = staffList.filter(s => s.staff_type === 'sales');
     const staffByLeadName = {};
     salesStaff.forEach(s => { if (s.lead_staff_name) staffByLeadName[normName(s.lead_staff_name)] = s; });
+    // Anyone in the directory (staff, admin, manager, editor, others) can
+    // be assigned an order — Outsider orders in particular aren't
+    // restricted to sales staff — so the manual assignment dropdown
+    // offers everyone, not just DM/TM sales staff.
+    const assignableStaff = [...staffList].sort((a,b) => a.name.localeCompare(b.name));
 
     // 4/5. Walk every payslip order, resolve which staff it belongs to.
     const matchedByStaffId = {}; // staff_id -> [{order_no, customer_name, ...}]
@@ -3161,8 +3214,23 @@ async function previewAutoCommission() {
       }
     });
 
-    autoCommissionData = salesStaff
-      .filter(s => s.lead_staff_name)
+    // Report rows: every sales staff with a 收单追踪 mapping (shown even
+    // with 0 orders, since that's useful visibility on who isn't tracked
+    // yet), PLUS anyone else — admin, manager, editor, etc — who actually
+    // received at least one order via manual/orphan assignment this
+    // month (e.g. an Outsider order). Without this second group, an
+    // order assigned to a non-sales person would silently disappear:
+    // it's removed from the "unmatched" list but would never surface as
+    // a result row, since only sales staff were ever considered here.
+    const leadMatchedStaff = salesStaff.filter(s => s.lead_staff_name);
+    const leadMatchedIds = new Set(leadMatchedStaff.map(s => s.id));
+    const extraMatchedStaff = Object.keys(matchedByStaffId)
+      .filter(sid => !leadMatchedIds.has(sid))
+      .map(sid => staffList.find(s => s.id === sid))
+      .filter(Boolean);
+    const reportStaff = [...leadMatchedStaff, ...extraMatchedStaff];
+
+    autoCommissionData = reportStaff
       .map(s => {
         const allOrders = (matchedByStaffId[s.id] || []).map(o => ({
           customer_name: o.customer_name,
@@ -3254,7 +3322,7 @@ async function previewAutoCommission() {
                   <td>
                     <select id="orphanAssign_${i}" style="font-size:12px;padding:4px 6px" onchange="updateOrphanAlgoDefault(${i})">
                       <option value="">— select staff —</option>
-                      ${salesStaff.map(s => `<option value="${s.id}" data-algo="${(s.channel || 'DM').toLowerCase()}">${s.name}</option>`).join('')}
+                      ${assignableStaff.map(s => `<option value="${s.id}" data-algo="${s.staff_type === 'sales' ? (s.channel || 'DM').toLowerCase() : 'outsider'}">${s.name}</option>`).join('')}
                     </select>
                     <select id="orphanAlgo_${i}" style="font-size:12px;padding:4px 6px">
                       <option value="dm">DM</option>
@@ -3324,9 +3392,12 @@ async function assignOrphanOrder(i) {
 function populateBulkMatchStaffSelect() {
   const sel = document.getElementById('bulkMatchStaff');
   if (!sel) return;
-  const salesStaff = staffList.filter(s => s.staff_type === 'sales');
+  // Everyone in the directory is selectable here too — a whole pasted
+  // batch of non-ad-sourced names could belong to an admin or manager
+  // just as easily as a DM/TM sales staff.
+  const sorted = [...staffList].sort((a,b) => a.name.localeCompare(b.name));
   sel.innerHTML = `<option value="">— select staff —</option>` +
-    salesStaff.map(s => `<option value="${s.id}" data-algo="${(s.channel || 'DM').toLowerCase()}">${s.name}</option>`).join('');
+    sorted.map(s => `<option value="${s.id}" data-algo="${s.staff_type === 'sales' ? (s.channel || 'DM').toLowerCase() : 'outsider'}">${s.name}</option>`).join('');
 }
 
 // When a staff is picked for Bulk Manual Match, default the algorithm
@@ -3437,6 +3508,12 @@ function viewAutoCommOrders(idx) {
 async function saveAutoCommissionRow(idx) {
   const row = autoCommissionData[idx];
   if (!row) return;
+  let epfEmployee = 0, epfEmployer = 0;
+  if (row.staff.epf_applicable) {
+    const epf = calcEpf(row.staff.base_salary || 0);
+    epfEmployee = epf.employee;
+    epfEmployer = epf.employer;
+  }
   const body = {
     staff_id: row.staff.id,
     year: row.year,
@@ -3446,6 +3523,8 @@ async function saveAutoCommissionRow(idx) {
     base_salary: row.staff.base_salary || 0,
     bonus: 0,
     deductions: 0,
+    epf_employee: epfEmployee,
+    epf_employer: epfEmployer,
   };
   try {
     // Overwrite any existing payroll record for this staff/year/month so
@@ -4663,7 +4742,17 @@ CREATE TABLE IF NOT EXISTS nec_bank_directory (
   bank_account text,
   is_active boolean DEFAULT true,
   created_at timestamptz DEFAULT now()
-);`;
+);
+
+-- Links a nec_staff row back to the Bank Details entry it was auto-synced
+-- from. Bank Details is the master people directory (Manager / Admin /
+-- Editor / DM / TM / Others teams) — every active person there gets a
+-- mirrored nec_staff row so they're selectable in order-assignment
+-- dropdowns (Auto Commission Matching) and appear in Payroll's Staff
+-- List, without a separate manual "+ Add Staff" step. NULL means this
+-- nec_staff row was created directly via Payroll's own "+ Add Staff"
+-- (not synced from Bank Details).
+ALTER TABLE nec_staff ADD COLUMN IF NOT EXISTS bank_directory_id uuid REFERENCES nec_bank_directory(id);`;
 
 const DEFAULT_MANAGERS = [
   { name: 'Kai Yan', share_percentage: 29 },
