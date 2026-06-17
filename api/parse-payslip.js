@@ -383,15 +383,24 @@ function parseCowayPayslip(text) {
       if (m) { subtotal = pn(m[1]); break; }
     }
 
-    // For "Overidding" sections, the section total sits at the VERY START of
-    // sLines (first standalone decimal), not at the end. Using the backward
-    // search (`subtotal`) gives the wrong value because an intermediate
-    // sub-section total can appear later in the same section's text block.
+    // For "Overidding" sections the relevant subtotals sit at the VERY START
+    // of sLines as a consecutive block of standalone decimals, followed
+    // immediately by the first data row. There can be MORE THAN ONE leading
+    // decimal: when two or more "1st Installment Month" headers appear
+    // back-to-back with no content between them (as in KY's payslip —
+    // indices 32, 33, 34), their individual subtotals (88.25 and 1,491.25)
+    // all "spill" into the last header's sLines and must ALL be summed.
+    // Using a backward search (`subtotal`) is wrong because it finds a
+    // large closing total thousands of lines later (e.g. 3,531.74 for KY),
+    // and using only the FIRST decimal is wrong because it misses subsequent
+    // subtotals in the leading cluster. Sum the ENTIRE consecutive leading
+    // run of standalone decimals and stop at the first non-decimal line.
     let overridingLeadTotal = 0;
     if (sec.name.includes('Overidding')) {
       for (let j = 0; j < sLines.length; j++) {
         const m = sLines[j].match(/^([\d,]+\.\d{2})$/);
-        if (m) { overridingLeadTotal = pn(m[1]); break; }
+        if (m) { overridingLeadTotal = r2(overridingLeadTotal + pn(m[1])); }
+        else { break; }
       }
     }
 
