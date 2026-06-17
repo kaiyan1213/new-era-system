@@ -541,7 +541,7 @@
             <th>Base Salary</th>
             <th>Bonus</th>
             <th>Total Pay</th>
-            <th>Status</th>
+            <th>Payment</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -667,10 +667,10 @@
     <div id="mgrPane-overview">
       <div class="table-wrap" style="margin-bottom:20px">
         <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">
-          Total per manager (Manager Comm + Acc Below + Manager Invoice + Adjustments)
+          Total per manager (Manager Comm + Acc Below + Manager Invoice + Outsider + Adjustments)
         </div>
         <div style="padding:10px 14px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)">
-          Manager Invoice is negative — it's the manager's own pool_contribution from their uploaded Coway payslip, subtracted back out so it isn't double-counted (Coway already paid that amount directly to the manager; the pooled Manager Comm share already includes it, so only the remainder needs to be topped up).
+          Manager Invoice is negative — it's the manager's own pool_contribution from their uploaded Coway payslip, subtracted back out so it isn't double-counted (Coway already paid that amount directly to the manager; the pooled Manager Comm share already includes it, so only the remainder needs to be topped up). Outsider is full commission from any non-ad-sourced orders assigned to this manager (same as a staff member's Outsider commission).
         </div>
         <table>
           <thead>
@@ -679,12 +679,13 @@
               <th>Manager Comm</th>
               <th>Acc Below</th>
               <th>Manager Invoice</th>
+              <th>Outsider</th>
               <th>Adjustments</th>
               <th>Total</th>
             </tr>
           </thead>
           <tbody id="mgrGrandTotalBody">
-            <tr><td colspan="6"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+            <tr><td colspan="7"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -1498,6 +1499,15 @@
         </div>
       </div>
       <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Own Coway Proxy Account (for settlement)</label>
+          <select id="editStaffOwnProxy" class="form-input">
+            <option value="">— none —</option>
+          </select>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">If this staff also runs their own Coway account, Coway pays its payslip directly — that amount is netted against their earned commission when saving to Payroll, auto-generating a payslip (we still owe them) or an invoice (they owe us back) depending on the direction.</div>
+        </div>
+      </div>
+      <div class="form-row">
         <div class="form-group" style="display:flex;align-items:center;gap:8px">
           <input type="checkbox" id="editStaffEpf" style="width:auto">
           <label class="form-label" style="margin:0" for="editStaffEpf">EPF applicable (employee 11% / employer 13%, calculated on base salary only)</label>
@@ -1997,7 +2007,7 @@ let proxyList = [];
 
 async function loadProxies() {
   try {
-    proxyList = await sb('proxy_accounts', { filter: 'is_active=eq.true', select: 'id,name,ic_number,channel,coway_id,bank_name,bank_account,manager,relationship,direct' });
+    proxyList = await sb('proxy_accounts', { filter: 'is_active=eq.true', select: 'id,name,ic_number,channel,coway_id,bank_name,bank_account,manager,relationship,direct,is_manager_account' });
     return proxyList;
   } catch(e) { return []; }
 }
@@ -2533,7 +2543,16 @@ async function syncStaffFromBankEntry(bankId, name, team) {
       return;
     }
     const { staff_type, channel } = inferStaffTypeFromTeam(team);
-    await sb('nec_staff', { method: 'POST', body: { name, staff_type, channel, base_salary: 0, bank_directory_id: bankId, is_active: true } });
+    // Auto-match this person's own Coway proxy account by name (e.g. Mei
+    // She's own proxy is literally named "LEE MEI SHE") — best-effort,
+    // can be corrected manually in Edit Staff if it doesn't match or
+    // matches the wrong one.
+    let ownProxyId = null;
+    try {
+      const proxyMatch = await sb('proxy_accounts', { filter: `name=eq.${encodeURIComponent(name)}&is_active=eq.true&is_manager_account=eq.false`, select: 'id' });
+      if (proxyMatch.length) ownProxyId = proxyMatch[0].id;
+    } catch(e) { /* non-fatal — leave unlinked */ }
+    await sb('nec_staff', { method: 'POST', body: { name, staff_type, channel, base_salary: 0, bank_directory_id: bankId, own_proxy_id: ownProxyId, is_active: true } });
   } catch(e) {
     console.error('Staff sync from Bank Details failed:', e);
   }
@@ -2861,19 +2880,23 @@ async function loadPayroll() {
     }
     tbody.innerHTML = filtered.map(r => {
       const staff = staffList.find(s => s.id === r.staff_id) || { name: 'Unknown', staff_type: 'sales', channel: 'DM' };
+      const isInvoice = r.settlement_type === 'invoice';
+      const isManager = r.record_type === 'manager';
       return `<tr>
         <td class="td-name">${staff.name}</td>
-        <td><span class="badge badge-${(staff.channel||'dm').toLowerCase()}">${staff.channel}</span></td>
-        <td><span class="badge badge-${staff.staff_type === 'sales' ? 'dm' : 'other'}">${staff.staff_type}</span>${r.commission_type === 'outsider' ? ' <span class="badge badge-other" title="Full payslip commission, not from ads">Outsider</span>' : ''}</td>
+        <td>${staff.channel ? `<span class="badge badge-${staff.channel.toLowerCase()}">${staff.channel}</span>` : '<span class="td-muted">—</span>'}</td>
+        <td><span class="badge badge-${staff.staff_type === 'sales' ? 'dm' : 'other'}">${isManager ? 'manager' : staff.staff_type}</span>${r.commission_type === 'outsider' ? ' <span class="badge badge-other" title="Full payslip commission, not from ads">Outsider</span>' : ''}${isInvoice ? ' <span class="badge badge-other" style="color:var(--red)" title="Staff owes New Era back">Invoice</span>' : ''}</td>
         <td class="td-mono">${MONTHS[r.month]} ${r.year}</td>
         <td class="td-mono">${r.orders_count || 0}</td>
         <td class="td-mono">${fmt(r.commission_earned)}</td>
-        <td class="td-mono">${fmt(r.base_salary)}${parseFloat(r.epf_employee||0) > 0 ? `<div style="font-size:10px;color:var(--red)">−EPF ${fmt(r.epf_employee)}</div>` : ''}</td>
+        <td class="td-mono">${fmt(r.base_salary)}${parseFloat(r.epf_employee||0) > 0 ? `<div style="font-size:10px;color:var(--red)">−EPF ${fmt(r.epf_employee)}</div>` : ''}${parseFloat(r.own_proxy_offset||0) > 0 ? `<div style="font-size:10px;color:var(--red)">−Own proxy ${fmt(r.own_proxy_offset)}</div>` : ''}</td>
         <td class="td-mono">${fmt(r.bonus)}</td>
-        <td class="td-mono" style="color:var(--green);font-weight:600">${fmt(r.total_pay)}</td>
-        <td><span class="badge badge-${r.status}">${r.status}</span></td>
+        <td class="td-mono" style="color:${parseFloat(r.total_pay) < 0 ? 'var(--red)' : 'var(--green)'};font-weight:600">${fmt(r.total_pay)}</td>
+        <td>${r.payment_date
+          ? `<span class="badge badge-paid">${r.payment_date}</span>`
+          : `<button class="btn btn-ghost btn-sm" onclick="markPayrollPaid('${r.id}')">Mark Paid</button>`}</td>
         <td>
-          <button class="btn btn-ghost btn-sm" onclick="generatePayrollRecordPayslip('${r.id}')">🖨 Payslip</button>
+          <button class="btn btn-ghost btn-sm" onclick="generatePayrollRecordPayslip('${r.id}')">${isInvoice ? '🖨 Invoice' : '🖨 Payslip'}</button>
           <button class="btn btn-danger btn-sm" onclick="deletePayroll('${r.id}')">✕</button>
         </td>
       </tr>`;
@@ -2940,7 +2963,7 @@ function renderStaffList() {
     </tr>`).join('');
 }
 
-function openEditStaffModal(id) {
+async function openEditStaffModal(id) {
   const s = staffList.find(x => x.id === id);
   if (!s) return;
   document.getElementById('editStaffId').value = s.id;
@@ -2952,6 +2975,12 @@ function openEditStaffModal(id) {
   document.getElementById('editStaffSalary').value = s.base_salary || 0;
   document.getElementById('editStaffLeadName').value = s.lead_staff_name || '';
   document.getElementById('editStaffEpf').checked = !!s.epf_applicable;
+  if (!proxyList.length) await loadProxies();
+  const proxySel = document.getElementById('editStaffOwnProxy');
+  const sortedProxies = [...proxyList].sort((a,b) => a.name.localeCompare(b.name));
+  proxySel.innerHTML = `<option value="">— none —</option>` +
+    sortedProxies.map(p => `<option value="${p.id}">${p.name}${p.coway_id ? ' (' + p.coway_id + ')' : ''}</option>`).join('');
+  proxySel.value = s.own_proxy_id || '';
   toggleEditStaffFields();
   openModal('modalEditStaff');
 }
@@ -2966,6 +2995,7 @@ async function saveEditStaff() {
     commission_per_order: parseFloat(document.getElementById('editStaffComm').value) || 0,
     base_salary: parseFloat(document.getElementById('editStaffSalary').value) || 0,
     lead_staff_name: document.getElementById('editStaffLeadName').value.trim() || null,
+    own_proxy_id: document.getElementById('editStaffOwnProxy').value || null,
     epf_applicable: document.getElementById('editStaffEpf').checked,
   };
   if (!body.name) return showToast('Name required', 'error');
@@ -3110,9 +3140,16 @@ async function previewAutoCommission() {
 
   try {
     await loadStaff();
+    await loadProxies();
 
-    // 1. Authoritative payslip orders for this month, across all proxies.
-    const breakdowns = await sb('nec_payslip_breakdown', { filter: `year=eq.${year}&month=eq.${month}`, select: '*' });
+    // 1. Authoritative payslip orders for this month, across all proxies
+    // — excluding the 4 pool managers' own Coway accounts (KY/Chloe/
+    // Carine/Jess). Those payslips already feed Manager Comm separately
+    // via the dedicated Manager Payslip upload, and aren't "new orders"
+    // a DM/TM staff sold, so they're skipped here entirely rather than
+    // showing up as a false "failed to parse" warning.
+    const breakdowns = (await sb('nec_payslip_breakdown', { filter: `year=eq.${year}&month=eq.${month}`, select: '*' }))
+      .filter(b => !(proxyList.find(p => p.id === b.proxy_id) || {}).is_manager_account);
     let payslipOrders = [];
     const emptyParsePayslips = []; // payslips with a payable amount but no orders extracted — likely a failed PDF parse
     breakdowns.forEach(b => {
@@ -3432,7 +3469,11 @@ async function bulkManualMatch() {
   resultEl.innerHTML = `<span style="color:var(--muted)">Searching this month's Coway payslips...</span>`;
 
   try {
-    const breakdowns = await sb('nec_payslip_breakdown', { filter: `year=eq.${year}&month=eq.${month}`, select: '*' });
+    await loadProxies();
+    // Same exclusion as the main reconciliation: managers' own Coway
+    // accounts aren't a source of staff-sold orders.
+    const breakdowns = (await sb('nec_payslip_breakdown', { filter: `year=eq.${year}&month=eq.${month}`, select: '*' }))
+      .filter(b => !(proxyList.find(p => p.id === b.proxy_id) || {}).is_manager_account);
     let payslipOrders = [];
     breakdowns.forEach(b => {
       const orders = flattenBreakdownOrders(b.categories_json);
@@ -3505,6 +3546,17 @@ function viewAutoCommOrders(idx) {
   alert(`${row.staff.name} — ${MONTHS[row.month]} ${row.year}\n${row.orders.length} payslip-verified orders:\n\n${list || '(none)'}`);
 }
 
+// This period's payslip amount from a staff's OWN Coway proxy account
+// (if they have one linked) — Coway pays this directly, bypassing New
+// Era, so it must be netted against what they actually earned.
+async function getOwnProxyPayslipAmount(ownProxyId, year, month) {
+  if (!ownProxyId) return 0;
+  try {
+    const rows = await sb('nec_payslip_breakdown', { filter: `proxy_id=eq.${ownProxyId}&year=eq.${year}&month=eq.${month}`, select: 'total_net_payable' });
+    return rows.length ? parseFloat(rows[0].total_net_payable || 0) : 0;
+  } catch(e) { return 0; }
+}
+
 async function saveAutoCommissionRow(idx) {
   const row = autoCommissionData[idx];
   if (!row) return;
@@ -3514,6 +3566,14 @@ async function saveAutoCommissionRow(idx) {
     epfEmployee = epf.employee;
     epfEmployer = epf.employer;
   }
+  // Net against this staff's own Coway proxy account, if they have one —
+  // that payslip amount already went straight to them from Coway, so it
+  // must come out of what we'd otherwise pay them. If the net comes out
+  // negative, they already received more than they earned and owe New
+  // Era the difference back instead.
+  const ownProxyOffset = await getOwnProxyPayslipAmount(row.staff.own_proxy_id, row.year, row.month);
+  const netPay = r2(row.commission + (row.staff.base_salary || 0) - epfEmployee - ownProxyOffset);
+  const settlementType = ownProxyOffset > 0 ? (netPay >= 0 ? 'payslip' : 'invoice') : null;
   const body = {
     staff_id: row.staff.id,
     year: row.year,
@@ -3525,6 +3585,9 @@ async function saveAutoCommissionRow(idx) {
     deductions: 0,
     epf_employee: epfEmployee,
     epf_employer: epfEmployer,
+    own_proxy_offset: ownProxyOffset,
+    settlement_type: settlementType,
+    record_type: 'staff',
   };
   try {
     // Overwrite any existing payroll record for this staff/year/month so
@@ -3533,7 +3596,8 @@ async function saveAutoCommissionRow(idx) {
     for (const e of existing) await sbDelete('nec_payroll', `id=eq.${e.id}`);
 
     await sb('nec_payroll', { method: 'POST', body });
-    await logAudit('CREATE', 'nec_payroll', `Auto-generated payroll for ${row.staff.name} — ${MONTHS[body.month]} ${body.year} — ${body.orders_count} orders, commission RM${body.commission_earned.toFixed(2)}`);
+    const settleNote = ownProxyOffset ? ` — netted against own proxy account RM${ownProxyOffset.toFixed(2)}, net RM${netPay.toFixed(2)} (${settlementType})` : '';
+    await logAudit('CREATE', 'nec_payroll', `Auto-generated payroll for ${row.staff.name} — ${MONTHS[body.month]} ${body.year} — ${body.orders_count} orders, commission RM${body.commission_earned.toFixed(2)}${settleNote}`);
     showToast(`Saved payroll for ${row.staff.name} ✓`);
     loadPayroll();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
@@ -3602,13 +3666,74 @@ function generateStaffPayslip(idx) {
 // Payslip generator for a manually-recorded nec_payroll row — works for
 // any staff type (sales/admin), includes EPF breakdown when applicable
 // and flags Outsider commission records.
+function buildStaffInvoiceHTML(staff, r) {
+  const amountDue = Math.abs(parseFloat(r.total_pay || 0));
+  return `
+      <div class="invoice-preview">
+        <div class="inv-header">
+          <div>
+            <div class="inv-bill-to" style="margin-bottom:2px">FROM</div>
+            <div class="inv-bill-name">${staff.name}</div>
+            <div class="inv-bill-sub">${staff.role || staff.channel || '—'}</div>
+          </div>
+          <div>
+            <div class="inv-label">INVOICE</div>
+            <div class="inv-meta">${MONTH_FULL[r.month]} ${r.year}</div>
+          </div>
+        </div>
+        <div class="inv-divider"></div>
+        <div class="inv-bill-to">Bill To</div>
+        <div class="inv-bill-name">New Era Consulting Enterprise</div>
+        <div class="inv-bill-sub">202503018811 (MA0326725-T)</div>
+        <table class="inv-table">
+          <thead><tr><th>Description</th><th>Amount</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Settlement for ${MONTH_FULL[r.month]} ${r.year}<br>
+              <span style="font-size:11px;color:#888">Earned commission (RM ${fmtNum(r.commission_earned)}) was less than the RM ${fmtNum(r.own_proxy_offset)} Coway already paid directly into this staff's own proxy account — the difference is owed back to New Era.</span></td>
+              <td style="font-weight:700">RM ${fmtNum(amountDue)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="inv-total-row">
+          <div class="inv-total-box">
+            <div class="inv-total-label">Total Amount Due to New Era</div>
+            <div class="inv-total-amount">RM ${fmtNum(amountDue)}</div>
+          </div>
+        </div>
+        <div class="inv-footer">
+          <strong>Payment Information</strong><br>
+          Bank: Public Bank Berhad<br>
+          Account Name: New Era Consulting Enterprise<br>
+          Account No: 3243542608
+        </div>
+      </div>`;
+}
+
 function generatePayrollRecordPayslip(recordId) {
   const r = payrollRecords?.find(x => x.id === recordId);
   if (!r) { showToast('Record not found', 'error'); return; }
   const staff = staffList.find(s => s.id === r.staff_id) || { name: 'Unknown', role: '', channel: '' };
 
+  // If netting this staff's commission against their own Coway proxy
+  // account came out negative, they already received more directly
+  // from Coway than they earned — generate an invoice billing them for
+  // the difference instead of a payslip.
+  if (r.settlement_type === 'invoice') {
+    const html = buildStaffInvoiceHTML(staff, r);
+    const win = window.open('', '_blank', 'width=700,height=800');
+    win.document.write(`<html><head><title>Invoice - ${staff.name} - ${MONTHS[r.month]} ${r.year}</title>
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
+      <style>body{margin:40px;background:#f5f5f5;font-family:Inter,sans-serif}
+      ${INVOICE_PRINT_STYLE}
+      @media print{body{margin:0;background:#fff}.invoice-preview{box-shadow:none}}
+      </style></head><body>${html}<br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#4f7cff;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
+    return;
+  }
+
   const epfEmployee = parseFloat(r.epf_employee || 0);
   const epfEmployer = parseFloat(r.epf_employer || 0);
+  const ownProxyOffset = parseFloat(r.own_proxy_offset || 0);
   const isOutsider = r.commission_type === 'outsider';
 
   const html = `
@@ -3636,8 +3761,10 @@ function generatePayrollRecordPayslip(recordId) {
         <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Bonus</span><span>RM ${fmtNum(r.bonus)}</span></div>
         <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Deductions</span><span>−RM ${fmtNum(r.deductions)}</span></div>
         ${epfEmployee > 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px;color:#c00"><span>EPF Employee (11%)</span><span>−RM ${fmtNum(epfEmployee)}</span></div>` : ''}
+        ${ownProxyOffset > 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px;color:#c00"><span>Less: Own Proxy Account Payslip (already paid by Coway)</span><span>−RM ${fmtNum(ownProxyOffset)}</span></div>` : ''}
         <div style="display:flex;justify-content:space-between;font-weight:800;font-size:15px;border-top:1px solid #ccc;margin-top:8px;padding-top:8px"><span>Total Pay</span><span>RM ${fmtNum(r.total_pay)}</span></div>
         ${epfEmployer > 0 ? `<div style="font-size:11px;color:#666;margin-top:6px">Employer EPF contribution (13%, company record only, not deducted from staff pay): RM ${fmtNum(epfEmployer)}</div>` : ''}
+        ${r.notes ? `<div style="font-size:11px;color:#666;margin-top:6px;border-top:1px solid #ddd;padding-top:6px">${r.notes}</div>` : ''}
       </div>
     </div>`;
 
@@ -3721,6 +3848,9 @@ function calcPayroll() {
 async function savePayroll() {
   const sel = document.getElementById('prStaff');
   const opt = sel.options[sel.selectedIndex];
+  const staffId = document.getElementById('prStaff').value;
+  const year = parseInt(document.getElementById('prYear').value);
+  const month = parseInt(document.getElementById('prMonth').value);
   const salary = parseFloat(document.getElementById('prSalary').value) || 0;
   let epfEmployee = 0, epfEmployer = 0;
   if (opt?.dataset.epf === '1') {
@@ -3728,18 +3858,28 @@ async function savePayroll() {
     epfEmployee = epf.employee;
     epfEmployer = epf.employer;
   }
+  const commission = parseFloat(document.getElementById('prComm').value) || 0;
+  const bonus = parseFloat(document.getElementById('prBonus').value) || 0;
+  const deductions = parseFloat(document.getElementById('prDeduct').value) || 0;
+  const staff = staffList.find(s => s.id === staffId);
+  const ownProxyOffset = await getOwnProxyPayslipAmount(staff?.own_proxy_id, year, month);
+  const netPay = r2(commission + salary + bonus - deductions - epfEmployee - ownProxyOffset);
+  const settlementType = ownProxyOffset > 0 ? (netPay >= 0 ? 'payslip' : 'invoice') : null;
   const body = {
-    staff_id: document.getElementById('prStaff').value,
-    year: parseInt(document.getElementById('prYear').value),
-    month: parseInt(document.getElementById('prMonth').value),
+    staff_id: staffId,
+    year,
+    month,
     orders_count: parseInt(document.getElementById('prOrders').value) || 0,
-    commission_earned: parseFloat(document.getElementById('prComm').value) || 0,
+    commission_earned: commission,
     commission_type: document.getElementById('prCommType').value,
     base_salary: salary,
-    bonus: parseFloat(document.getElementById('prBonus').value) || 0,
-    deductions: parseFloat(document.getElementById('prDeduct').value) || 0,
+    bonus,
+    deductions,
     epf_employee: epfEmployee,
     epf_employer: epfEmployer,
+    own_proxy_offset: ownProxyOffset,
+    settlement_type: settlementType,
+    record_type: 'staff',
   };
   if (!body.staff_id) return showToast('Select staff', 'error');
   try {
@@ -3747,7 +3887,23 @@ async function savePayroll() {
     closeModal('modalPayrollEntry');
     showToast('Payroll saved');
     const staffName = staffList.find(s => s.id === body.staff_id)?.name || body.staff_id;
-    await logAudit('CREATE', 'nec_payroll', `Payroll for ${staffName} — ${MONTHS[body.month]} ${body.year} — RM${(body.commission_earned + body.base_salary + body.bonus - body.deductions - body.epf_employee).toFixed(2)}${body.commission_type === 'outsider' ? ' (outsider, full commission)' : ''}`);
+    const settleNote = body.own_proxy_offset ? ` — netted against own proxy account RM${body.own_proxy_offset.toFixed(2)} (${body.settlement_type})` : '';
+    await logAudit('CREATE', 'nec_payroll', `Payroll for ${staffName} — ${MONTHS[body.month]} ${body.year} — RM${netPay.toFixed(2)}${body.commission_type === 'outsider' ? ' (outsider, full commission)' : ''}${settleNote}`);
+    loadPayroll();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function markPayrollPaid(id) {
+  const today = new Date().toISOString().slice(0,10);
+  const input = prompt('Payment date (YYYY-MM-DD):', today);
+  if (input === null) return; // cancelled
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.trim())) {
+    return showToast('Invalid date format — use YYYY-MM-DD', 'error');
+  }
+  try {
+    await sb('nec_payroll', { method: 'PATCH', filter: `id=eq.${id}`, body: { status: 'paid', payment_date: input.trim() } });
+    await logAudit('UPDATE', 'nec_payroll', `Marked payroll record ${id} as paid (payment date: ${input.trim()})`);
+    showToast('Marked as paid');
     loadPayroll();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
@@ -3823,6 +3979,35 @@ async function loadMgrEntryPreview() {
   if (poolTotalEl) poolTotalEl.textContent = `RM ${fmtNum(pool)}`;
 }
 
+// Computes one manager's full Total (Manager Comm + Acc Below + Manager
+// Invoice + Outsider + Adjustments) for one specific period — used when
+// confirming a period in Manager Sharing, to push a single settled
+// record into nec_payroll so Payroll becomes the one place tracking
+// who's been paid and when, across staff and managers alike.
+async function getManagerTotalForPeriod(m, year, month) {
+  if (!proxyList.length) await loadProxies();
+
+  const commRows = await sb('nec_manager_sharing', { filter: `manager_id=eq.${m.id}&year=eq.${year}&month=eq.${month}` });
+  const commTotal = r2(commRows.reduce((s,r) => s + parseFloat(r.amount_received||0), 0));
+
+  const proxyIds = new Set(proxyList.filter(p => p.manager === m.name).map(p => p.id));
+  const invoices = await sb('proxy_invoices', { filter: `year=eq.${year}&month=eq.${month}`, select: 'proxy_id,coway_payslip_amount,invoice_amount' });
+  const accBelowAmt = r2(invoices
+    .filter(inv => proxyIds.has(inv.proxy_id))
+    .reduce((s,inv) => s + Math.max(0, parseFloat(inv.coway_payslip_amount||0) - parseFloat(inv.invoice_amount||0)), 0));
+
+  const mp = await sb('nec_manager_payslips', { filter: `manager_id=eq.${m.id}&year=eq.${year}&month=eq.${month}` });
+  const invoiceAmt = mp.length ? -r2(parseFloat(mp[0].pool_contribution||0)) : 0;
+
+  const outsiderAmt = await getManagerOutsiderCommission(m.staff_id, year, month);
+
+  const adj = await sb('nec_manager_adjustments', { filter: `manager_id=eq.${m.id}&year=eq.${year}&month=eq.${month}` });
+  const adjTotal = r2(adj.reduce((s,a) => s + parseFloat(a.amount||0), 0));
+
+  const total = r2(commTotal + accBelowAmt + invoiceAmt + outsiderAmt + adjTotal);
+  return { commTotal, accBelowAmt, invoiceAmt, outsiderAmt, adjTotal, total };
+}
+
 async function saveManagerSharing() {
   const year = parseInt(document.getElementById('meYear').value);
   const month = parseInt(document.getElementById('meMonth').value);
@@ -3833,17 +4018,45 @@ async function saveManagerSharing() {
       const p = payslips.find(x => x.manager_id === m.id);
       return sum + parseFloat(p?.pool_contribution || 0);
     }, 0);
-    if (pool <= 0) return showToast('No manager payslips uploaded for this period yet', 'error');
-    for (const m of poolManagers) {
-      const amount = pool * (m.share_percentage / 100);
-      await sb('nec_manager_sharing', {
-        method: 'POST',
-        body: { manager_id: m.id, year, month, coway_payslip_amount: pool, share_percentage: m.share_percentage, amount_received: amount }
-      });
+    if (pool > 0) {
+      // Overwrite any existing pooled split for this period first, so
+      // re-confirming doesn't pile up duplicate nec_manager_sharing rows.
+      for (const m of poolManagers) {
+        const existing = await sb('nec_manager_sharing', { filter: `manager_id=eq.${m.id}&year=eq.${year}&month=eq.${month}`, select: 'id' });
+        for (const e of existing) await sbDelete('nec_manager_sharing', `id=eq.${e.id}`);
+        const amount = pool * (m.share_percentage / 100);
+        await sb('nec_manager_sharing', {
+          method: 'POST',
+          body: { manager_id: m.id, year, month, coway_payslip_amount: pool, share_percentage: m.share_percentage, amount_received: amount }
+        });
+      }
+      await logAudit('CREATE', 'nec_manager_sharing', `Recorded pooled manager sharing for ${MONTHS[month]} ${year} — pool RM${pool.toFixed(2)}`);
+    } else {
+      showToast('No manager payslips uploaded yet — Manager Comm will be RM0 for this period', 'error');
     }
+
+    // Push every manager's full Total (Comm + Acc Below + Manager Invoice
+    // + Outsider + Adjustments) into nec_payroll, so Payroll is the one
+    // place tracking who's been paid and when — for staff AND managers.
+    // Zehao is included even though he has no Manager Comm pool share.
+    const orderedManagers = MANAGER_ORDER.map(name => managerList.find(m => m.name === name)).filter(Boolean);
+    let pushedCount = 0, skippedNames = [];
+    for (const m of orderedManagers) {
+      if (!m.staff_id) { skippedNames.push(m.name); continue; }
+      const t = await getManagerTotalForPeriod(m, year, month);
+      const existing = await sb('nec_payroll', { filter: `staff_id=eq.${m.staff_id}&year=eq.${year}&month=eq.${month}`, select: 'id' });
+      for (const e of existing) await sbDelete('nec_payroll', `id=eq.${e.id}`);
+      const notes = `Manager Comm ${fmt(t.commTotal)} + Acc Below ${fmt(t.accBelowAmt)} + Manager Invoice ${fmt(t.invoiceAmt)} + Outsider ${fmt(t.outsiderAmt)} + Adjustments ${fmt(t.adjTotal)} = Total ${fmt(t.total)}`;
+      await sb('nec_payroll', {
+        method: 'POST',
+        body: { staff_id: m.staff_id, year, month, commission_earned: t.total, record_type: 'manager', notes }
+      });
+      pushedCount++;
+    }
+    if (skippedNames.length) showToast(`${skippedNames.join(', ')} not linked to a staff record yet — run the manager-staff link SQL`, 'error');
+
     closeModal('modalManagerEntry');
-    showToast('Manager sharing saved');
-    await logAudit('CREATE', 'nec_manager_sharing', `Recorded pooled manager sharing for ${MONTHS[month]} ${year} — pool RM${pool.toFixed(2)}`);
+    showToast(`Manager sharing saved — ${pushedCount} manager record(s) pushed to Payroll`);
     loadManagerSharing();
     loadMgrAdjustments();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
@@ -4066,6 +4279,39 @@ async function deleteMgrAdjustment(id) {
 // summary, the raw adjustment entries list, the Overview grand total
 // (Manager Comm + Acc Below + Adjustments) per manager, and an Overview
 // breakdown of what's actually inside each manager's Adjustments figure.
+// A manager's Outsider commission for a period — same concept as a
+// staff member's Outsider commission (full payslip amount on any
+// non-ad-sourced order assigned to them), just scoped to one staff_id
+// via their nec_managers.staff_id link. When month is null ("All
+// Months"), aggregates across every month in that year that has an
+// outsider assignment, mirroring how Acc Below/Adjustments already
+// aggregate across the whole year in that case.
+async function getManagerOutsiderCommission(staffId, year, month) {
+  if (!staffId) return 0;
+  try {
+    let filter = `staff_id=eq.${staffId}&year=eq.${year}&commission_algo=eq.outsider`;
+    if (month) filter += `&month=eq.${month}`;
+    const assignments = await sb('nec_order_assignments', { filter, select: 'order_no,customer_name,proxy_id,month' });
+    if (!assignments.length) return 0;
+    const months = [...new Set(assignments.map(a => a.month))];
+    let total = 0;
+    for (const mo of months) {
+      const bds = await sb('nec_payslip_breakdown', { filter: `year=eq.${year}&month=eq.${mo}`, select: '*' });
+      const flatByProxy = {};
+      bds.forEach(b => { flatByProxy[b.proxy_id] = flattenBreakdownOrders(b.categories_json); });
+      const monthAssignments = assignments.filter(a => a.month === mo);
+      const orders = [];
+      monthAssignments.forEach(a => {
+        const flat = flatByProxy[a.proxy_id] || [];
+        const match = flat.find(o => o.order_no === a.order_no && normName(o.customer_name) === normName(a.customer_name));
+        if (match) orders.push({ total_com: match.total_com || 0 });
+      });
+      total += calcOutsiderCommission(orders).commission;
+    }
+    return r2(total);
+  } catch(e) { return 0; }
+}
+
 async function loadMgrAdjustments() {
   const year = parseInt(document.getElementById('mgrYear').value);
   const monthRaw = document.getElementById('mgrMonth').value;
@@ -4136,6 +4382,15 @@ async function loadMgrAdjustments() {
 
     const orderedManagers = MANAGER_ORDER.map(name => managerList.find(m => m.name === name)).filter(Boolean);
 
+    // Outsider: full commission from any non-ad-sourced orders assigned
+    // to this manager (manager_id → nec_managers.staff_id link), same
+    // concept and matching pipeline as a regular staff member's
+    // Outsider commission.
+    const outsiderTotals = {};
+    await Promise.all(orderedManagers.map(async m => {
+      outsiderTotals[m.name] = await getManagerOutsiderCommission(m.staff_id, year, month);
+    }));
+
     // Acc Below & Adjustments tab — summary table, one column per
     // adjustment category so the composition is visible at a glance
     // instead of requiring a drill-down into the entries table below.
@@ -4183,14 +4438,16 @@ async function loadMgrAdjustments() {
       const commTotal = r2(commRows.reduce((s,r) => s + parseFloat(r.amount_received||0), 0));
       const accBelowAmt = accBelowTotals[m.name] || 0;
       const invoiceAmt = managerInvoiceTotals[m.name] || 0;
+      const outsiderAmt = outsiderTotals[m.name] || 0;
       const mgrAdjustments = adjustments.filter(a => a.manager_id === m.id);
       const adjTotal = r2(mgrAdjustments.reduce((s,a) => s + parseFloat(a.amount||0), 0));
-      const grandTotal = r2(commTotal + accBelowAmt + invoiceAmt + adjTotal);
+      const grandTotal = r2(commTotal + accBelowAmt + invoiceAmt + outsiderAmt + adjTotal);
       return `<tr>
         <td class="td-name">${m.name}</td>
         <td class="td-mono">${fmt(commTotal)}</td>
         <td class="td-mono">${fmt(accBelowAmt)}</td>
         <td class="td-mono" style="color:${invoiceAmt < 0 ? 'var(--red)' : 'var(--green)'}">${invoiceAmt >= 0 ? '+' : ''}${fmt(invoiceAmt)}</td>
+        <td class="td-mono" style="color:${outsiderAmt === 0 ? 'var(--muted)' : 'var(--green)'}">${outsiderAmt === 0 ? '—' : fmt(outsiderAmt)}</td>
         <td class="td-mono" style="color:${adjTotal < 0 ? 'var(--red)' : 'var(--green)'}">${adjTotal >= 0 ? '+' : ''}${fmt(adjTotal)}</td>
         <td class="td-mono" style="font-weight:700;color:var(--accent)">${fmt(grandTotal)}</td>
       </tr>`;
@@ -4230,9 +4487,10 @@ async function loadMgrAdjustments() {
       const commTotal = r2(commRows.reduce((s,r) => s + parseFloat(r.amount_received||0), 0));
       const accBelowAmt = accBelowTotals[m.name] || 0;
       const invoiceAmt = managerInvoiceTotals[m.name] || 0;
+      const outsiderAmt = outsiderTotals[m.name] || 0;
       const mgrAdjustments = adjustments.filter(a => a.manager_id === m.id);
       const adjTotal = r2(mgrAdjustments.reduce((s,a) => s + parseFloat(a.amount||0), 0));
-      const grandTotal = r2(commTotal + accBelowAmt + invoiceAmt + adjTotal);
+      const grandTotal = r2(commTotal + accBelowAmt + invoiceAmt + outsiderAmt + adjTotal);
       if (document.getElementById(`mgr${i}`)) {
         document.getElementById(`mgr${i}`).textContent = grandTotal !== 0 ? fmt(grandTotal) : '—';
         document.getElementById(`mgr${i}pct`).textContent = `${m.share_percentage}% share`;
@@ -4530,6 +4788,13 @@ CREATE TABLE IF NOT EXISTS proxy_accounts (
 ALTER TABLE proxy_accounts ADD COLUMN IF NOT EXISTS manager text;
 ALTER TABLE proxy_accounts ADD COLUMN IF NOT EXISTS relationship text;
 ALTER TABLE proxy_accounts ADD COLUMN IF NOT EXISTS direct text;
+-- True for the 4 pool managers' OWN Coway accounts (KY/Chloe/Carine/
+-- Jess). Their payslips already feed Manager Comm separately via the
+-- dedicated Manager Payslip upload (nec_manager_payslips) — they aren't
+-- "new orders" a DM/TM staff sold, so Auto Commission Matching skips
+-- these proxies entirely instead of flagging their payslip as a failed
+-- parse.
+ALTER TABLE proxy_accounts ADD COLUMN IF NOT EXISTS is_manager_account boolean DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS proxy_invoices (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -4571,6 +4836,15 @@ ALTER TABLE nec_staff ADD COLUMN IF NOT EXISTS epf_applicable boolean DEFAULT fa
 -- individual orders can still be overridden to Outsider (100% of payslip
 -- commission) via the per-order commission_algo on nec_order_assignments.
 
+-- A staff member's OWN personal Coway proxy account (e.g. Mei She's own
+-- account is the proxy named "LEE MEI SHE"). Coway pays this account's
+-- payslip amount directly, bypassing New Era — so when settling a
+-- staff's earned commission, that amount must be netted against this
+-- proxy's payslip this period (see own_proxy_offset on nec_payroll).
+-- Auto-matched by name when a Bank Details person is synced into
+-- nec_staff; can be corrected manually in Edit Staff.
+ALTER TABLE nec_staff ADD COLUMN IF NOT EXISTS own_proxy_id uuid REFERENCES proxy_accounts(id);
+
 CREATE TABLE IF NOT EXISTS nec_payroll (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   staff_id uuid REFERENCES nec_staff(id),
@@ -4584,7 +4858,12 @@ CREATE TABLE IF NOT EXISTS nec_payroll (
   deductions numeric(10,2) DEFAULT 0,
   epf_employee numeric(10,2) DEFAULT 0,
   epf_employer numeric(10,2) DEFAULT 0,
-  total_pay numeric(10,2) GENERATED ALWAYS AS (commission_earned + base_salary + bonus - deductions - epf_employee) STORED,
+  own_proxy_offset numeric(10,2) DEFAULT 0,
+  total_pay numeric(10,2) GENERATED ALWAYS AS (commission_earned + base_salary + bonus - deductions - epf_employee - own_proxy_offset) STORED,
+  settlement_type text,
+  record_type text DEFAULT 'staff',
+  notes text,
+  payment_date date,
   status text DEFAULT 'draft',
   created_at timestamptz DEFAULT now()
 );
@@ -4592,9 +4871,25 @@ CREATE TABLE IF NOT EXISTS nec_payroll (
 ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS commission_type text DEFAULT 'tiered';
 ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS epf_employee numeric(10,2) DEFAULT 0;
 ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS epf_employer numeric(10,2) DEFAULT 0;
--- If nec_payroll already existed before epf_employee was added, total_pay's
--- generated formula won't include it automatically — drop and recreate the
--- column so existing deployments pick up the new formula.
+-- own_proxy_offset: this period's payslip amount from the staff's OWN
+-- Coway proxy account (Coway already paid this directly, bypassing New
+-- Era) — netted against commission_earned to find the real settlement.
+-- settlement_type: 'payslip' when the net is positive (New Era still
+-- owes the staff money) or 'invoice' when negative (the staff already
+-- received more from Coway directly than they earned, so they owe New
+-- Era back the difference) — decided automatically at save time.
+-- record_type: 'staff' (normal sales/admin payroll) or 'manager' (a
+-- Manager Sharing period's confirmed Total, pushed here so Payroll is
+-- the single place tracking who's been paid and when, across everyone).
+ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS own_proxy_offset numeric(10,2) DEFAULT 0;
+ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS settlement_type text;
+ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS record_type text DEFAULT 'staff';
+ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS notes text;
+ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS payment_date date;
+-- If nec_payroll already existed before epf_employee/own_proxy_offset were
+-- added, total_pay's generated formula won't include them automatically —
+-- drop and recreate the column so existing deployments pick up the new
+-- formula.
 DO $$
 BEGIN
   IF EXISTS (
@@ -4604,8 +4899,9 @@ BEGIN
     ALTER TABLE nec_payroll DROP COLUMN total_pay;
   END IF;
   ALTER TABLE nec_payroll ADD COLUMN total_pay numeric(10,2)
-    GENERATED ALWAYS AS (commission_earned + base_salary + bonus - deductions - epf_employee) STORED;
+    GENERATED ALWAYS AS (commission_earned + base_salary + bonus - deductions - epf_employee - own_proxy_offset) STORED;
 END $$;
+
 
 CREATE TABLE IF NOT EXISTS nec_managers (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -4613,6 +4909,14 @@ CREATE TABLE IF NOT EXISTS nec_managers (
   share_percentage numeric(5,2) NOT NULL,
   is_active boolean DEFAULT true
 );
+
+-- Links a manager (short name: Kai Yan/Chloe/Carine/Jess/Zehao) to their
+-- nec_staff row (full legal name, synced from Bank Details — e.g. Chloe's
+-- nec_staff row is named "Tan Wei Yan"). Needed so confirming a period in
+-- Manager Sharing can write that manager's Total into nec_payroll under
+-- the right staff_id, making Payroll the single payment-tracking table
+-- for everyone — staff, admin, and managers alike.
+ALTER TABLE nec_managers ADD COLUMN IF NOT EXISTS staff_id uuid REFERENCES nec_staff(id);
 
 CREATE TABLE IF NOT EXISTS nec_manager_sharing (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
