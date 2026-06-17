@@ -757,12 +757,18 @@
             <tr>
               <th>Manager</th>
               <th>Acc Below (auto)</th>
-              <th>Adjustments (manual)</th>
+              <th>Claim</th>
+              <th>Mistake</th>
+              <th>Gift</th>
+              <th>Both Co. Loan Claim</th>
+              <th>Alpha C Claim</th>
+              <th>Return Back</th>
+              <th>Other</th>
               <th>Combined</th>
             </tr>
           </thead>
           <tbody id="accBelowSummaryBody">
-            <tr><td colspan="4"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+            <tr><td colspan="9"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -1650,7 +1656,8 @@
 <!-- Manager Adjustment Entry Modal -->
 <div class="modal-bg hidden" id="modalMgrAdjustment">
   <div class="modal">
-    <div class="modal-title">Add Acc Below Adjustment</div>
+    <div class="modal-title" id="maModalTitle">Add Acc Below Adjustment</div>
+    <input type="hidden" id="maEditId" value="">
     <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Positive amount = manager receives this much. Negative amount = manager owes/pays this much. This is added on top of the auto-computed Manager Invoice to get the manager's Acc Below total. Available for all 5 managers, including Zehao.</div>
     <div class="form-grid">
       <div class="form-row">
@@ -2285,6 +2292,10 @@ async function deleteInvoice(id) {
 // ============ DIRECTORY ============
 
 const MANAGER_ORDER = ['Kai Yan', 'Chloe', 'Carine', 'Jess', 'Zehao'];
+// Must match the <option> values in #maCategory exactly — used to break
+// the Acc Below summary table into one column per category instead of a
+// single opaque "Adjustments" total.
+const ADJUSTMENT_CATEGORIES = ['Claim', 'Mistake', 'Gift', 'Both Company Loan Claim', 'Alpha C Claim', 'Return Back', 'Other'];
 let directoryInvoiceMap = {}; // proxy_id -> invoice row for selected year/month
 
 async function loadDirectory() {
@@ -3756,12 +3767,39 @@ async function openMgrAdjustmentModal() {
     .slice()
     .sort((a,b) => MANAGER_ORDER.indexOf(a.name) - MANAGER_ORDER.indexOf(b.name))
     .map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+  document.getElementById('maEditId').value = '';
+  document.getElementById('maModalTitle').textContent = 'Add Acc Below Adjustment';
   document.getElementById('maAmount').value = '';
   document.getElementById('maDescription').value = '';
   openModal('modalMgrAdjustment');
 }
 
+// Populates the same Add/Edit modal with an existing adjustment's values
+// and switches it into edit mode (tracked via the hidden maEditId field),
+// so a single entry can be corrected in place instead of delete+re-add.
+async function editMgrAdjustment(id) {
+  if (!managerList.length) await loadManagers();
+  const rows = await sb('nec_manager_adjustments', { filter: `id=eq.${id}` });
+  const adj = rows[0];
+  if (!adj) return showToast('Adjustment not found', 'error');
+  const sel = document.getElementById('maManager');
+  sel.innerHTML = managerList
+    .slice()
+    .sort((a,b) => MANAGER_ORDER.indexOf(a.name) - MANAGER_ORDER.indexOf(b.name))
+    .map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+  document.getElementById('maEditId').value = adj.id;
+  document.getElementById('maModalTitle').textContent = 'Edit Acc Below Adjustment';
+  document.getElementById('maManager').value = adj.manager_id;
+  document.getElementById('maYear').value = adj.year;
+  document.getElementById('maMonth').value = adj.month;
+  document.getElementById('maCategory').value = adj.category;
+  document.getElementById('maAmount').value = adj.amount;
+  document.getElementById('maDescription').value = adj.description || '';
+  openModal('modalMgrAdjustment');
+}
+
 async function saveMgrAdjustment() {
+  const editId = document.getElementById('maEditId').value;
   const managerId = document.getElementById('maManager').value;
   const year = parseInt(document.getElementById('maYear').value);
   const month = parseInt(document.getElementById('maMonth').value);
@@ -3770,15 +3808,25 @@ async function saveMgrAdjustment() {
   const description = document.getElementById('maDescription').value.trim();
   if (!managerId) return showToast('Select a manager', 'error');
   if (isNaN(amount) || amount === 0) return showToast('Enter a non-zero amount', 'error');
+  const mgrName = managerList.find(m => m.id === managerId)?.name || managerId;
   try {
-    await sb('nec_manager_adjustments', {
-      method: 'POST',
-      body: { manager_id: managerId, year, month, category, description: description || null, amount }
-    });
-    const mgrName = managerList.find(m => m.id === managerId)?.name || managerId;
-    await logAudit('CREATE', 'nec_manager_adjustments', `Added ${category} adjustment for ${mgrName} — ${MONTHS[month]} ${year} — RM${amount.toFixed(2)}`);
+    if (editId) {
+      await sb('nec_manager_adjustments', {
+        method: 'PATCH',
+        filter: `id=eq.${editId}`,
+        body: { manager_id: managerId, year, month, category, description: description || null, amount }
+      });
+      await logAudit('UPDATE', 'nec_manager_adjustments', `Edited ${category} adjustment for ${mgrName} — ${MONTHS[month]} ${year} — RM${amount.toFixed(2)}`);
+      showToast('Adjustment updated');
+    } else {
+      await sb('nec_manager_adjustments', {
+        method: 'POST',
+        body: { manager_id: managerId, year, month, category, description: description || null, amount }
+      });
+      await logAudit('CREATE', 'nec_manager_adjustments', `Added ${category} adjustment for ${mgrName} — ${MONTHS[month]} ${year} — RM${amount.toFixed(2)}`);
+      showToast('Adjustment saved');
+    }
     closeModal('modalMgrAdjustment');
-    showToast('Adjustment saved');
     loadMgrAdjustments();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
@@ -3868,16 +3916,25 @@ async function loadMgrAdjustments() {
 
     const orderedManagers = MANAGER_ORDER.map(name => managerList.find(m => m.name === name)).filter(Boolean);
 
-    // Acc Below & Adjustments tab — summary table
+    // Acc Below & Adjustments tab — summary table, one column per
+    // adjustment category so the composition is visible at a glance
+    // instead of requiring a drill-down into the entries table below.
     summaryBody.innerHTML = orderedManagers.map(m => {
       const accBelowAmt = accBelowTotals[m.name] || 0;
       const mgrAdjustments = adjustments.filter(a => a.manager_id === m.id);
-      const adjTotal = r2(mgrAdjustments.reduce((s,a) => s + parseFloat(a.amount||0), 0));
+      const categoryTotals = ADJUSTMENT_CATEGORIES.map(cat => {
+        const sum = r2(mgrAdjustments.filter(a => a.category === cat).reduce((s,a) => s + parseFloat(a.amount||0), 0));
+        return sum;
+      });
+      const adjTotal = r2(categoryTotals.reduce((s,v) => s + v, 0));
       const combined = r2(accBelowAmt + adjTotal);
+      const categoryCells = categoryTotals.map(v =>
+        `<td class="td-mono" style="color:${v === 0 ? 'var(--muted)' : (v < 0 ? 'var(--red)' : 'var(--green)')}">${v === 0 ? '—' : (v >= 0 ? '+' : '') + fmt(v)}</td>`
+      ).join('');
       return `<tr>
         <td class="td-name">${m.name}</td>
         <td class="td-mono">${fmt(accBelowAmt)}</td>
-        <td class="td-mono" style="color:${adjTotal < 0 ? 'var(--red)' : 'var(--green)'}">${adjTotal >= 0 ? '+' : ''}${fmt(adjTotal)}</td>
+        ${categoryCells}
         <td class="td-mono" style="font-weight:700">${fmt(combined)}</td>
       </tr>`;
     }).join('');
@@ -3895,7 +3952,7 @@ async function loadMgrAdjustments() {
           <td>${a.category}</td>
           <td style="color:var(--muted);font-size:12px">${a.description || '—'}</td>
           <td class="td-mono" style="color:${amt < 0 ? 'var(--red)' : 'var(--green)'}">${amt >= 0 ? '+' : ''}${fmt(amt)}</td>
-          <td><button class="btn btn-danger btn-sm" onclick="deleteMgrAdjustment('${a.id}')">✕</button></td>
+          <td><button class="btn btn-ghost btn-sm" onclick="editMgrAdjustment('${a.id}')" style="margin-right:4px">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteMgrAdjustment('${a.id}')">✕</button></td>
         </tr>`;
       }).join('');
     }
