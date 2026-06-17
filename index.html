@@ -637,7 +637,7 @@
         <div class="stat-sub" id="mgr3pct">—% share</div>
       </div>
     </div>
-    <div style="font-size:11px;color:var(--muted);margin-top:-8px;margin-bottom:20px">Stat cards show each manager's full Total (Manager Comm + Acc Below) for the selected period. Zehao has Acc Below but no Manager Comm pool share — see the Total table in the Overview tab below.</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:-8px;margin-bottom:20px">Stat cards show each manager's full settlement (Com + Claim − Acc Below) for the selected period. Zehao has Claim/Acc Below but no Manager Comm pool share — see the Total table in the Overview tab below.</div>
 
     <div class="toolbar">
       <div class="toolbar-left">
@@ -667,26 +667,25 @@
     <div id="mgrPane-overview">
       <div class="table-wrap" style="margin-bottom:20px">
         <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">
-          Total per manager (Manager Comm + Acc Below + Manager Invoice + Outsider + Adjustments)
+          Total per manager (Com + Claim + Mistake − Acc Below)
         </div>
         <div style="padding:10px 14px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)">
-          Manager Invoice is negative — it's the manager's own pool_contribution from their uploaded Coway payslip, subtracted back out so it isn't double-counted (Coway already paid that amount directly to the manager; the pooled Manager Comm share already includes it, so only the remainder needs to be topped up). Outsider is full commission from any non-ad-sourced orders assigned to this manager (same as a staff member's Outsider commission). Confirm pushes this Total into Payroll for the selected month — pick a specific month (not All Months) to confirm.
+          Com = Manager Comm pool share + Manager Invoice netting + Outsider commission, all rolled into one earning figure. Claim = every Adjustment except Mistake (Gift/Loan/Alpha C/Return Back/Other all roll into Claim). Mistake is its own separate category, kept apart from Claim. Acc Below is a deduction owed back to New Era (this manager's proxy accounts that didn't collect this period) — it eats into Com first, then Claim, then Mistake; if it eats through all three, the period becomes an Invoice instead of a Payslip when confirmed. Confirm pushes this settlement into Payroll for the selected month — pick a specific month (not All Months) to confirm.
         </div>
         <table>
           <thead>
             <tr>
               <th>Manager</th>
-              <th>Manager Comm</th>
+              <th>Com</th>
+              <th>Claim</th>
+              <th>Mistake</th>
               <th>Acc Below</th>
-              <th>Manager Invoice</th>
-              <th>Outsider</th>
-              <th>Adjustments</th>
               <th>Total</th>
               <th>Confirm</th>
             </tr>
           </thead>
           <tbody id="mgrGrandTotalBody">
-            <tr><td colspan="8"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+            <tr><td colspan="7"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -770,7 +769,7 @@
           <button class="btn btn-primary btn-sm" onclick="openMgrAdjustmentModal()">Add Adjustment</button>
         </div>
         <div style="padding:10px 14px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)">
-          Acc Below = the money this manager's proxy accounts didn't collect this period — auto-computed as the sum of each of their proxies' (Coway payslip − New Era invoice) for the period, the same PIC liability shown on the Directory page, kept with the manager instead of collected from the proxy directly. Adjustments (Claim/Mistake/Gift/Loan Claim/etc) are a separate, manually-entered category: positive = manager receives, negative = manager owes. Both add into each manager's final Total. Applies to all 5 managers including Zehao, who has Acc Below and Adjustments but no Manager Comm pool share.
+          Acc Below = the money this manager's proxy accounts didn't collect this period — auto-computed as the sum of each of their proxies' (Coway payslip − New Era invoice) for the period, the same PIC liability shown on the Directory page, kept with the manager instead of collected from the proxy directly. It's a deduction owed back to New Era, not a bonus — see the Overview tab for how it nets against Com/Claim/Mistake. Adjustments (Claim/Mistake/Gift/Loan Claim/etc) are a separate, manually-entered category: positive = manager receives, negative = manager owes. On the final settlement (Overview tab, Payslip/Calculation documents), Mistake stays its own separate figure while every other sub-category here (Claim/Gift/Loan Claim/Alpha C Claim/Return Back/Other) rolls into one "Claim" figure — this table is just for tracking the detailed reasons. Applies to all 5 managers including Zehao, who has Acc Below and Adjustments but no Manager Comm pool share.
         </div>
         <table>
           <thead>
@@ -3598,14 +3597,14 @@ function viewAutoCommOrders(idx) {
   alert(`${row.staff.name} — ${MONTHS[row.month]} ${row.year}\n${row.orders.length} payslip-verified orders:\n\n${list || '(none)'}`);
 }
 
-// Whether a payroll record nets out negative (the staff received more
-// from their own Coway proxy than they earned, so they owe New Era
-// back) — derived live from own_proxy_offset + total_pay's sign rather
-// than trusting the stored settlement_type, so editing claim/bonus/
-// deductions after the initial save always flips the document type
-// correctly instead of going stale.
+// Whether a payroll record nets out negative, meaning the person owes
+// New Era money rather than the other way round — derived live from
+// total_pay's sign rather than trusting the stored settlement_type, so
+// editing claim/bonus/deductions after the initial save (or a manager's
+// Adjustments outweighing everything else) always flips the document
+// type correctly instead of going stale.
 function isInvoiceRecord(r) {
-  return parseFloat(r.own_proxy_offset||0) > 0 && parseFloat(r.total_pay||0) < 0;
+  return parseFloat(r.total_pay||0) < 0;
 }
 
 // This period's payslip amount from a staff's OWN Coway proxy account
@@ -3719,22 +3718,84 @@ async function generateStaffPayslip(idx) {
     <br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#4f7cff;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
 }
 
-// Settlement breakdown rows in the same shape the staff already track
-// manually (Sales / Claim / Coway Money / Outsider / Bonus / Total) so
-// the printed document is something they can directly check against
-// their own numbers. Base Salary/Deductions/EPF only appear when
-// non-zero (most sales staff don't have them); Sales/Claim/Coway
-// Money/Outsider/Bonus always appear (blank when not applicable) to
-// match the staff's own reconciliation sheet layout.
-function getSettlementBreakdown(r) {
-  const isOutsider = r.commission_type === 'outsider';
+// Pulls out the two earning categories (Com, Claim) and the deduction
+// that needs to be netted against them — Coway Money for staff (money
+// Coway already paid directly into their own proxy account) or Acc
+// Below for managers (proxy accounts under them that didn't collect
+// this period) — the common shape both record types reduce to, even
+// though the underlying components differ. Com folds together Manager
+// Comm + Manager Invoice + Outsider for managers, or the raw commission
+// (Sales or Outsider, whichever applies) for staff. Claim folds
+// together every Adjustment sub-category (Mistake/Gift/Loan/etc) for
+// managers, or the staff's own claim_amount.
+function getRawSettlementParts(r) {
+  if (r.record_type === 'manager') {
+    let com = 0, claim = 0, mistake = 0, deduction = 0;
+    if (r.notes) {
+      try {
+        const d = JSON.parse(r.notes);
+        if (Array.isArray(d)) {
+          // Old breakdown format from before this categorization existed.
+          const find = (label) => parseFloat((d.find(x => x.label === label)||{}).amount || 0);
+          com = find('Manager Comm') + find('Manager Invoice') + find('Outsider');
+          claim = find('Adjustments');
+          deduction = find('Acc Below');
+        } else if (d && typeof d === 'object') {
+          com = parseFloat(d.com||0); claim = parseFloat(d.claim||0); mistake = parseFloat(d.mistake||0); deduction = parseFloat(d.accBelow||0);
+        }
+      } catch(e) { /* unrecognized notes format — leave at 0 */ }
+    }
+    return { com, claim, mistake, deduction, deductionLabel: 'Acc Below' };
+  }
+  return {
+    com: parseFloat(r.commission_earned||0),
+    claim: parseFloat(r.claim_amount||0),
+    mistake: 0,
+    deduction: parseFloat(r.own_proxy_offset||0),
+    deductionLabel: 'Coway Money',
+  };
+}
+
+// Full-transparency breakdown for the Calculation worksheet — the raw
+// Com/Claim/Mistake figures plus the deduction shown as its own
+// negative line, so the math is fully auditable. This is deliberately
+// NOT what the formal Payslip shows (see getPayslipLineItems below) —
+// the Payslip only shows the final, post-absorption split.
+function getCalculationBreakdown(r) {
+  const { com, claim, mistake, deduction, deductionLabel } = getRawSettlementParts(r);
   const rows = [];
   if (parseFloat(r.base_salary||0) > 0) rows.push({ label: 'Base Salary', amount: parseFloat(r.base_salary) });
-  rows.push({ label: 'Sales', amount: isOutsider ? null : parseFloat(r.commission_earned||0) });
-  rows.push({ label: 'Claim', amount: parseFloat(r.claim_amount||0) || null });
-  rows.push({ label: 'Coway Money', amount: parseFloat(r.own_proxy_offset||0) > 0 ? -parseFloat(r.own_proxy_offset) : null });
-  rows.push({ label: 'Outsider', amount: isOutsider ? parseFloat(r.commission_earned||0) : null });
-  rows.push({ label: 'Bonus', amount: parseFloat(r.bonus||0) || null });
+  rows.push({ label: 'Com', amount: com || null });
+  rows.push({ label: 'Claim', amount: claim || null });
+  if (mistake) rows.push({ label: 'Mistake', amount: mistake });
+  rows.push({ label: deductionLabel, amount: deduction > 0 ? -deduction : null });
+  if (parseFloat(r.bonus||0) !== 0) rows.push({ label: 'Bonus', amount: parseFloat(r.bonus) });
+  if (parseFloat(r.deductions||0) > 0) rows.push({ label: 'Deductions', amount: -parseFloat(r.deductions) });
+  if (parseFloat(r.epf_employee||0) > 0) rows.push({ label: 'EPF Employee (11%)', amount: -parseFloat(r.epf_employee) });
+  return rows;
+}
+
+// What the formal Payslip actually prints — Com, Claim, and Mistake
+// AFTER the deduction has been absorbed (see allocateSettlement; it
+// eats Com first, then Claim, then Mistake), so it's never just one
+// lump "Commission" figure but also never shows the raw deduction
+// itself, only what's actually being paid out in each bucket.
+function getPayslipLineItems(r) {
+  const { com, claim, mistake, deduction } = getRawSettlementParts(r);
+  const { shown } = allocateSettlement([
+    { label: 'Com', amount: com },
+    { label: 'Claim', amount: claim },
+    { label: 'Mistake', amount: mistake },
+  ], deduction);
+  const comShown = shown.find(b => b.label === 'Com').amount;
+  const claimShown = shown.find(b => b.label === 'Claim').amount;
+  const mistakeShown = shown.find(b => b.label === 'Mistake').amount;
+  const rows = [];
+  if (parseFloat(r.base_salary||0) > 0) rows.push({ label: 'Base Salary', amount: parseFloat(r.base_salary) });
+  rows.push({ label: 'Com', amount: comShown || null });
+  rows.push({ label: 'Claim', amount: claimShown || null });
+  if (mistakeShown) rows.push({ label: 'Mistake', amount: mistakeShown });
+  if (parseFloat(r.bonus||0) !== 0) rows.push({ label: 'Bonus', amount: parseFloat(r.bonus) });
   if (parseFloat(r.deductions||0) > 0) rows.push({ label: 'Deductions', amount: -parseFloat(r.deductions) });
   if (parseFloat(r.epf_employee||0) > 0) rows.push({ label: 'EPF Employee (11%)', amount: -parseFloat(r.epf_employee) });
   return rows;
@@ -3749,12 +3810,11 @@ function genStaffDocNumber(prefix, r) {
   return `NEC-${prefix}-${r.year}${String(r.month).padStart(2,'0')}-${ref}`;
 }
 
-// Formal invoice billing the STAFF for the shortfall — same letterhead,
-// single line item, and footer as the Proxy Inv invoices (buildInvoiceHTML)
-// so every invoice New Era issues looks consistent. The detailed
-// calculation (Sales/Claim/Coway Money/etc) is intentionally NOT shown
-// here — that lives in the separate Calculation worksheet so the
-// invoice itself stays a clean, professional billing document.
+// Formal invoice billing whoever owes New Era money for the period —
+// same letterhead and footer as the Proxy Inv invoices (buildInvoiceHTML)
+// so every invoice New Era issues looks consistent, kept as ONE clean
+// line item rather than an itemized breakdown (that's what the separate
+// Calculation worksheet is for).
 function buildStaffInvoiceHTML(staff, r) {
   const amountDue = Math.abs(parseFloat(r.total_pay || 0));
   return `
@@ -3778,8 +3838,8 @@ function buildStaffInvoiceHTML(staff, r) {
           <thead><tr><th>Description</th><th>Amount</th></tr></thead>
           <tbody>
             <tr>
-              <td>Commission Settlement Reconciliation for ${MONTH_FULL[r.month]} ${r.year}<br>
-              <span style="font-size:11px;color:#888">Coway paid more directly into this staff's own proxy account than was earned in commission this period — see the attached calculation sheet for the full breakdown.</span></td>
+              <td>Settlement Reconciliation for ${MONTH_FULL[r.month]} ${r.year}<br>
+              <span style="font-size:11px;color:#888">Net settlement for the period resulted in an amount owed back to New Era — see the attached calculation sheet for the full breakdown.</span></td>
               <td style="font-weight:700">RM ${fmtNum(amountDue)}</td>
             </tr>
           </tbody>
@@ -3799,12 +3859,19 @@ function buildStaffInvoiceHTML(staff, r) {
       </div>`;
 }
 
-// Clean staff payslip — same single-line-item philosophy as the invoice
-// above, for the case where New Era still owes the staff money. Full
-// breakdown again lives in the separate Calculation worksheet.
+// Staff/manager payslip — unlike the invoice above, this itemizes every
+// component (commission vs bonus vs claim vs outsider, etc) as its own
+// line so it's never just one lump "Commission" figure; staff can check
+// exactly what they're being paid for directly on the payslip itself.
 function buildStaffPayslipHTML(staff, r) {
   const totalPay = parseFloat(r.total_pay || 0);
   const isOutsider = r.commission_type === 'outsider';
+  const rows = getPayslipLineItems(r);
+  const rowsHtml = rows.map(row => `
+            <tr>
+              <td>${row.label}</td>
+              <td style="${row.amount < 0 ? 'color:#c00' : ''}">${row.amount === null ? '—' : (row.amount < 0 ? '−RM ' : 'RM ') + fmtNum(Math.abs(row.amount))}</td>
+            </tr>`).join('');
   return `
       <div class="invoice-preview">
         <div class="inv-header">
@@ -3821,16 +3888,10 @@ function buildStaffPayslipHTML(staff, r) {
         <div class="inv-divider"></div>
         <div class="inv-bill-to">Pay To</div>
         <div class="inv-bill-name">${staff.name}</div>
-        <div class="inv-bill-sub">${staff.role || staff.channel || 'New Era Staff'}${isOutsider ? ' · Outsider' : ''}</div>
+        <div class="inv-bill-sub">${staff.role || staff.channel || 'New Era Staff'}${isOutsider ? ' · Outsider' : ''}${r.orders_count ? ` · ${r.orders_count} payslip-verified orders` : ''}</div>
         <table class="inv-table">
           <thead><tr><th>Description</th><th>Amount</th></tr></thead>
-          <tbody>
-            <tr>
-              <td>Commission Settlement for ${MONTH_FULL[r.month]} ${r.year}<br>
-              <span style="font-size:11px;color:#888">${r.orders_count ? r.orders_count + ' payslip-verified orders. ' : ''}See the attached calculation sheet for the full breakdown.</span></td>
-              <td style="font-weight:700">RM ${fmtNum(totalPay)}</td>
-            </tr>
-          </tbody>
+          <tbody>${rowsHtml}</tbody>
         </table>
         <div class="inv-total-row">
           <div class="inv-total-box">
@@ -3838,18 +3899,21 @@ function buildStaffPayslipHTML(staff, r) {
             <div class="inv-total-amount" style="color:#22c55e">RM ${fmtNum(totalPay)}</div>
           </div>
         </div>
+        ${parseFloat(r.epf_employer||0) > 0 ? `<div style="font-size:11px;color:#888;margin-top:-8px">Employer EPF contribution (13%, company record only, not deducted from staff pay): RM ${fmtNum(r.epf_employer)}</div>` : ''}
         <div class="inv-footer">
           Payment will be credited to this staff's registered bank account.
         </div>
       </div>`;
 }
 
-// Internal worksheet — NOT a billing document — showing the full
-// Sales/Claim/Coway Money/Outsider/Bonus breakdown so staff can check
-// their own numbers against New Era's calculation. Deliberately styled
-// differently from the invoice/payslip so the two are never confused.
+// Internal worksheet — NOT a billing document — showing the same
+// itemized breakdown as the payslip, for the invoice case (where the
+// invoice itself stays a clean single line item) so whoever owes money
+// can still check the full calculation against their own numbers.
+// Deliberately styled differently from the invoice/payslip so the two
+// are never confused.
 function buildCalculationHTML(staff, r) {
-  const rows = getSettlementBreakdown(r);
+  const rows = getCalculationBreakdown(r);
   return `
     <div style="max-width:680px;margin:0 auto;font-family:Inter,sans-serif;color:#111;background:#fff;padding:32px;border-radius:8px;border:2px dashed #ccc">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:16px;margin-bottom:16px">
@@ -3868,7 +3932,6 @@ function buildCalculationHTML(staff, r) {
         <div style="display:flex;justify-content:space-between;font-weight:800;font-size:15px;border-top:1px solid #ccc;margin-top:8px;padding-top:8px"><span>Total</span><span>${parseFloat(r.total_pay) < 0 ? '−' : ''}RM ${fmtNum(Math.abs(parseFloat(r.total_pay||0)))}</span></div>
       </div>
       ${parseFloat(r.epf_employer||0) > 0 ? `<div style="font-size:11px;color:#666;margin-bottom:6px">Employer EPF contribution (13%, company record only, not deducted from staff pay): RM ${fmtNum(r.epf_employer)}</div>` : ''}
-      ${r.notes ? `<div style="font-size:11px;color:#666;border-top:1px solid #ddd;padding-top:6px">${r.notes}</div>` : ''}
     </div>`;
 }
 
@@ -3889,10 +3952,10 @@ function generatePayrollRecordPayslip(recordId) {
   if (!r) { showToast('Record not found', 'error'); return; }
   const staff = staffList.find(s => s.id === r.staff_id) || { name: 'Unknown', role: '', channel: '' };
 
-  // If netting this staff's commission against their own Coway proxy
-  // account came out negative, they already received more directly
-  // from Coway than they earned — generate an invoice billing them for
-  // the difference instead of a payslip.
+  // If the period nets out negative — whether from a staff's own-proxy
+  // netting or a manager's Adjustments outweighing everything else —
+  // generate an invoice billing them for the difference instead of a
+  // payslip.
   const isInv = isInvoiceRecord(r);
   const html = isInv ? buildStaffInvoiceHTML(staff, r) : buildStaffPayslipHTML(staff, r);
   const title = isInv ? 'Invoice' : 'Payslip';
@@ -4137,11 +4200,18 @@ async function loadMgrEntryPreview() {
   if (poolTotalEl) poolTotalEl.textContent = `RM ${fmtNum(pool)}`;
 }
 
-// Computes one manager's full Total (Manager Comm + Acc Below + Manager
-// Invoice + Outsider + Adjustments) for one specific period — used when
-// confirming a period in Manager Sharing, to push a single settled
+// Computes one manager's full settlement for one specific period — used
+// when confirming a period in Manager Sharing, to push a single settled
 // record into nec_payroll so Payroll becomes the one place tracking
 // who's been paid and when, across staff and managers alike.
+//
+// Two earning categories: Com (Manager Comm pool share + Manager
+// Invoice netting + Outsider) and Claim (all Adjustments, regardless of
+// sub-category — Mistake/Gift/Loan/etc — rolled into one "Claim"
+// figure). Acc Below is a deduction owed back to New Era (proxy
+// accounts under this manager that didn't collect this period), netted
+// out via allocateSettlement: it eats into Com first, then Claim, and
+// only tips into an Invoice if it exceeds both combined.
 async function getManagerTotalForPeriod(m, year, month) {
   if (!proxyList.length) await loadProxies();
 
@@ -4159,11 +4229,37 @@ async function getManagerTotalForPeriod(m, year, month) {
 
   const outsiderAmt = await getManagerOutsiderCommission(m.staff_id, year, month);
 
+  // "Claim" on the final settlement rolls up every Adjustment category
+  // EXCEPT Mistake (Gift/Loan Claim/Alpha C Claim/Return Back/Other all
+  // count as Claim) — Mistake stays its own separate bucket since it's
+  // a distinct correction, not a reimbursement-style claim.
   const adj = await sb('nec_manager_adjustments', { filter: `manager_id=eq.${m.id}&year=eq.${year}&month=eq.${month}` });
-  const adjTotal = r2(adj.reduce((s,a) => s + parseFloat(a.amount||0), 0));
+  const mistakeTotal = r2(adj.filter(a => a.category === 'Mistake').reduce((s,a) => s + parseFloat(a.amount||0), 0));
+  const claimTotal = r2(adj.filter(a => a.category !== 'Mistake').reduce((s,a) => s + parseFloat(a.amount||0), 0));
 
-  const total = r2(commTotal + accBelowAmt + invoiceAmt + outsiderAmt + adjTotal);
-  return { commTotal, accBelowAmt, invoiceAmt, outsiderAmt, adjTotal, total };
+  const comTotal = r2(commTotal + invoiceAmt + outsiderAmt);
+  const total = r2(comTotal + claimTotal + mistakeTotal - accBelowAmt);
+  // Kept for the Overview table's raw-component columns.
+  return { commTotal, accBelowAmt, invoiceAmt, outsiderAmt, claimTotal, mistakeTotal, comTotal, total };
+}
+
+// Decides how a deduction (Acc Below for managers, Coway Money for
+// staff) eats into the earning buckets in priority order — Com first,
+// then Claim, then Mistake — and if even the last bucket can't absorb
+// it, the period nets negative and becomes an Invoice instead of a
+// Payslip. The combined total is the same regardless of how the
+// absorption is split — this only decides what the printed Payslip
+// shows for each bucket (or whether it's an Invoice at all).
+function allocateSettlement(buckets, deduction) {
+  let remaining = deduction;
+  const shown = buckets.map(b => ({ label: b.label, amount: b.amount }));
+  for (let i = 0; i < shown.length && remaining > 0; i++) {
+    if (shown[i].amount <= 0) continue;
+    const take = Math.min(shown[i].amount, remaining);
+    shown[i].amount = r2(shown[i].amount - take);
+    remaining = r2(remaining - take);
+  }
+  return { shown, isInvoice: remaining > 0 };
 }
 
 async function saveManagerSharing() {
@@ -4196,11 +4292,11 @@ async function saveManagerSharing() {
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
-// Pushes ONE manager's current Total (Manager Comm + Acc Below + Manager
-// Invoice + Outsider + Adjustments) for the Overview tab's selected
-// period into nec_payroll — this is what makes Payroll the single place
-// tracking who's been paid and when, across staff and managers alike.
-// Safe to re-run: overwrites any existing record for that staff+period.
+// Pushes ONE manager's current settlement (Com + Claim, net of Acc
+// Below) for the Overview tab's selected period into nec_payroll — this
+// is what makes Payroll the single place tracking who's been paid and
+// when, across staff and managers alike. Safe to re-run: overwrites any
+// existing record for that staff+period.
 async function confirmManagerToPayroll(managerId) {
   const m = managerList.find(x => x.id === managerId);
   if (!m) return;
@@ -4213,12 +4309,16 @@ async function confirmManagerToPayroll(managerId) {
     const t = await getManagerTotalForPeriod(m, year, month);
     const existing = await sb('nec_payroll', { filter: `staff_id=eq.${m.staff_id}&year=eq.${year}&month=eq.${month}`, select: 'id' });
     for (const e of existing) await sbDelete('nec_payroll', `id=eq.${e.id}`);
-    const notes = `Manager Comm ${fmt(t.commTotal)} + Acc Below ${fmt(t.accBelowAmt)} + Manager Invoice ${fmt(t.invoiceAmt)} + Outsider ${fmt(t.outsiderAmt)} + Adjustments ${fmt(t.adjTotal)} = Total ${fmt(t.total)}`;
+    // Store the raw Com/Claim/Mistake/Acc Below figures (not a
+    // pre-split breakdown) so getSettlementBreakdown can derive both
+    // the fully transparent Calculation view and the absorbed Payslip
+    // view from the same source, on demand.
+    const notes = JSON.stringify({ com: t.comTotal, claim: t.claimTotal, mistake: t.mistakeTotal, accBelow: t.accBelowAmt });
     await sb('nec_payroll', {
       method: 'POST',
       body: { staff_id: m.staff_id, year, month, commission_earned: t.total, record_type: 'manager', notes }
     });
-    await logAudit('CREATE', 'nec_payroll', `Confirmed ${m.name}'s manager Total for ${MONTHS[month]} ${year} into Payroll — RM${t.total.toFixed(2)}`);
+    await logAudit('CREATE', 'nec_payroll', `Confirmed ${m.name}'s manager settlement for ${MONTHS[month]} ${year} into Payroll — Com ${fmt(t.comTotal)} (Manager Comm ${fmt(t.commTotal)} + Manager Invoice ${fmt(t.invoiceAmt)} + Outsider ${fmt(t.outsiderAmt)}) + Claim ${fmt(t.claimTotal)} + Mistake ${fmt(t.mistakeTotal)} − Acc Below ${fmt(t.accBelowAmt)} = Total RM${t.total.toFixed(2)}`);
     showToast(`${m.name} confirmed to Payroll ✓`);
     loadMgrAdjustments();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
@@ -4574,13 +4674,13 @@ async function loadMgrAdjustments() {
         return sum;
       });
       const adjTotal = r2(categoryTotals.reduce((s,v) => s + v, 0));
-      const combined = r2(accBelowAmt + adjTotal);
+      const combined = r2(adjTotal - accBelowAmt);
       const categoryCells = categoryTotals.map(v =>
         `<td class="td-mono" style="color:${v === 0 ? 'var(--muted)' : (v < 0 ? 'var(--red)' : 'var(--green)')}">${v === 0 ? '—' : (v >= 0 ? '+' : '') + fmt(v)}</td>`
       ).join('');
       return `<tr>
         <td class="td-name">${m.name}</td>
-        <td class="td-mono">${fmt(accBelowAmt)}</td>
+        <td class="td-mono" style="color:${accBelowAmt > 0 ? 'var(--red)' : 'var(--muted)'}">${accBelowAmt > 0 ? '−' + fmt(accBelowAmt) : '—'}</td>
         ${categoryCells}
         <td class="td-mono" style="font-weight:700">${fmt(combined)}</td>
       </tr>`;
@@ -4604,16 +4704,18 @@ async function loadMgrAdjustments() {
       }).join('');
     }
 
-    // Overview tab — grand total table: Manager Comm + Acc Below + Manager Invoice + Adjustments
+    // Overview tab — grand total table: Com + Claim + Mistake − Acc Below
     grandTotalBody.innerHTML = orderedManagers.map(m => {
       const commRows = commRecords.filter(r => r.manager_id === m.id);
       const commTotal = r2(commRows.reduce((s,r) => s + parseFloat(r.amount_received||0), 0));
       const accBelowAmt = accBelowTotals[m.name] || 0;
       const invoiceAmt = managerInvoiceTotals[m.name] || 0;
       const outsiderAmt = outsiderTotals[m.name] || 0;
+      const comTotal = r2(commTotal + invoiceAmt + outsiderAmt);
       const mgrAdjustments = adjustments.filter(a => a.manager_id === m.id);
-      const adjTotal = r2(mgrAdjustments.reduce((s,a) => s + parseFloat(a.amount||0), 0));
-      const grandTotal = r2(commTotal + accBelowAmt + invoiceAmt + outsiderAmt + adjTotal);
+      const claimTotal = r2(mgrAdjustments.filter(a => a.category !== 'Mistake').reduce((s,a) => s + parseFloat(a.amount||0), 0));
+      const mistakeTotal = r2(mgrAdjustments.filter(a => a.category === 'Mistake').reduce((s,a) => s + parseFloat(a.amount||0), 0));
+      const grandTotal = r2(comTotal + claimTotal + mistakeTotal - accBelowAmt);
       let confirmCell;
       if (!month) {
         confirmCell = `<span style="font-size:11px;color:var(--muted)">Pick a month</span>`;
@@ -4626,11 +4728,10 @@ async function loadMgrAdjustments() {
       }
       return `<tr>
         <td class="td-name">${m.name}</td>
-        <td class="td-mono">${fmt(commTotal)}</td>
-        <td class="td-mono">${fmt(accBelowAmt)}</td>
-        <td class="td-mono" style="color:${invoiceAmt < 0 ? 'var(--red)' : 'var(--green)'}">${invoiceAmt >= 0 ? '+' : ''}${fmt(invoiceAmt)}</td>
-        <td class="td-mono" style="color:${outsiderAmt === 0 ? 'var(--muted)' : 'var(--green)'}">${outsiderAmt === 0 ? '—' : fmt(outsiderAmt)}</td>
-        <td class="td-mono" style="color:${adjTotal < 0 ? 'var(--red)' : 'var(--green)'}">${adjTotal >= 0 ? '+' : ''}${fmt(adjTotal)}</td>
+        <td class="td-mono">${fmt(comTotal)}<div style="font-size:10px;color:var(--muted)">Comm ${fmt(commTotal)} ${invoiceAmt>=0?'+':''}${fmt(invoiceAmt)} ${outsiderAmt>=0?'+':''}${fmt(outsiderAmt)}</div></td>
+        <td class="td-mono" style="color:${claimTotal < 0 ? 'var(--red)' : 'var(--green)'}">${claimTotal >= 0 ? '+' : ''}${fmt(claimTotal)}</td>
+        <td class="td-mono" style="color:${mistakeTotal === 0 ? 'var(--muted)' : (mistakeTotal < 0 ? 'var(--red)' : 'var(--green)')}">${mistakeTotal === 0 ? '—' : (mistakeTotal >= 0 ? '+' : '') + fmt(mistakeTotal)}</td>
+        <td class="td-mono" style="color:${accBelowAmt > 0 ? 'var(--red)' : 'var(--muted)'}">${accBelowAmt > 0 ? '−' + fmt(accBelowAmt) : '—'}</td>
         <td class="td-mono" style="font-weight:700;color:var(--accent)">${fmt(grandTotal)}</td>
         <td>${confirmCell}</td>
       </tr>`;
@@ -4671,9 +4772,11 @@ async function loadMgrAdjustments() {
       const accBelowAmt = accBelowTotals[m.name] || 0;
       const invoiceAmt = managerInvoiceTotals[m.name] || 0;
       const outsiderAmt = outsiderTotals[m.name] || 0;
+      const comTotal = r2(commTotal + invoiceAmt + outsiderAmt);
       const mgrAdjustments = adjustments.filter(a => a.manager_id === m.id);
-      const adjTotal = r2(mgrAdjustments.reduce((s,a) => s + parseFloat(a.amount||0), 0));
-      const grandTotal = r2(commTotal + accBelowAmt + invoiceAmt + outsiderAmt + adjTotal);
+      const claimTotal = r2(mgrAdjustments.filter(a => a.category !== 'Mistake').reduce((s,a) => s + parseFloat(a.amount||0), 0));
+      const mistakeTotal = r2(mgrAdjustments.filter(a => a.category === 'Mistake').reduce((s,a) => s + parseFloat(a.amount||0), 0));
+      const grandTotal = r2(comTotal + claimTotal + mistakeTotal - accBelowAmt);
       if (document.getElementById(`mgr${i}`)) {
         document.getElementById(`mgr${i}`).textContent = grandTotal !== 0 ? fmt(grandTotal) : '—';
         document.getElementById(`mgr${i}pct`).textContent = `${m.share_percentage}% share`;
