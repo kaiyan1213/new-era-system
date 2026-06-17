@@ -443,14 +443,22 @@
   <div id="page-payroll" class="hidden">
     <div class="page-header">
       <div>
-        <div class="page-title">Staff Payroll</div>
-        <div class="page-sub">Sales commission + Admin fixed salary</div>
+        <div class="page-title">Payroll</div>
+        <div class="page-sub">Sales commission + Admin fixed salary — covers everyone, not just sales staff</div>
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost" onclick="openAddStaffModal()">+ Add Staff</button>
         <button class="btn btn-primary" onclick="openPayrollEntryModal()">Record Payroll</button>
       </div>
     </div>
+
+    <div class="tabs">
+      <div class="tab active" id="payrollTab-records" onclick="switchPayrollTab('records')">Payroll</div>
+      <div class="tab" id="payrollTab-automatch" onclick="switchPayrollTab('automatch')">Auto Commission Matching</div>
+    </div>
+
+    <!-- PAYROLL TAB: stats, staff list, payroll records -->
+    <div id="payrollPane-records">
 
     <div class="stats-row">
       <div class="stat-card">
@@ -498,46 +506,6 @@
       </div>
     </div>
 
-    <!-- Auto Commission from 收单追踪 -->
-    <div class="table-wrap" style="margin-bottom:20px">
-      <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-        <span>Auto Commission — from 收单追踪 (Installed orders)</span>
-        <div style="display:flex;gap:8px;align-items:center">
-          <select id="acYear" style="width:90px">
-            <option value="2025">2025</option>
-            <option value="2026" selected>2026</option>
-          </select>
-          <select id="acMonth" style="width:130px">
-            <option value="1">January</option><option value="2">February</option>
-            <option value="3">March</option><option value="4">April</option>
-            <option value="5">May</option><option value="6" selected>June</option>
-            <option value="7">July</option><option value="8">August</option>
-            <option value="9">September</option><option value="10">October</option>
-            <option value="11">November</option><option value="12">December</option>
-          </select>
-          <button class="btn btn-ghost btn-sm" onclick="previewAutoCommission()">🔄 Preview</button>
-        </div>
-      </div>
-      <div style="font-size:11px;color:var(--muted);padding:8px 14px;border-bottom:1px solid var(--border)">
-        Pulls every new order from this month's Coway payslips (the authoritative list, across all proxies) and cross-checks it against 收单追踪's claims, matched purely by customer name (any "(nickname)" or other notes staff add after the name are ignored) — via the "收单追踪 Staff Name" set on each staff member below. Only orders verified against an actual payslip count toward commission (RM50/order for orders 1–20, +RM1000 bonus at the 10th, +RM1000 at the 20th, RM100/order from the 21st onward). Payslip orders with no matching staff claim show up below for manual assignment.
-      </div>
-      <div id="autoCommContainer">
-        <div class="empty"><div class="empty-text">Set each staff's 收单追踪 name below, then click "🔄 Preview".</div></div>
-      </div>
-      <div style="border-top:1px solid var(--border);padding:14px">
-        <div style="font-weight:700;margin-bottom:6px">Bulk Manual Match</div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Paste a list of customer names (one per line) and pick a staff member — the system will search this month's Coway payslips for each name and assign any match to that staff. Names that don't match any payslip order for this month are skipped and reported back.</div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start">
-          <textarea id="bulkMatchNames" rows="5" placeholder="One customer name per line..." style="flex:1;min-width:260px;font-family:var(--mono);font-size:12px;padding:8px"></textarea>
-          <div style="display:flex;flex-direction:column;gap:8px;min-width:180px">
-            <select id="bulkMatchStaff" style="width:100%"></select>
-            <button class="btn btn-primary btn-sm" onclick="bulkManualMatch()">Match &amp; Assign</button>
-          </div>
-        </div>
-        <div id="bulkMatchResult" style="margin-top:10px;font-size:12px"></div>
-      </div>
-    </div>
-
     <!-- Staff List -->
     <div class="table-wrap" style="margin-bottom:20px">
       <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">Staff List</div>
@@ -581,6 +549,51 @@
           <tr><td colspan="11"><div class="empty"><div class="empty-icon">👥</div><div class="empty-text">Loading payroll...</div></div></td></tr>
         </tbody>
       </table>
+    </div>
+
+    </div>
+    <!-- end PAYROLL TAB -->
+
+    <!-- AUTO COMMISSION MATCHING TAB -->
+    <div id="payrollPane-automatch" class="hidden">
+      <div class="table-wrap" style="margin-bottom:20px">
+        <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <span>Auto Commission — from 收单追踪 (Installed orders)</span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select id="acYear" style="width:90px">
+              <option value="2025">2025</option>
+              <option value="2026" selected>2026</option>
+            </select>
+            <select id="acMonth" style="width:130px">
+              <option value="1">January</option><option value="2">February</option>
+              <option value="3">March</option><option value="4">April</option>
+              <option value="5">May</option><option value="6" selected>June</option>
+              <option value="7">July</option><option value="8">August</option>
+              <option value="9">September</option><option value="10">October</option>
+              <option value="11">November</option><option value="12">December</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" onclick="previewAutoCommission()">🔄 Preview</button>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);padding:8px 14px;border-bottom:1px solid var(--border)">
+          Pulls every new order from this month's Coway payslips (the authoritative list, across all proxies) and cross-checks it against 收单追踪's claims, matched purely by customer name (any "(nickname)" or other notes staff add after the name are ignored) — via the "收单追踪 Staff Name" set on each staff member on the Payroll tab. Only orders verified against an actual payslip count toward commission (RM50/order for orders 1–20, +RM1000 bonus at the 10th, +RM1000 at the 20th, RM100/order from the 21st onward). Payslip orders with no matching staff claim show up below for manual assignment.
+        </div>
+        <div id="autoCommContainer">
+          <div class="empty"><div class="empty-text">Set each staff's 收单追踪 name on the Payroll tab, then click "🔄 Preview".</div></div>
+        </div>
+        <div style="border-top:1px solid var(--border);padding:14px">
+          <div style="font-weight:700;margin-bottom:6px">Bulk Manual Match</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Paste a list of customer names (one per line) and pick a staff member — the system will search this month's Coway payslips for each name and assign any match to that staff. Names that don't match any payslip order for this month are skipped and reported back.</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start">
+            <textarea id="bulkMatchNames" rows="5" placeholder="One customer name per line..." style="flex:1;min-width:260px;font-family:var(--mono);font-size:12px;padding:8px"></textarea>
+            <div style="display:flex;flex-direction:column;gap:8px;min-width:180px">
+              <select id="bulkMatchStaff" style="width:100%"></select>
+              <button class="btn btn-primary btn-sm" onclick="bulkManualMatch()">Match &amp; Assign</button>
+            </div>
+          </div>
+          <div id="bulkMatchResult" style="margin-top:10px;font-size:12px"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -4031,6 +4044,20 @@ function switchManagerTab(tab) {
   ['overview', 'comm', 'accbelow'].forEach(t => {
     const pane = document.getElementById(`mgrPane-${t}`);
     const tabEl = document.getElementById(`mgrTab-${t}`);
+    if (t === tab) { pane.classList.remove('hidden'); tabEl.classList.add('active'); }
+    else { pane.classList.add('hidden'); tabEl.classList.remove('active'); }
+  });
+}
+
+// Sub-tabs on the Payroll page: "Payroll" (staff list + payroll records —
+// covers everyone: sales staff, admin, outsider, TM, not just "staff" in
+// the narrow sense) and "Auto Commission Matching" (the 收单追踪
+// reconciliation preview + bulk manual match tool), kept separate since
+// they're different workflows that happened to share a page before.
+function switchPayrollTab(tab) {
+  ['records', 'automatch'].forEach(t => {
+    const pane = document.getElementById(`payrollPane-${t}`);
+    const tabEl = document.getElementById(`payrollTab-${t}`);
     if (t === tab) { pane.classList.remove('hidden'); tabEl.classList.add('active'); }
     else { pane.classList.add('hidden'); tabEl.classList.remove('active'); }
   });
