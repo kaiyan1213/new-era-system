@@ -649,7 +649,10 @@
     <div id="mgrPane-overview">
       <div class="table-wrap" style="margin-bottom:20px">
         <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">
-          Total per manager (Manager Comm + Acc Below + Adjustments)
+          Total per manager (Manager Comm + Acc Below + Manager Invoice + Adjustments)
+        </div>
+        <div style="padding:10px 14px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)">
+          Manager Invoice is negative — it's the manager's own pool_contribution from their uploaded Coway payslip, subtracted back out so it isn't double-counted (Coway already paid that amount directly to the manager; the pooled Manager Comm share already includes it, so only the remainder needs to be topped up).
         </div>
         <table>
           <thead>
@@ -657,12 +660,13 @@
               <th>Manager</th>
               <th>Manager Comm</th>
               <th>Acc Below</th>
+              <th>Manager Invoice</th>
               <th>Adjustments</th>
               <th>Total</th>
             </tr>
           </thead>
           <tbody id="mgrGrandTotalBody">
-            <tr><td colspan="5"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+            <tr><td colspan="6"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -3840,6 +3844,28 @@ async function loadMgrAdjustments() {
     if (month) commFilter += `&month=eq.${month}`;
     const commRecords = await sb('nec_manager_sharing', { filter: commFilter });
 
+    // Manager Invoice: NEGATIVE of each manager's own pool_contribution
+    // (nec_manager_payslips — the same Overriding+Allowance figure their
+    // own uploaded Coway payslip feeds into the Manager Comm pool). Coway
+    // already paid this amount directly to the manager via their own
+    // payslip, so it must be subtracted back out of their pooled Manager
+    // Comm share to avoid double-counting — e.g. KY's own payslip already
+    // gave him RM1579.50 from Coway directly, so the company only needs to
+    // top him up by (poolShare − 1579.50) to reach his full Manager Comm
+    // entitlement. Only pool managers (KY/Chloe/Carine/Jess) have this;
+    // Zehao has no own-payslip upload and so no Manager Invoice line.
+    let mpFilter = `year=eq.${year}`;
+    if (month) mpFilter += `&month=eq.${month}`;
+    const managerPayslips = await sb('nec_manager_payslips', { filter: mpFilter });
+    const managerInvoiceTotals = {};
+    MANAGER_ORDER.forEach(m => managerInvoiceTotals[m] = 0);
+    managerPayslips.forEach(mp => {
+      const mgr = managerList.find(m => m.id === mp.manager_id);
+      if (mgr && MANAGER_ORDER.includes(mgr.name)) {
+        managerInvoiceTotals[mgr.name] = r2(managerInvoiceTotals[mgr.name] - parseFloat(mp.pool_contribution||0));
+      }
+    });
+
     const orderedManagers = MANAGER_ORDER.map(name => managerList.find(m => m.name === name)).filter(Boolean);
 
     // Acc Below & Adjustments tab — summary table
@@ -3874,18 +3900,20 @@ async function loadMgrAdjustments() {
       }).join('');
     }
 
-    // Overview tab — grand total table: Manager Comm + Acc Below + Adjustments, shown as 4 distinct columns
+    // Overview tab — grand total table: Manager Comm + Acc Below + Manager Invoice + Adjustments
     grandTotalBody.innerHTML = orderedManagers.map(m => {
       const commRows = commRecords.filter(r => r.manager_id === m.id);
       const commTotal = r2(commRows.reduce((s,r) => s + parseFloat(r.amount_received||0), 0));
       const accBelowAmt = accBelowTotals[m.name] || 0;
+      const invoiceAmt = managerInvoiceTotals[m.name] || 0;
       const mgrAdjustments = adjustments.filter(a => a.manager_id === m.id);
       const adjTotal = r2(mgrAdjustments.reduce((s,a) => s + parseFloat(a.amount||0), 0));
-      const grandTotal = r2(commTotal + accBelowAmt + adjTotal);
+      const grandTotal = r2(commTotal + accBelowAmt + invoiceAmt + adjTotal);
       return `<tr>
         <td class="td-name">${m.name}</td>
         <td class="td-mono">${fmt(commTotal)}</td>
         <td class="td-mono">${fmt(accBelowAmt)}</td>
+        <td class="td-mono" style="color:${invoiceAmt < 0 ? 'var(--red)' : 'var(--green)'}">${invoiceAmt >= 0 ? '+' : ''}${fmt(invoiceAmt)}</td>
         <td class="td-mono" style="color:${adjTotal < 0 ? 'var(--red)' : 'var(--green)'}">${adjTotal >= 0 ? '+' : ''}${fmt(adjTotal)}</td>
         <td class="td-mono" style="font-weight:700;color:var(--accent)">${fmt(grandTotal)}</td>
       </tr>`;
@@ -3924,9 +3952,10 @@ async function loadMgrAdjustments() {
       const commRows = commRecords.filter(r => r.manager_id === m.id);
       const commTotal = r2(commRows.reduce((s,r) => s + parseFloat(r.amount_received||0), 0));
       const accBelowAmt = accBelowTotals[m.name] || 0;
+      const invoiceAmt = managerInvoiceTotals[m.name] || 0;
       const mgrAdjustments = adjustments.filter(a => a.manager_id === m.id);
       const adjTotal = r2(mgrAdjustments.reduce((s,a) => s + parseFloat(a.amount||0), 0));
-      const grandTotal = r2(commTotal + accBelowAmt + adjTotal);
+      const grandTotal = r2(commTotal + accBelowAmt + invoiceAmt + adjTotal);
       if (document.getElementById(`mgr${i}`)) {
         document.getElementById(`mgr${i}`).textContent = grandTotal !== 0 ? fmt(grandTotal) : '—';
         document.getElementById(`mgr${i}pct`).textContent = `${m.share_percentage}% share`;
