@@ -589,9 +589,12 @@
     <div class="page-header">
       <div>
         <div class="page-title">Manager Profit Sharing</div>
-        <div class="page-sub">Coway payslips → routed through NEC → distributed by % to each manager</div>
+        <div class="page-sub">Coway payslips → routed through NEC → distributed by % to each manager, plus Acc Below settlement</div>
       </div>
-      <button class="btn btn-primary" onclick="openManagerEntryModal()">Record This Month</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="openMgrAdjustmentModal()">Add Adjustment</button>
+        <button class="btn btn-primary" onclick="openManagerEntryModal()">Record This Month</button>
+      </div>
     </div>
 
     <div class="stats-row" id="managerStats">
@@ -616,14 +619,15 @@
         <div class="stat-sub" id="mgr3pct">—% share</div>
       </div>
     </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:-8px;margin-bottom:20px">Stat cards show each manager's full Total (Manager Comm + Acc Below) for the selected period. Zehao has Acc Below but no Manager Comm pool share — see the Total table in the Overview tab below.</div>
 
     <div class="toolbar">
       <div class="toolbar-left">
-        <select id="mgrYear" onchange="loadManagerSharing(); loadMgrPayslips(); loadMgrAdjustments();">
+        <select id="mgrYear" onchange="loadAllManagerData()">
           <option value="2025">2025</option>
           <option value="2026" selected>2026</option>
         </select>
-        <select id="mgrMonth" onchange="loadManagerSharing(); loadMgrPayslips(); loadMgrAdjustments();">
+        <select id="mgrMonth" onchange="loadAllManagerData()">
           <option value="">All Months</option>
           <option value="1">January</option><option value="2">February</option>
           <option value="3">March</option><option value="4">April</option>
@@ -635,112 +639,130 @@
       </div>
     </div>
 
-    <div class="table-wrap" style="margin-bottom:20px">
-      <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-        <span>Manager Payslips — pool inputs (Overriding 1st Install + Allowance)</span>
-        <button class="btn btn-primary btn-sm" onclick="openMgrPayslipUploadModal()">Upload Manager Payslip</button>
-      </div>
-      <div style="padding:10px 14px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)">
-        Only KY, Chloe, Carine, and Jess upload here — these are never treated as proxy accounts and never count toward PIC liability. The Manager Comm pool for a period = the sum of all 4 managers' (Overriding 1st Install total + Allowance total) here, split by each manager's share %.
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Manager</th>
-            <th>Month</th>
-            <th>Overriding 1st Install</th>
-            <th>Allowance</th>
-            <th>Pool Contribution</th>
-            <th>Source File</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="mgrPayslipTableBody">
-          <tr><td colspan="7"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
-        </tbody>
-      </table>
+    <div class="tabs">
+      <div class="tab active" id="mgrTab-overview" onclick="switchManagerTab('overview')">Overview</div>
+      <div class="tab" id="mgrTab-comm" onclick="switchManagerTab('comm')">Manager Comm</div>
+      <div class="tab" id="mgrTab-accbelow" onclick="switchManagerTab('accbelow')">Acc Below</div>
     </div>
 
-    <div class="table-wrap" style="margin-bottom:20px">
-      <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-        <span>Acc Below — Manager Invoice (auto) + manual adjustments</span>
-        <button class="btn btn-primary btn-sm" onclick="openMgrAdjustmentModal()">Add Adjustment</button>
+    <!-- OVERVIEW TAB: the answer — grand total per manager -->
+    <div id="mgrPane-overview">
+      <div class="table-wrap">
+        <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">
+          Total per manager (Manager Comm + Acc Below)
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Manager</th>
+              <th>Manager Comm</th>
+              <th>Acc Below</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody id="mgrGrandTotalBody">
+            <tr><td colspan="4"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+          </tbody>
+        </table>
       </div>
-      <div style="padding:10px 14px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)">
-        Manager Invoice is auto-computed per manager as the sum of each of their proxies' (Coway payslip − New Era invoice) for the period — the same PIC liability shown on the Directory page, kept with the manager instead of collected from the proxy directly. Manual adjustments (Claim/Mistake/Gift/Loan Claim/etc) are added on top: positive = manager receives, negative = manager owes. Applies to all 5 managers including Zehao, who has Acc Below but no Manager Comm pool share.
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Manager</th>
-            <th>Manager Invoice (auto)</th>
-            <th>Adjustments</th>
-            <th>Acc Below Total</th>
-          </tr>
-        </thead>
-        <tbody id="accBelowSummaryBody">
-          <tr><td colspan="4"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
-        </tbody>
-      </table>
     </div>
 
-    <div class="table-wrap" style="margin-bottom:20px">
-      <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">
-        Acc Below — manual adjustment entries
+    <!-- MANAGER COMM TAB: pool inputs + pooled split records -->
+    <div id="mgrPane-comm" class="hidden">
+      <div class="table-wrap" style="margin-bottom:20px">
+        <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <span>Manager Payslips — pool inputs (Overriding 1st Install + Allowance)</span>
+          <button class="btn btn-primary btn-sm" onclick="openMgrPayslipUploadModal()">Upload Manager Payslip</button>
+        </div>
+        <div style="padding:10px 14px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)">
+          Only KY, Chloe, Carine, and Jess upload here — these are never treated as proxy accounts and never count toward PIC liability. The Manager Comm pool for a period = the sum of all 4 managers' (Overriding 1st Install total + Allowance total) here, split by each manager's share %.
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Manager</th>
+              <th>Month</th>
+              <th>Overriding 1st Install</th>
+              <th>Allowance</th>
+              <th>Pool Contribution</th>
+              <th>Source File</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="mgrPayslipTableBody">
+            <tr><td colspan="7"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+          </tbody>
+        </table>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Manager</th>
-            <th>Month</th>
-            <th>Category</th>
-            <th>Description</th>
-            <th>Amount</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="mgrAdjustmentTableBody">
-          <tr><td colspan="6"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
-        </tbody>
-      </table>
+
+      <div class="table-wrap">
+        <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">
+          Manager Comm — recorded pooled splits
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Manager</th>
+              <th>Month</th>
+              <th>Coway Payslip</th>
+              <th>Share %</th>
+              <th>Amount Received</th>
+              <th>Notes</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="managerTableBody">
+            <tr><td colspan="7"><div class="empty"><div class="empty-icon">👔</div><div class="empty-text">Loading records...</div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
-    <div class="table-wrap" style="margin-bottom:20px">
-      <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">
-        Total per manager (Manager Comm + Acc Below)
+    <!-- ACC BELOW TAB: auto Manager Invoice + manual adjustments -->
+    <div id="mgrPane-accbelow" class="hidden">
+      <div class="table-wrap" style="margin-bottom:20px">
+        <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <span>Acc Below — Manager Invoice (auto) + manual adjustments</span>
+          <button class="btn btn-primary btn-sm" onclick="openMgrAdjustmentModal()">Add Adjustment</button>
+        </div>
+        <div style="padding:10px 14px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)">
+          Manager Invoice is auto-computed per manager as the sum of each of their proxies' (Coway payslip − New Era invoice) for the period — the same PIC liability shown on the Directory page, kept with the manager instead of collected from the proxy directly. Manual adjustments (Claim/Mistake/Gift/Loan Claim/etc) are added on top: positive = manager receives, negative = manager owes. Applies to all 5 managers including Zehao, who has Acc Below but no Manager Comm pool share.
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Manager</th>
+              <th>Manager Invoice (auto)</th>
+              <th>Adjustments</th>
+              <th>Acc Below Total</th>
+            </tr>
+          </thead>
+          <tbody id="accBelowSummaryBody">
+            <tr><td colspan="4"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+          </tbody>
+        </table>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Manager</th>
-            <th>Manager Comm</th>
-            <th>Acc Below</th>
-            <th>Total</th>
-          </tr>
-        </thead>
-        <tbody id="mgrGrandTotalBody">
-          <tr><td colspan="4"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
-        </tbody>
-      </table>
-    </div>
 
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Manager</th>
-            <th>Month</th>
-            <th>Coway Payslip</th>
-            <th>Share %</th>
-            <th>Amount Received</th>
-            <th>Notes</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="managerTableBody">
-          <tr><td colspan="7"><div class="empty"><div class="empty-icon">👔</div><div class="empty-text">Loading records...</div></div></td></tr>
-        </tbody>
-      </table>
+      <div class="table-wrap">
+        <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">
+          Manual adjustment entries
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Manager</th>
+              <th>Month</th>
+              <th>Category</th>
+              <th>Description</th>
+              <th>Amount</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="mgrAdjustmentTableBody">
+            <tr><td colspan="6"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -1901,7 +1923,7 @@ function showPage(page) {
   event?.target?.classList.add('active');
   if (page === 'proxy') loadInvoices();
   if (page === 'payroll') loadPayroll();
-  if (page === 'manager') { loadManagerSharing(); loadMgrPayslips(); loadMgrAdjustments(); }
+  if (page === 'manager') loadAllManagerData();
   if (page === 'pl') loadPL();
   if (page === 'audit') loadAuditLog();
   if (page === 'breakdown') loadBreakdown();
@@ -3844,9 +3866,53 @@ async function loadMgrAdjustments() {
         <td class="td-mono" style="font-weight:700;color:var(--accent)">${fmt(grandTotal)}</td>
       </tr>`;
     }).join('');
+
+    // Update stat cards with the TRUE grand total (Manager Comm + Acc Below)
+    // — 4 slots, pool managers only (Zehao excluded, no mgr4 card; his
+    // grand total is still visible in the Total table above). Sort
+    // explicitly by MANAGER_ORDER so the index mapping to mgr0-mgr3 (fixed
+    // "Kai Yan"/"Chloe"/"Carine"/"Jess" card labels in the HTML) doesn't
+    // depend on DB row insertion order.
+    const poolManagersForStats = managerList
+      .filter(m => isPoolManager(m.name))
+      .sort((a,b) => MANAGER_ORDER.indexOf(a.name) - MANAGER_ORDER.indexOf(b.name));
+    poolManagersForStats.forEach((m, i) => {
+      const commRows = commRecords.filter(r => r.manager_id === m.id);
+      const commTotal = r2(commRows.reduce((s,r) => s + parseFloat(r.amount_received||0), 0));
+      const invoiceAmt = managerInvoiceTotals[m.name] || 0;
+      const mgrAdjustments = adjustments.filter(a => a.manager_id === m.id);
+      const adjTotal = r2(mgrAdjustments.reduce((s,a) => s + parseFloat(a.amount||0), 0));
+      const grandTotal = r2(commTotal + invoiceAmt + adjTotal);
+      if (document.getElementById(`mgr${i}`)) {
+        document.getElementById(`mgr${i}`).textContent = grandTotal !== 0 ? fmt(grandTotal) : '—';
+        document.getElementById(`mgr${i}pct`).textContent = `${m.share_percentage}% share`;
+      }
+    });
   } catch(e) {
     summaryBody.innerHTML = `<tr><td colspan="4"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Table not set up yet. Go to Setup tab.</div></div></td></tr>`;
   }
+}
+
+// Sub-tabs within the Manager Sharing page: Overview (grand total — the
+// headline answer), Manager Comm (pool inputs + recorded splits), Acc
+// Below (auto Manager Invoice + manual adjustments). Splitting these into
+// tabs instead of stacking ~6 full-width tables keeps each view focused.
+function switchManagerTab(tab) {
+  ['overview', 'comm', 'accbelow'].forEach(t => {
+    const pane = document.getElementById(`mgrPane-${t}`);
+    const tabEl = document.getElementById(`mgrTab-${t}`);
+    if (t === tab) { pane.classList.remove('hidden'); tabEl.classList.add('active'); }
+    else { pane.classList.add('hidden'); tabEl.classList.remove('active'); }
+  });
+}
+
+// Refreshes everything on the Manager Sharing page — called on page load
+// and whenever the year/month filter changes, since all three tabs' data
+// (and the stat cards) depend on the same period.
+function loadAllManagerData() {
+  loadManagerSharing();
+  loadMgrPayslips();
+  loadMgrAdjustments();
 }
 
 async function loadManagerSharing() {
@@ -3857,23 +3923,6 @@ async function loadManagerSharing() {
     let filter = `year=eq.${year}`;
     if (month) filter += `&month=eq.${month}`;
     const records = await sb('nec_manager_sharing', { filter });
-
-    // Update stat cards (4 slots — pool managers only, Zehao excluded since
-    // he has no Manager Comm pool share and there's no mgr4 card). Sort
-    // explicitly by MANAGER_ORDER so the index mapping to mgr0-mgr3 (which
-    // correspond to fixed "Kai Yan"/"Chloe"/"Carine"/"Jess" card labels in
-    // the HTML) doesn't depend on DB row insertion order.
-    const poolManagersForStats = managerList
-      .filter(m => isPoolManager(m.name))
-      .sort((a,b) => MANAGER_ORDER.indexOf(a.name) - MANAGER_ORDER.indexOf(b.name));
-    poolManagersForStats.forEach((m, i) => {
-      const mRecords = records.filter(r => r.manager_id === m.id);
-      const total = mRecords.reduce((s,r) => s + parseFloat(r.amount_received||0), 0);
-      if (document.getElementById(`mgr${i}`)) {
-        document.getElementById(`mgr${i}`).textContent = total > 0 ? fmt(total) : '—';
-        document.getElementById(`mgr${i}pct`).textContent = `${m.share_percentage}% share`;
-      }
-    });
 
     const tbody = document.getElementById('managerTableBody');
     if (records.length === 0) {
