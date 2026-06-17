@@ -583,11 +583,16 @@
         </div>
         <div style="border-top:1px solid var(--border);padding:14px">
           <div style="font-weight:700;margin-bottom:6px">Bulk Manual Match</div>
-          <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Paste a list of customer names (one per line) and pick a staff member — the system will search this month's Coway payslips for each name and assign any match to that staff. Names that don't match any payslip order for this month are skipped and reported back.</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Paste a list of customer names (one per line) and pick a staff member — the system will search this month's Coway payslips for each name and assign any match to that staff. Names that don't match any payslip order for this month are skipped and reported back. All matched names in one batch get the same commission algorithm — use Outsider here if this whole batch is non-ad-sourced customers, otherwise leave it on the staff's default.</div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start">
             <textarea id="bulkMatchNames" rows="5" placeholder="One customer name per line..." style="flex:1;min-width:260px;font-family:var(--mono);font-size:12px;padding:8px"></textarea>
             <div style="display:flex;flex-direction:column;gap:8px;min-width:180px">
-              <select id="bulkMatchStaff" style="width:100%"></select>
+              <select id="bulkMatchStaff" style="width:100%" onchange="updateBulkMatchAlgoDefault()"></select>
+              <select id="bulkMatchAlgo" style="width:100%">
+                <option value="dm">DM</option>
+                <option value="tm">TM</option>
+                <option value="outsider">Outsider</option>
+              </select>
               <button class="btn btn-primary btn-sm" onclick="bulkManualMatch()">Match &amp; Assign</button>
             </div>
           </div>
@@ -1428,6 +1433,14 @@
           <input type="text" id="staffLeadName" class="form-input" placeholder="e.g. Elysa, Ze Heng">
           <div style="font-size:11px;color:var(--muted);margin-top:4px">Must match the "Staff" name exactly as it appears in 收单追踪 (staff_leads.staff_name)</div>
         </div>
+        <div class="form-group">
+          <label class="form-label">Default Commission Algorithm</label>
+          <select id="staffDefaultAlgo" class="form-input">
+            <option value="dm">DM (RM50/order tiered + milestone bonuses)</option>
+            <option value="tm">TM (50/70/90% split of payslip commission)</option>
+          </select>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">Pre-fills the algorithm when assigning this staff's orders in Auto Commission Matching. DM and TM never mix on one staff — only individual orders can still be flipped to Outsider there.</div>
+        </div>
       </div>
       <div class="form-row">
         <div class="form-group" style="display:flex;align-items:center;gap:8px">
@@ -1490,6 +1503,13 @@
           <label class="form-label">收单追踪 Staff Name (for auto commission)</label>
           <input type="text" id="editStaffLeadName" class="form-input" placeholder="e.g. Elysa, Ze Heng">
           <div style="font-size:11px;color:var(--muted);margin-top:4px">Must match the "Staff" name exactly as it appears in 收单追踪 (staff_leads.staff_name)</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Default Commission Algorithm</label>
+          <select id="editStaffDefaultAlgo" class="form-input">
+            <option value="dm">DM (RM50/order tiered + milestone bonuses)</option>
+            <option value="tm">TM (50/70/90% split of payslip commission)</option>
+          </select>
         </div>
       </div>
       <div class="form-row">
@@ -2848,6 +2868,7 @@ async function saveStaff() {
     base_salary: parseFloat(document.getElementById('staffSalary').value) || 0,
     lead_staff_name: document.getElementById('staffLeadName').value.trim() || null,
     epf_applicable: document.getElementById('staffEpf').checked,
+    default_commission_algo: document.getElementById('staffDefaultAlgo')?.value || 'dm',
   };
   if (!body.name) return showToast('Name required', 'error');
   try {
@@ -2871,7 +2892,7 @@ function renderStaffList() {
       <td class="td-name">${s.name}</td>
       <td class="td-muted">${s.role || '—'}</td>
       <td><span class="badge badge-${(s.channel||'dm').toLowerCase()}">${s.channel || '—'}</span></td>
-      <td><span class="badge badge-${s.staff_type === 'sales' ? 'dm' : 'other'}">${s.staff_type}</span>${s.epf_applicable ? ' <span class="badge badge-other" title="EPF applicable">EPF</span>' : ''}</td>
+      <td><span class="badge badge-${s.staff_type === 'sales' ? 'dm' : 'other'}">${s.staff_type}</span>${s.epf_applicable ? ' <span class="badge badge-other" title="EPF applicable">EPF</span>' : ''}${s.staff_type === 'sales' ? ` <span class="badge badge-other" title="Default commission algorithm">${(s.default_commission_algo || 'dm').toUpperCase()}</span>` : ''}</td>
       <td class="td-mono">${fmt(s.commission_per_order)}</td>
       <td class="td-mono">${fmt(s.base_salary)}</td>
       <td class="td-mono">${s.lead_staff_name || '<span class="td-muted">— not mapped —</span>'}</td>
@@ -2891,6 +2912,7 @@ function openEditStaffModal(id) {
   document.getElementById('editStaffSalary').value = s.base_salary || 0;
   document.getElementById('editStaffLeadName').value = s.lead_staff_name || '';
   document.getElementById('editStaffEpf').checked = !!s.epf_applicable;
+  if (document.getElementById('editStaffDefaultAlgo')) document.getElementById('editStaffDefaultAlgo').value = s.default_commission_algo || 'dm';
   openModal('modalEditStaff');
 }
 
@@ -2905,6 +2927,7 @@ async function saveEditStaff() {
     base_salary: parseFloat(document.getElementById('editStaffSalary').value) || 0,
     lead_staff_name: document.getElementById('editStaffLeadName').value.trim() || null,
     epf_applicable: document.getElementById('editStaffEpf').checked,
+    default_commission_algo: document.getElementById('editStaffDefaultAlgo')?.value || 'dm',
   };
   if (!body.name) return showToast('Name required', 'error');
   try {
@@ -2939,6 +2962,39 @@ function calcCommissionTier(orderCount) {
     breakdownParts.push(`${extra} orders (21st onward) × RM100 = RM${(extra*100).toFixed(2)}`);
   }
   return { commission: total, breakdown: breakdownParts.join(' | ') };
+}
+
+// TM commission: unlike DM's flat RM50/RM100 per order, TM takes a
+// percentage SPLIT of each order's actual Coway payslip commission
+// (total_com — the order's own commission plus its share of allowance).
+// The percentage tier is based on the TM order's position within this
+// staff's TM-tagged orders ONLY this month (DM/Outsider orders for the
+// same staff don't occupy a slot here, and DM/TM never mix on one staff
+// per the business rule, so this only matters when Outsider orders are
+// mixed in alongside TM ones): orders 1-10 -> 50%, 11-20 -> 70%, 21+ ->
+// 90%. tmOrders must already be in the order they should be counted in
+// (insertion order from the caller; no particular sort is mandated).
+function calcTMCommission(tmOrders) {
+  if (!tmOrders.length) return { commission: 0, breakdown: 'No TM orders this month' };
+  let total = 0;
+  const breakdownParts = [];
+  tmOrders.forEach((o, idx) => {
+    const n = idx + 1; // 1-indexed position among this staff's TM orders this month
+    const pct = n <= 10 ? 0.5 : (n <= 20 ? 0.7 : 0.9);
+    const amt = r2((o.total_com || 0) * pct);
+    total = r2(total + amt);
+    breakdownParts.push(`#${n} ${o.customer_name || o.order_no || '—'}: RM${(o.total_com||0).toFixed(2)} × ${(pct*100).toFixed(0)}% = RM${amt.toFixed(2)}`);
+  });
+  return { commission: total, breakdown: breakdownParts.join(' | ') };
+}
+
+// Outsider commission: 100% of the order's actual Coway payslip
+// commission (total_com), no split, no tiering.
+function calcOutsiderCommission(outsiderOrders) {
+  if (!outsiderOrders.length) return { commission: 0, breakdown: 'No Outsider orders this month' };
+  const total = r2(outsiderOrders.reduce((s,o) => s + (o.total_com || 0), 0));
+  const breakdown = outsiderOrders.map(o => `${o.customer_name || o.order_no || '—'}: RM${(o.total_com||0).toFixed(2)} (full)`).join(' | ');
+  return { commission: total, breakdown };
 }
 
 let autoCommissionData = [];
@@ -2990,11 +3046,11 @@ function flattenBreakdownOrders(categoriesJson) {
     if (c && Array.isArray(c.new_orders)) {
       // nested shape: category -> new_orders[]
       for (const o of c.new_orders) {
-        if (o && (o.order_no || o.customer_name)) out.push({ order_no: o.order_no || null, customer_name: o.customer_name || '' });
+        if (o && (o.order_no || o.customer_name)) out.push({ order_no: o.order_no || null, customer_name: o.customer_name || '', total_com: parseFloat(o.total_com || 0) });
       }
     } else if (c && (c.order_no || c.customer_name)) {
       // flat shape: c itself is an order
-      out.push({ order_no: c.order_no || null, customer_name: c.customer_name || '' });
+      out.push({ order_no: c.order_no || null, customer_name: c.customer_name || '', total_com: parseFloat(c.total_com || 0) });
     }
   }
   return out;
@@ -3033,7 +3089,8 @@ async function previewAutoCommission() {
         customer_name: o.customer_name,
         norm_name: normName(o.customer_name),
         proxy_id: b.proxy_id,
-        proxy_name: (proxyList.find(p => p.id === b.proxy_id) || {}).name || b.distributor_code || '—'
+        proxy_name: (proxyList.find(p => p.id === b.proxy_id) || {}).name || b.distributor_code || '—',
+        total_com: o.total_com || 0
       }));
     });
 
@@ -3098,7 +3155,13 @@ async function previewAutoCommission() {
 
       if (staff) {
         if (!matchedByStaffId[staff.id]) matchedByStaffId[staff.id] = [];
-        matchedByStaffId[staff.id].push(po);
+        // commission_algo resolution: an explicit per-order choice
+        // recorded on the assignment (set via the algo dropdown in the UI)
+        // takes precedence; otherwise fall back to the staff's own
+        // default_commission_algo (dm/tm). This is what lets the same
+        // staff have a mix of e.g. 90% DM orders + a few Outsider orders.
+        const algo = (manualAssign && manualAssign.commission_algo) || staff.default_commission_algo || 'dm';
+        matchedByStaffId[staff.id].push({ ...po, commission_algo: algo });
         matchedNormNamesUsed.add(po.norm_name);
       } else {
         unmatchedPayslipOrders.push(po);
@@ -3108,14 +3171,32 @@ async function previewAutoCommission() {
     autoCommissionData = salesStaff
       .filter(s => s.lead_staff_name)
       .map(s => {
-        const orders = (matchedByStaffId[s.id] || []).map(o => ({
+        const allOrders = (matchedByStaffId[s.id] || []).map(o => ({
           customer_name: o.customer_name,
           order_no: o.order_no,
           product_model: o.proxy_name, // reused field for display in payslip/orders modal
-          install_date: ''
+          install_date: '',
+          total_com: o.total_com,
+          commission_algo: o.commission_algo
         }));
-        const { commission, breakdown } = calcCommissionTier(orders.length);
-        return { staff: s, orders, commission, breakdown, year, month };
+        // Split by per-order algorithm and compute each group with its own
+        // formula, then sum into one commission total for this staff. DM
+        // and TM never mix on the same staff per the business rule, but
+        // Outsider orders can appear alongside either, so all three groups
+        // are always computed independently and added together.
+        const dmOrders = allOrders.filter(o => o.commission_algo === 'dm');
+        const tmOrders = allOrders.filter(o => o.commission_algo === 'tm');
+        const outsiderOrders = allOrders.filter(o => o.commission_algo === 'outsider');
+        const dmResult = calcCommissionTier(dmOrders.length);
+        const tmResult = calcTMCommission(tmOrders);
+        const outsiderResult = calcOutsiderCommission(outsiderOrders);
+        const commission = r2(dmResult.commission + tmResult.commission + outsiderResult.commission);
+        const breakdownParts = [];
+        if (dmOrders.length) breakdownParts.push(`DM (${dmOrders.length} orders): ${dmResult.breakdown}`);
+        if (tmOrders.length) breakdownParts.push(`TM (${tmOrders.length} orders): ${tmResult.breakdown}`);
+        if (outsiderOrders.length) breakdownParts.push(`Outsider (${outsiderOrders.length} orders): ${outsiderResult.breakdown}`);
+        const breakdown = breakdownParts.join(' || ') || 'No matched orders this month';
+        return { staff: s, orders: allOrders, commission, breakdown, year, month };
       });
 
     if (!autoCommissionData.length) {
@@ -3178,9 +3259,14 @@ async function previewAutoCommission() {
                   <td class="td-name">${o.customer_name || '—'}</td>
                   <td class="td-muted">${o.proxy_name}</td>
                   <td>
-                    <select id="orphanAssign_${i}" style="font-size:12px;padding:4px 6px">
+                    <select id="orphanAssign_${i}" style="font-size:12px;padding:4px 6px" onchange="updateOrphanAlgoDefault(${i})">
                       <option value="">— select staff —</option>
-                      ${salesStaff.map(s => `<option value="${s.id}">${s.name}</option>`).join('')}
+                      ${salesStaff.map(s => `<option value="${s.id}" data-algo="${s.default_commission_algo || 'dm'}">${s.name}</option>`).join('')}
+                    </select>
+                    <select id="orphanAlgo_${i}" style="font-size:12px;padding:4px 6px">
+                      <option value="dm">DM</option>
+                      <option value="tm">TM</option>
+                      <option value="outsider">Outsider</option>
                     </select>
                     <button class="btn btn-primary btn-sm" onclick="assignOrphanOrder(${i})">Assign</button>
                   </td>
@@ -3197,10 +3283,24 @@ async function previewAutoCommission() {
   }
 }
 
+// When a staff is picked in the orphan-order assignment row, default the
+// adjacent algorithm dropdown to that staff's own default_commission_algo
+// — the person assigning can still override it to Outsider for this
+// specific order.
+function updateOrphanAlgoDefault(i) {
+  const sel = document.getElementById(`orphanAssign_${i}`);
+  const algoSel = document.getElementById(`orphanAlgo_${i}`);
+  const selectedOption = sel?.options[sel.selectedIndex];
+  const defaultAlgo = selectedOption?.dataset?.algo || 'dm';
+  if (algoSel) algoSel.value = defaultAlgo;
+}
+
 async function assignOrphanOrder(i) {
   const o = unmatchedPayslipOrders[i];
   const sel = document.getElementById(`orphanAssign_${i}`);
+  const algoSel = document.getElementById(`orphanAlgo_${i}`);
   const staffId = sel?.value;
+  const commissionAlgo = algoSel?.value || 'dm';
   if (!staffId) { showToast('Pick a staff member first', 'error'); return; }
   const year = parseInt(document.getElementById('acYear').value);
   const month = parseInt(document.getElementById('acMonth').value);
@@ -3218,10 +3318,11 @@ async function assignOrphanOrder(i) {
         customer_name: o.customer_name,
         proxy_id: o.proxy_id,
         staff_id: staffId,
-        source: 'manual'
+        source: 'manual',
+        commission_algo: commissionAlgo
       }
     });
-    await logAudit('CREATE', 'nec_order_assignments', `Assigned order ${o.order_no || o.customer_name} to staff`);
+    await logAudit('CREATE', 'nec_order_assignments', `Assigned order ${o.order_no || o.customer_name} to staff (${commissionAlgo})`);
     showToast('Assigned ✓');
     previewAutoCommission();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
@@ -3232,7 +3333,18 @@ function populateBulkMatchStaffSelect() {
   if (!sel) return;
   const salesStaff = staffList.filter(s => s.staff_type === 'sales');
   sel.innerHTML = `<option value="">— select staff —</option>` +
-    salesStaff.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+    salesStaff.map(s => `<option value="${s.id}" data-algo="${s.default_commission_algo || 'dm'}">${s.name}</option>`).join('');
+}
+
+// When a staff is picked for Bulk Manual Match, default the algorithm
+// dropdown to that staff's own default_commission_algo — can still be
+// overridden to Outsider if this whole pasted batch is non-ad-sourced.
+function updateBulkMatchAlgoDefault() {
+  const sel = document.getElementById('bulkMatchStaff');
+  const algoSel = document.getElementById('bulkMatchAlgo');
+  const selectedOption = sel?.options[sel.selectedIndex];
+  const defaultAlgo = selectedOption?.dataset?.algo || 'dm';
+  if (algoSel) algoSel.value = defaultAlgo;
 }
 
 // Bulk manual match: takes a list of pasted customer names, searches this
@@ -3241,6 +3353,7 @@ function populateBulkMatchStaffSelect() {
 // back which names matched and which didn't.
 async function bulkManualMatch() {
   const staffId = document.getElementById('bulkMatchStaff').value;
+  const commissionAlgo = document.getElementById('bulkMatchAlgo')?.value || 'dm';
   const resultEl = document.getElementById('bulkMatchResult');
   const raw = document.getElementById('bulkMatchNames').value;
   const names = raw.split('\n').map(s => s.trim()).filter(Boolean);
@@ -3294,7 +3407,8 @@ async function bulkManualMatch() {
             customer_name: m.order.customer_name,
             proxy_id: m.order.proxy_id,
             staff_id: staffId,
-            source: 'manual'
+            source: 'manual',
+            commission_algo: commissionAlgo
           }
         });
         assigned.push(m);
@@ -4372,11 +4486,17 @@ CREATE TABLE IF NOT EXISTS nec_staff (
   lead_staff_name text,
   epf_applicable boolean DEFAULT false,
   is_active boolean DEFAULT true,
-  created_at timestamptz DEFAULT now()
+  created_at timestamptz DEFAULT now(),
+  default_commission_algo text DEFAULT 'dm'
 );
 
 ALTER TABLE nec_staff ADD COLUMN IF NOT EXISTS lead_staff_name text;
 ALTER TABLE nec_staff ADD COLUMN IF NOT EXISTS epf_applicable boolean DEFAULT false;
+-- Each sales staff has a default commission algorithm ('dm' or 'tm') used
+-- to pre-fill the per-order algorithm choice in Auto Commission Matching.
+-- DM and TM never mix on the same staff member; only Outsider can be
+-- applied per-order on top of either default, for specific non-ad orders.
+ALTER TABLE nec_staff ADD COLUMN IF NOT EXISTS default_commission_algo text DEFAULT 'dm';
 
 CREATE TABLE IF NOT EXISTS nec_payroll (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -4525,9 +4645,18 @@ CREATE TABLE IF NOT EXISTS nec_order_assignments (
   proxy_id uuid REFERENCES proxy_accounts(id),
   staff_id uuid REFERENCES nec_staff(id),
   source text DEFAULT 'manual',
+  commission_algo text,
   created_at timestamptz DEFAULT now(),
   UNIQUE(year, month, proxy_id, order_no, customer_name)
 );
+
+-- Per-order commission algorithm: 'dm' (RM50/order tiered), 'tm' (50/70/90%
+-- split of the payslip commission, tiered by TM order count only), or
+-- 'outsider' (100% of the payslip commission, no split). Defaults to the
+-- assigned staff's default_commission_algo at assignment time, but can be
+-- overridden per order to 'outsider' for non-ad-sourced customers — this
+-- is why the choice lives per-order here rather than only on nec_staff.
+ALTER TABLE nec_order_assignments ADD COLUMN IF NOT EXISTS commission_algo text;
 
 CREATE TABLE IF NOT EXISTS nec_bank_directory (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
