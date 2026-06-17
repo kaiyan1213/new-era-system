@@ -227,6 +227,7 @@
   .breakdown-grid { display: grid; grid-template-columns: 280px 1fr; gap: 20px; }
   .breakdown-sidebar { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   .breakdown-sidebar-header { padding: 14px 16px; background: var(--surface2); border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .breakdown-group-header { padding: 8px 16px; background: var(--surface2); border-bottom: 1px solid var(--border); font-size: 11px; font-weight: 700; color: var(--accent); }
   .breakdown-proxy-item { padding: 12px 16px; cursor: pointer; border-bottom: 1px solid var(--border); transition: background 0.1s; display: flex; justify-content: space-between; align-items: center; }
   .breakdown-proxy-item:hover { background: var(--surface2); }
   .breakdown-proxy-item.active { background: rgba(79,124,255,0.1); border-left: 3px solid var(--accent); }
@@ -454,8 +455,8 @@
 
     <div class="tabs">
       <div class="tab active" id="payrollTab-records" onclick="switchPayrollTab('records')">Payroll</div>
-      <div class="tab" id="payrollTab-stafflist" onclick="switchPayrollTab('stafflist')">Staff List</div>
       <div class="tab" id="payrollTab-automatch" onclick="switchPayrollTab('automatch')">Auto Commission Matching</div>
+      <div class="tab" id="payrollTab-stafflist" onclick="switchPayrollTab('stafflist')">Staff List</div>
     </div>
 
     <!-- PAYROLL TAB: stats + payroll records — only people whose payslip
@@ -1078,6 +1079,9 @@
       <div>
         <div class="breakdown-sidebar">
           <div class="breakdown-sidebar-header">Proxies & Managers</div>
+          <div style="padding:10px 12px;border-bottom:1px solid var(--border)">
+            <input type="text" id="bdSearch" placeholder="Search proxy / customer / order no..." oninput="renderBreakdownSidebar()" style="width:100%">
+          </div>
           <div id="breakdownSidebar">
             <div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">Loading...</div>
           </div>
@@ -2039,6 +2043,7 @@ function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 // ============ PROXY ============
 
 let proxyList = [];
+let breakdownData = [];
 
 async function loadProxies() {
   try {
@@ -5737,25 +5742,78 @@ async function loadBreakdown() {
     if (month) filter += `&month=eq.${month}`;
     const breakdowns = await sb('nec_payslip_breakdown', { filter, select: '*' });
 
-    const sidebar = document.getElementById('breakdownSidebar');
-    if (!breakdowns.length) {
-      sidebar.innerHTML = `<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">No breakdown data.<br>Upload payslips first.</div>`;
+    // Pre-extract every order's customer name/order number from each
+    // breakdown's categories_json so the search box can match against
+    // them without re-parsing JSON on every keystroke.
+    breakdownData = breakdowns.map(b => {
+      const proxy = proxyList.find(p => p.id === b.proxy_id) || { name: b.distributor_code || '?', manager: null };
+      let orders = [];
+      try {
+        const cats = JSON.parse(b.categories_json || '[]');
+        cats.forEach(cat => (cat.new_orders || []).forEach(o => orders.push({ order_no: o.order_no || '', customer_name: o.customer_name || '' })));
+      } catch(e) { /* malformed categories_json — search just won't match orders for this one */ }
+      return { ...b, proxy, orders };
+    });
+
+    const searchBox = document.getElementById('bdSearch');
+    if (searchBox) searchBox.value = '';
+
+    if (!breakdownData.length) {
+      document.getElementById('breakdownSidebar').innerHTML = `<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">No breakdown data.<br>Upload payslips first.</div>`;
       return;
     }
+    renderBreakdownSidebar();
+  } catch(e) {
+    document.getElementById('breakdownSidebar').innerHTML = `<div style="padding:20px;color:var(--red);font-size:12px">Error: ${e.message}</div>`;
+  }
+}
 
-    sidebar.innerHTML = breakdowns.map(b => {
-      const proxy = proxyList.find(p => p.id === b.proxy_id) || { name: b.distributor_code || '?' };
+// Renders the sidebar grouped by manager (PIC), same MANAGER_ORDER-then-
+// alphabetical pattern as the Proxy Inv page, filtered by the search box
+// if there's a query — matches the proxy's own name, or any customer
+// name / order number among that proxy's orders for the period.
+function renderBreakdownSidebar() {
+  const q = (document.getElementById('bdSearch')?.value || '').trim().toLowerCase();
+  const matchedOrder = (b) => b.orders.find(o => (o.order_no||'').toLowerCase().includes(q) || (o.customer_name||'').toLowerCase().includes(q));
+  const matches = (b) => !q || b.proxy.name.toLowerCase().includes(q) || !!matchedOrder(b);
+  const filtered = breakdownData.filter(matches);
+
+  const sidebar = document.getElementById('breakdownSidebar');
+  if (!filtered.length) {
+    sidebar.innerHTML = `<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">No match for "${q}".</div>`;
+    return;
+  }
+
+  const groups = {};
+  filtered.forEach(b => {
+    const mgr = b.proxy.manager || 'Unassigned';
+    if (!groups[mgr]) groups[mgr] = [];
+    groups[mgr].push(b);
+  });
+  const groupOrder = [...MANAGER_ORDER.filter(m => groups[m]), ...Object.keys(groups).filter(m => !MANAGER_ORDER.includes(m)).sort()];
+
+  sidebar.innerHTML = groupOrder.map(mgr => {
+    const rows = groups[mgr].sort((a,b) => a.proxy.name.localeCompare(b.proxy.name));
+    const rowsHtml = rows.map(b => {
+      // When the match came from an order rather than the proxy's own
+      // name, surface which order matched so it's not a mystery why
+      // this proxy showed up in the results.
+      let matchHint = '';
+      if (q && !b.proxy.name.toLowerCase().includes(q)) {
+        const hit = matchedOrder(b);
+        if (hit) matchHint = `<div style="font-size:10px;color:var(--accent)">↳ ${hit.customer_name || '—'} · ${hit.order_no || '—'}</div>`;
+      }
       return `<div class="breakdown-proxy-item" onclick="showBreakdown('${b.id}')">
         <div>
-          <div style="font-weight:500;font-size:13px">${proxy.name}</div>
+          <div style="font-weight:500;font-size:13px">${b.proxy.name}</div>
           <div style="font-size:11px;color:var(--muted)">${MONTHS[b.month]} ${b.year} · ${b.member_level || '—'}</div>
+          ${matchHint}
         </div>
         <div style="font-family:var(--mono);font-size:12px;color:var(--green)">RM ${fmtNum(b.total_net_payable)}</div>
       </div>`;
     }).join('');
-  } catch(e) {
-    document.getElementById('breakdownSidebar').innerHTML = `<div style="padding:20px;color:var(--red);font-size:12px">Error: ${e.message}</div>`;
-  }
+    return `<div class="breakdown-group-header">${mgr} (PIC)</div>${rowsHtml}`;
+  }).join('');
 }
 
 async function showBreakdown(id) {
@@ -5771,6 +5829,16 @@ async function showBreakdown(id) {
 
     const catHTML = cats.map(cat => {
       const newOrders = (cat.new_orders || []);
+      const hasRealData = newOrders.length > 0 || parseFloat(cat.subtotal||0) !== 0 || parseFloat(cat.trailing_total||0) !== 0;
+      // Some parsed payslips leave behind empty placeholder category
+      // objects with no name, no orders, and a zero subtotal — these
+      // carry no information, so skip them entirely rather than
+      // printing a literal "UNDEFINED" section. If a category DOES
+      // have real money or orders but is just missing its name (a real
+      // parsing gap), show it as "Uncategorized" instead of hiding it —
+      // money should never silently disappear from the breakdown.
+      if (!cat.name && !hasRealData) return '';
+      const catName = cat.name || 'Uncategorized';
       const orderRows = newOrders.map(o => `
         <div class="order-row">
           <span style="color:var(--muted);font-family:var(--mono)">${o.order_no || '—'}</span>
@@ -5790,7 +5858,7 @@ async function showBreakdown(id) {
 
       return `<div class="cat-section">
         <div class="cat-section-title">
-          <span>${cat.name}</span>
+          <span>${catName}</span>
           <span style="color:var(--green)">RM ${fmtNum(cat.subtotal)}</span>
         </div>
         ${newOrders.length > 0 ? `<div class="order-row header">
