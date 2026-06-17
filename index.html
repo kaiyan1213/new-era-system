@@ -3730,7 +3730,7 @@ async function generateStaffPayslip(idx) {
 // managers, or the staff's own claim_amount.
 function getRawSettlementParts(r) {
   if (r.record_type === 'manager') {
-    let com = 0, claim = 0, mistake = 0, deduction = 0;
+    let com = 0, claim = 0, mistake = 0, deduction = 0, parsed = false;
     if (r.notes) {
       try {
         const d = JSON.parse(r.notes);
@@ -3740,10 +3740,20 @@ function getRawSettlementParts(r) {
           com = find('Manager Comm') + find('Manager Invoice') + find('Outsider');
           claim = find('Adjustments');
           deduction = find('Acc Below');
+          parsed = true;
         } else if (d && typeof d === 'object') {
           com = parseFloat(d.com||0); claim = parseFloat(d.claim||0); mistake = parseFloat(d.mistake||0); deduction = parseFloat(d.accBelow||0);
+          parsed = true;
         }
-      } catch(e) { /* unrecognized notes format — leave at 0 */ }
+      } catch(e) { /* even older sentence-style notes, predates any JSON breakdown — fall through */ }
+    }
+    if (!parsed) {
+      // Can't recover a real split from old/unrecognized notes — show
+      // the stored total as one lump Com rather than a confusingly
+      // blank payslip. Re-confirming from the Overview tab refreshes
+      // notes into the current structured format and restores the
+      // real Com/Claim/Mistake split.
+      com = parseFloat(r.commission_earned||0);
     }
     return { com, claim, mistake, deduction, deductionLabel: 'Acc Below' };
   }
