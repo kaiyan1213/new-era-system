@@ -3205,6 +3205,11 @@ async function assignOrphanOrder(i) {
   const year = parseInt(document.getElementById('acYear').value);
   const month = parseInt(document.getElementById('acMonth').value);
   try {
+    // Upsert: delete any existing assignment for this exact
+    // (year,month,proxy_id,order_no,customer_name) key first, in case the
+    // orphan list was stale and this order was already assigned —
+    // otherwise the UNIQUE constraint throws and the click silently fails.
+    await sbDelete('nec_order_assignments', `year=eq.${year}&month=eq.${month}&proxy_id=eq.${o.proxy_id}&order_no=eq.${o.order_no}&customer_name=eq.${encodeURIComponent(o.customer_name)}`);
     await sb('nec_order_assignments', {
       method: 'POST',
       body: {
@@ -3270,29 +3275,44 @@ async function bulkManualMatch() {
       else notFound.push(name);
     }
 
+    const assigned = [];
+    const failed = [];
     for (const m of matched) {
-      await sb('nec_order_assignments', {
-        method: 'POST',
-        body: {
-          year, month,
-          order_no: m.order.order_no,
-          customer_name: m.order.customer_name,
-          proxy_id: m.order.proxy_id,
-          staff_id: staffId,
-          source: 'manual'
-        }
-      });
+      try {
+        // Upsert: nec_order_assignments has a UNIQUE constraint on
+        // (year, month, proxy_id, order_no, customer_name) — delete any
+        // existing assignment for this exact key first (e.g. from an
+        // earlier bulk-match run, or the per-row "Assign" button above)
+        // so re-assigning the same order doesn't throw a duplicate-key
+        // error and abort the rest of the batch.
+        await sbDelete('nec_order_assignments', `year=eq.${year}&month=eq.${month}&proxy_id=eq.${m.order.proxy_id}&order_no=eq.${m.order.order_no}&customer_name=eq.${encodeURIComponent(m.order.customer_name)}`);
+        await sb('nec_order_assignments', {
+          method: 'POST',
+          body: {
+            year, month,
+            order_no: m.order.order_no,
+            customer_name: m.order.customer_name,
+            proxy_id: m.order.proxy_id,
+            staff_id: staffId,
+            source: 'manual'
+          }
+        });
+        assigned.push(m);
+      } catch(itemErr) {
+        failed.push({ name: m.name, error: itemErr.message });
+      }
     }
 
-    if (matched.length) {
-      await logAudit('CREATE', 'nec_order_assignments', `Bulk-assigned ${matched.length} order(s) to ${staff?.name || staffId} — ${MONTHS[month]} ${year}`);
+    if (assigned.length) {
+      await logAudit('CREATE', 'nec_order_assignments', `Bulk-assigned ${assigned.length} order(s) to ${staff?.name || staffId} — ${MONTHS[month]} ${year}`);
     }
 
     resultEl.innerHTML = `
-      <div style="color:var(--green);margin-bottom:4px">✓ Matched &amp; assigned ${matched.length} of ${names.length} name(s) to ${staff?.name || '—'}.</div>
+      <div style="color:var(--green);margin-bottom:4px">✓ Matched &amp; assigned ${assigned.length} of ${names.length} name(s) to ${staff?.name || '—'}.</div>
       ${notFound.length ? `<div style="color:var(--yellow)">⚠ ${notFound.length} name(s) not found in this month's payslips: ${notFound.map(n=>`"${n}"`).join(', ')}</div>` : ''}
+      ${failed.length ? `<div style="color:var(--red)">⚠ ${failed.length} name(s) failed to assign: ${failed.map(f=>`"${f.name}" (${f.error})`).join(', ')}</div>` : ''}
     `;
-    showToast(`Matched ${matched.length}/${names.length} ✓`);
+    showToast(`Matched ${assigned.length}/${names.length} ✓`);
     previewAutoCommission();
   } catch(e) {
     resultEl.innerHTML = `<span style="color:var(--red)">Error: ${e.message}</span>`;
