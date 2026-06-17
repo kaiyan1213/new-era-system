@@ -642,14 +642,14 @@
     <div class="tabs">
       <div class="tab active" id="mgrTab-overview" onclick="switchManagerTab('overview')">Overview</div>
       <div class="tab" id="mgrTab-comm" onclick="switchManagerTab('comm')">Manager Comm</div>
-      <div class="tab" id="mgrTab-accbelow" onclick="switchManagerTab('accbelow')">Acc Below</div>
+      <div class="tab" id="mgrTab-accbelow" onclick="switchManagerTab('accbelow')">Acc Below & Adjustments</div>
     </div>
 
     <!-- OVERVIEW TAB: the answer — grand total per manager -->
     <div id="mgrPane-overview">
-      <div class="table-wrap">
+      <div class="table-wrap" style="margin-bottom:20px">
         <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">
-          Total per manager (Manager Comm + Acc Below)
+          Total per manager (Manager Comm + Acc Below + Adjustments)
         </div>
         <table>
           <thead>
@@ -657,10 +657,30 @@
               <th>Manager</th>
               <th>Manager Comm</th>
               <th>Acc Below</th>
+              <th>Adjustments</th>
               <th>Total</th>
             </tr>
           </thead>
           <tbody id="mgrGrandTotalBody">
+            <tr><td colspan="5"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-wrap">
+        <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">
+          Adjustments breakdown by category — what's in each manager's Adjustments figure above
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Manager</th>
+              <th>Category</th>
+              <th>Description</th>
+              <th>Amount</th>
+            </tr>
+          </thead>
+          <tbody id="mgrOverviewAdjBody">
             <tr><td colspan="4"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
           </tbody>
         </table>
@@ -718,23 +738,23 @@
       </div>
     </div>
 
-    <!-- ACC BELOW TAB: auto Manager Invoice + manual adjustments -->
+    <!-- ACC BELOW & ADJUSTMENTS TAB -->
     <div id="mgrPane-accbelow" class="hidden">
       <div class="table-wrap" style="margin-bottom:20px">
         <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-          <span>Acc Below — Manager Invoice (auto) + manual adjustments</span>
+          <span>Acc Below (auto) + Adjustments (manual)</span>
           <button class="btn btn-primary btn-sm" onclick="openMgrAdjustmentModal()">Add Adjustment</button>
         </div>
         <div style="padding:10px 14px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)">
-          Manager Invoice is auto-computed per manager as the sum of each of their proxies' (Coway payslip − New Era invoice) for the period — the same PIC liability shown on the Directory page, kept with the manager instead of collected from the proxy directly. Manual adjustments (Claim/Mistake/Gift/Loan Claim/etc) are added on top: positive = manager receives, negative = manager owes. Applies to all 5 managers including Zehao, who has Acc Below but no Manager Comm pool share.
+          Acc Below = the money this manager's proxy accounts didn't collect this period — auto-computed as the sum of each of their proxies' (Coway payslip − New Era invoice) for the period, the same PIC liability shown on the Directory page, kept with the manager instead of collected from the proxy directly. Adjustments (Claim/Mistake/Gift/Loan Claim/etc) are a separate, manually-entered category: positive = manager receives, negative = manager owes. Both add into each manager's final Total. Applies to all 5 managers including Zehao, who has Acc Below and Adjustments but no Manager Comm pool share.
         </div>
         <table>
           <thead>
             <tr>
               <th>Manager</th>
-              <th>Manager Invoice (auto)</th>
-              <th>Adjustments</th>
-              <th>Acc Below Total</th>
+              <th>Acc Below (auto)</th>
+              <th>Adjustments (manual)</th>
+              <th>Combined</th>
             </tr>
           </thead>
           <tbody id="accBelowSummaryBody">
@@ -745,7 +765,7 @@
 
       <div class="table-wrap">
         <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">
-          Manual adjustment entries
+          Adjustment entries (Claim / Mistake / Gift / Loan Claim / etc)
         </div>
         <table>
           <thead>
@@ -3770,9 +3790,10 @@ async function deleteMgrAdjustment(id) {
 // the auto Manager Invoice (sum of Math.max(0, payslip-invoice) across
 // that manager's proxies for the selected period — the same PIC liability
 // formula used on the Directory page) plus the sum of manual adjustments
-// for that manager/period, then renders three tables: the Acc Below
-// summary, the raw adjustment entries list, and the final grand total
-// (Manager Comm + Acc Below) per manager.
+// for that manager/period, then renders: the Acc Below + Adjustments
+// summary, the raw adjustment entries list, the Overview grand total
+// (Manager Comm + Acc Below + Adjustments) per manager, and an Overview
+// breakdown of what's actually inside each manager's Adjustments figure.
 async function loadMgrAdjustments() {
   const year = parseInt(document.getElementById('mgrYear').value);
   const monthRaw = document.getElementById('mgrMonth').value;
@@ -3780,13 +3801,15 @@ async function loadMgrAdjustments() {
   const summaryBody = document.getElementById('accBelowSummaryBody');
   const entriesBody = document.getElementById('mgrAdjustmentTableBody');
   const grandTotalBody = document.getElementById('mgrGrandTotalBody');
+  const overviewAdjBody = document.getElementById('mgrOverviewAdjBody');
   if (!summaryBody) return;
 
   try {
     if (!managerList.length) await loadManagers();
     await loadProxies();
 
-    // Manager Invoice (auto): same PIC liability formula as Directory page,
+    // Acc Below (auto): the money this manager's proxy accounts didn't
+    // collect this period — same PIC liability formula as Directory page,
     // grouped by proxy_accounts.manager (text name), summed per manager.
     let invFilter = `year=eq.${year}`;
     if (month) invFilter += `&month=eq.${month}`;
@@ -3796,17 +3819,18 @@ async function loadMgrAdjustments() {
     });
     const proxyManagerMap = {};
     proxyList.forEach(p => { proxyManagerMap[p.id] = p.manager; });
-    const managerInvoiceTotals = {};
-    MANAGER_ORDER.forEach(m => managerInvoiceTotals[m] = 0);
+    const accBelowTotals = {};
+    MANAGER_ORDER.forEach(m => accBelowTotals[m] = 0);
     invoices.forEach(inv => {
       const mgrName = proxyManagerMap[inv.proxy_id];
       if (mgrName && MANAGER_ORDER.includes(mgrName)) {
         const picAmt = Math.max(0, parseFloat(inv.coway_payslip_amount||0) - parseFloat(inv.invoice_amount||0));
-        managerInvoiceTotals[mgrName] = r2(managerInvoiceTotals[mgrName] + picAmt);
+        accBelowTotals[mgrName] = r2(accBelowTotals[mgrName] + picAmt);
       }
     });
 
-    // Manual adjustments, grouped by manager_id
+    // Adjustments (manual): Claim/Mistake/Gift/Loan Claim/etc — a
+    // separate category from Acc Below, grouped by manager_id.
     let adjFilter = `year=eq.${year}`;
     if (month) adjFilter += `&month=eq.${month}`;
     const adjustments = await sb('nec_manager_adjustments', { filter: adjFilter });
@@ -3818,23 +3842,23 @@ async function loadMgrAdjustments() {
 
     const orderedManagers = MANAGER_ORDER.map(name => managerList.find(m => m.name === name)).filter(Boolean);
 
-    // Acc Below summary table
+    // Acc Below & Adjustments tab — summary table
     summaryBody.innerHTML = orderedManagers.map(m => {
-      const invoiceAmt = managerInvoiceTotals[m.name] || 0;
+      const accBelowAmt = accBelowTotals[m.name] || 0;
       const mgrAdjustments = adjustments.filter(a => a.manager_id === m.id);
       const adjTotal = r2(mgrAdjustments.reduce((s,a) => s + parseFloat(a.amount||0), 0));
-      const accBelowTotal = r2(invoiceAmt + adjTotal);
+      const combined = r2(accBelowAmt + adjTotal);
       return `<tr>
         <td class="td-name">${m.name}</td>
-        <td class="td-mono">${fmt(invoiceAmt)}</td>
+        <td class="td-mono">${fmt(accBelowAmt)}</td>
         <td class="td-mono" style="color:${adjTotal < 0 ? 'var(--red)' : 'var(--green)'}">${adjTotal >= 0 ? '+' : ''}${fmt(adjTotal)}</td>
-        <td class="td-mono" style="font-weight:700">${fmt(accBelowTotal)}</td>
+        <td class="td-mono" style="font-weight:700">${fmt(combined)}</td>
       </tr>`;
     }).join('');
 
-    // Manual adjustment entries table
+    // Adjustment entries table (full detail, all managers/periods matching filter)
     if (adjustments.length === 0) {
-      entriesBody.innerHTML = `<tr><td colspan="6"><div class="empty"><div class="empty-text">No manual adjustments for this period</div></div></td></tr>`;
+      entriesBody.innerHTML = `<tr><td colspan="6"><div class="empty"><div class="empty-text">No adjustments for this period</div></div></td></tr>`;
     } else {
       entriesBody.innerHTML = adjustments.map(a => {
         const mgr = managerList.find(m => m.id === a.manager_id) || { name: 'Unknown' };
@@ -3850,39 +3874,59 @@ async function loadMgrAdjustments() {
       }).join('');
     }
 
-    // Grand total table: Manager Comm + Acc Below
+    // Overview tab — grand total table: Manager Comm + Acc Below + Adjustments, shown as 4 distinct columns
     grandTotalBody.innerHTML = orderedManagers.map(m => {
       const commRows = commRecords.filter(r => r.manager_id === m.id);
       const commTotal = r2(commRows.reduce((s,r) => s + parseFloat(r.amount_received||0), 0));
-      const invoiceAmt = managerInvoiceTotals[m.name] || 0;
+      const accBelowAmt = accBelowTotals[m.name] || 0;
       const mgrAdjustments = adjustments.filter(a => a.manager_id === m.id);
       const adjTotal = r2(mgrAdjustments.reduce((s,a) => s + parseFloat(a.amount||0), 0));
-      const accBelowTotal = r2(invoiceAmt + adjTotal);
-      const grandTotal = r2(commTotal + accBelowTotal);
+      const grandTotal = r2(commTotal + accBelowAmt + adjTotal);
       return `<tr>
         <td class="td-name">${m.name}</td>
         <td class="td-mono">${fmt(commTotal)}</td>
-        <td class="td-mono">${fmt(accBelowTotal)}</td>
+        <td class="td-mono">${fmt(accBelowAmt)}</td>
+        <td class="td-mono" style="color:${adjTotal < 0 ? 'var(--red)' : 'var(--green)'}">${adjTotal >= 0 ? '+' : ''}${fmt(adjTotal)}</td>
         <td class="td-mono" style="font-weight:700;color:var(--accent)">${fmt(grandTotal)}</td>
       </tr>`;
     }).join('');
 
-    // Update stat cards with the TRUE grand total (Manager Comm + Acc Below)
-    // — 4 slots, pool managers only (Zehao excluded, no mgr4 card; his
-    // grand total is still visible in the Total table above). Sort
-    // explicitly by MANAGER_ORDER so the index mapping to mgr0-mgr3 (fixed
-    // "Kai Yan"/"Chloe"/"Carine"/"Jess" card labels in the HTML) doesn't
-    // depend on DB row insertion order.
+    // Overview tab — Adjustments breakdown by category, so it's clear at a
+    // glance what's actually inside each manager's Adjustments figure
+    // (e.g. "RM3000 = Both Company Loan Claim" rather than just a number).
+    if (overviewAdjBody) {
+      if (adjustments.length === 0) {
+        overviewAdjBody.innerHTML = `<tr><td colspan="4"><div class="empty"><div class="empty-text">No adjustments for this period</div></div></td></tr>`;
+      } else {
+        overviewAdjBody.innerHTML = adjustments.map(a => {
+          const mgr = managerList.find(m => m.id === a.manager_id) || { name: 'Unknown' };
+          const amt = parseFloat(a.amount||0);
+          return `<tr>
+            <td class="td-name">${mgr.name}</td>
+            <td>${a.category}</td>
+            <td style="color:var(--muted);font-size:12px">${a.description || '—'}</td>
+            <td class="td-mono" style="color:${amt < 0 ? 'var(--red)' : 'var(--green)'}">${amt >= 0 ? '+' : ''}${fmt(amt)}</td>
+          </tr>`;
+        }).join('');
+      }
+    }
+
+    // Update stat cards with the TRUE grand total (Manager Comm + Acc
+    // Below + Adjustments) — 4 slots, pool managers only (Zehao excluded,
+    // no mgr4 card; his grand total is still visible in the Total table
+    // above). Sort explicitly by MANAGER_ORDER so the index mapping to
+    // mgr0-mgr3 (fixed "Kai Yan"/"Chloe"/"Carine"/"Jess" card labels in
+    // the HTML) doesn't depend on DB row insertion order.
     const poolManagersForStats = managerList
       .filter(m => isPoolManager(m.name))
       .sort((a,b) => MANAGER_ORDER.indexOf(a.name) - MANAGER_ORDER.indexOf(b.name));
     poolManagersForStats.forEach((m, i) => {
       const commRows = commRecords.filter(r => r.manager_id === m.id);
       const commTotal = r2(commRows.reduce((s,r) => s + parseFloat(r.amount_received||0), 0));
-      const invoiceAmt = managerInvoiceTotals[m.name] || 0;
+      const accBelowAmt = accBelowTotals[m.name] || 0;
       const mgrAdjustments = adjustments.filter(a => a.manager_id === m.id);
       const adjTotal = r2(mgrAdjustments.reduce((s,a) => s + parseFloat(a.amount||0), 0));
-      const grandTotal = r2(commTotal + invoiceAmt + adjTotal);
+      const grandTotal = r2(commTotal + accBelowAmt + adjTotal);
       if (document.getElementById(`mgr${i}`)) {
         document.getElementById(`mgr${i}`).textContent = grandTotal !== 0 ? fmt(grandTotal) : '—';
         document.getElementById(`mgr${i}pct`).textContent = `${m.share_percentage}% share`;
