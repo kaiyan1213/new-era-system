@@ -611,7 +611,7 @@
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost" onclick="openMgrAdjustmentModal()">Add Adjustment</button>
-        <button class="btn btn-primary" onclick="openManagerEntryModal()">Record This Month</button>
+        <button class="btn btn-primary" onclick="openManagerEntryModal()">Split Manager Comm Pool</button>
       </div>
     </div>
 
@@ -670,7 +670,7 @@
           Total per manager (Manager Comm + Acc Below + Manager Invoice + Outsider + Adjustments)
         </div>
         <div style="padding:10px 14px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)">
-          Manager Invoice is negative — it's the manager's own pool_contribution from their uploaded Coway payslip, subtracted back out so it isn't double-counted (Coway already paid that amount directly to the manager; the pooled Manager Comm share already includes it, so only the remainder needs to be topped up). Outsider is full commission from any non-ad-sourced orders assigned to this manager (same as a staff member's Outsider commission).
+          Manager Invoice is negative — it's the manager's own pool_contribution from their uploaded Coway payslip, subtracted back out so it isn't double-counted (Coway already paid that amount directly to the manager; the pooled Manager Comm share already includes it, so only the remainder needs to be topped up). Outsider is full commission from any non-ad-sourced orders assigned to this manager (same as a staff member's Outsider commission). Confirm pushes this Total into Payroll for the selected month — pick a specific month (not All Months) to confirm.
         </div>
         <table>
           <thead>
@@ -682,10 +682,11 @@
               <th>Outsider</th>
               <th>Adjustments</th>
               <th>Total</th>
+              <th>Confirm</th>
             </tr>
           </thead>
           <tbody id="mgrGrandTotalBody">
-            <tr><td colspan="7"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+            <tr><td colspan="8"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -2902,9 +2903,9 @@ async function loadPayroll() {
     document.getElementById('statAdminStaff').textContent = adminStaff.length;
 
     // Net cash position across EVERYONE in nec_payroll for this period —
-    // staff, admin, and managers (manager Totals pushed here via Manager
-    // Sharing's "Record This Month") — so one glance answers "does the
-    // company pay out or collect this month".
+    // staff, admin, and managers (manager Totals pushed here via the
+    // per-manager Confirm button in Manager Sharing's Overview tab) — so
+    // one glance answers "does the company pay out or collect this month".
     const toPay = records.filter(r => parseFloat(r.total_pay||0) > 0).reduce((s,r) => s + parseFloat(r.total_pay||0), 0);
     const toReceive = records.filter(r => parseFloat(r.total_pay||0) < 0).reduce((s,r) => s + Math.abs(parseFloat(r.total_pay||0)), 0);
     const net = toPay - toReceive;
@@ -2947,6 +2948,7 @@ async function loadPayroll() {
         <td>
           <button class="btn btn-ghost btn-sm" onclick="openEditPayrollModal('${r.id}')">Edit</button>
           <button class="btn btn-ghost btn-sm" onclick="generatePayrollRecordPayslip('${r.id}')">${isInvoice ? '🖨 Invoice' : '🖨 Payslip'}</button>
+          <button class="btn btn-ghost btn-sm" onclick="generatePayrollCalculation('${r.id}')">🧮 Calc</button>
           <button class="btn btn-danger btn-sm" onclick="deletePayroll('${r.id}')">✕</button>
         </td>
       </tr>`;
@@ -3678,7 +3680,7 @@ async function saveAutoCommissionRow(idx) {
 async function generateStaffPayslip(idx) {
   const row = autoCommissionData[idx];
   if (!row) return;
-  const { staff, orders, commission, breakdown, year, month } = row;
+  const { staff, orders, commission, year, month } = row;
   const baseSalary = parseFloat(staff.base_salary || 0);
   let epfEmployee = 0, epfEmployer = 0;
   if (staff.epf_applicable) {
@@ -3691,7 +3693,7 @@ async function generateStaffPayslip(idx) {
   const totalPay = r2(commission + baseSalary - epfEmployee - ownProxyOffset);
 
   // Build a record-shaped object so this preview can reuse the exact
-  // same breakdown/invoice rendering as a saved Payroll record — no
+  // same document/calculation rendering as a saved Payroll record — no
   // separate calculation logic to keep in sync.
   const fakeRecord = {
     commission_earned: commission, commission_type: allOutsider ? 'outsider' : 'tiered',
@@ -3699,69 +3701,24 @@ async function generateStaffPayslip(idx) {
     epf_employee: epfEmployee, epf_employer: epfEmployer, own_proxy_offset: ownProxyOffset,
     total_pay: totalPay, month, year, orders_count: orders.length, notes: null,
   };
-
-  if (isInvoiceRecord(fakeRecord)) {
-    const html = buildStaffInvoiceHTML(staff, fakeRecord);
-    const win = window.open('', '_blank', 'width=700,height=800');
-    win.document.write(`<html><head><title>Invoice Preview - ${staff.name} - ${MONTHS[month]} ${year}</title>
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
-      <style>body{margin:40px;background:#f5f5f5;font-family:Inter,sans-serif}
-      ${INVOICE_PRINT_STYLE}
-      @media print{body{margin:0;background:#fff}.invoice-preview{box-shadow:none}}
-      </style></head><body><div style="max-width:700px;margin:0 auto 12px;font-size:12px;color:#c00;font-weight:600">⚠ Preview only — not yet saved to Payroll</div>${html}<br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#4f7cff;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
-    return;
-  }
-
-  const rows = getSettlementBreakdown(fakeRecord);
-  const orderRows = orders.map((o,i) => `
-    <tr>
-      <td style="padding:4px 8px;border-bottom:1px solid #eee">${i+1}</td>
-      <td style="padding:4px 8px;border-bottom:1px solid #eee">${o.customer_name || '—'}</td>
-    </tr>`).join('');
-
-  const html = `
-    <div style="max-width:680px;margin:0 auto;font-family:Inter,sans-serif;color:#111;background:#fff;padding:32px;border-radius:8px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:16px;margin-bottom:16px">
-        <div>
-          <div style="font-size:20px;font-weight:800">New Era Consulting Enterprise</div>
-          <div style="font-size:12px;color:#666">Staff Commission Payslip (Preview)</div>
-        </div>
-        <div style="text-align:right;font-size:12px;color:#666">
-          <div>${MONTHS[month]} ${year}</div>
-          <div>Generated: ${new Date().toISOString().slice(0,10)}</div>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;margin-bottom:16px">
-        <div><strong>Name:</strong> ${staff.name}</div>
-        <div><strong>Role:</strong> ${staff.role || '—'}</div>
-        <div><strong>Channel:</strong> ${staff.channel || '—'}</div>
-        <div><strong>Verified Orders:</strong> ${orders.length}</div>
-      </div>
-      <div style="background:#f5f5f5;border-radius:6px;padding:12px;margin-bottom:16px;font-size:13px">
-        ${rows.map(row => `<div style="display:flex;justify-content:space-between;margin-bottom:4px${row.amount < 0 ? ';color:#c00' : ''}"><span>${row.label}</span><span>${row.amount === null ? '—' : (row.amount < 0 ? '−RM ' : 'RM ') + fmtNum(Math.abs(row.amount))}</span></div>`).join('')}
-        <div style="font-size:11px;color:#666;margin-top:4px">${breakdown}</div>
-        <div style="display:flex;justify-content:space-between;font-weight:800;font-size:15px;border-top:1px solid #ccc;margin-top:8px;padding-top:8px"><span>Total Pay</span><span>RM ${fmtNum(totalPay)}</span></div>
-      </div>
-      <div style="font-size:12px;font-weight:700;margin-bottom:6px">Verified Orders Detail</div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead><tr style="background:#f0f0f0">
-          <th style="padding:4px 8px;text-align:left">#</th>
-          <th style="padding:4px 8px;text-align:left">Customer</th>
-        </tr></thead>
-        <tbody>${orderRows || `<tr><td colspan="2" style="padding:8px;color:#999">No verified orders this month</td></tr>`}</tbody>
-      </table>
-    </div>`;
+  const isInv = isInvoiceRecord(fakeRecord);
+  const docHtml = isInv ? buildStaffInvoiceHTML(staff, fakeRecord) : buildStaffPayslipHTML(staff, fakeRecord);
+  const calcHtml = buildCalculationHTML(staff, fakeRecord);
 
   const win = window.open('', '_blank', 'width=760,height=900');
-  win.document.write(`<html><head><title>Payslip Preview - ${staff.name} - ${MONTHS[month]} ${year}</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <style>body{margin:24px;background:#f5f5f5}@media print{body{margin:0;background:#fff}}</style></head>
-    <body><div style="max-width:680px;margin:0 auto 12px;font-size:12px;color:#c00;font-weight:600">⚠ Preview only — not yet saved to Payroll</div>${html}<button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#4f7cff;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
+  win.document.write(`<html><head><title>${isInv ? 'Invoice' : 'Payslip'} Preview - ${staff.name} - ${MONTHS[month]} ${year}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <style>body{margin:40px;background:#f5f5f5;font-family:Inter,sans-serif}
+    ${INVOICE_PRINT_STYLE}
+    @media print{body{margin:0;background:#fff}.invoice-preview{box-shadow:none}}
+    </style></head><body>
+    <div style="max-width:700px;margin:0 auto 12px;font-size:12px;color:#c00;font-weight:600">⚠ Preview only — not yet saved to Payroll</div>
+    ${docHtml}
+    <div style="height:24px"></div>
+    ${calcHtml}
+    <br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#4f7cff;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
 }
 
-// Payslip generator for a manually-recorded nec_payroll row — works for
-// any staff type (sales/admin), includes EPF breakdown when applicable
-// and flags Outsider commission records.
 // Settlement breakdown rows in the same shape the staff already track
 // manually (Sales / Claim / Coway Money / Outsider / Bonus / Total) so
 // the printed document is something they can directly check against
@@ -3783,34 +3740,50 @@ function getSettlementBreakdown(r) {
   return rows;
 }
 
+// A short, stable reference number for staff-facing documents — derived
+// from the record's own id so it's the same every time it's reprinted,
+// without needing a separate sequential-numbering scheme like proxy
+// invoices have.
+function genStaffDocNumber(prefix, r) {
+  const ref = r.id ? r.id.toString().replace(/-/g,'').slice(0,6).toUpperCase() : 'DRAFT';
+  return `NEC-${prefix}-${r.year}${String(r.month).padStart(2,'0')}-${ref}`;
+}
+
+// Formal invoice billing the STAFF for the shortfall — same letterhead,
+// single line item, and footer as the Proxy Inv invoices (buildInvoiceHTML)
+// so every invoice New Era issues looks consistent. The detailed
+// calculation (Sales/Claim/Coway Money/etc) is intentionally NOT shown
+// here — that lives in the separate Calculation worksheet so the
+// invoice itself stays a clean, professional billing document.
 function buildStaffInvoiceHTML(staff, r) {
   const amountDue = Math.abs(parseFloat(r.total_pay || 0));
-  const rows = getSettlementBreakdown(r);
   return `
       <div class="invoice-preview">
         <div class="inv-header">
           <div>
-            <div class="inv-bill-to" style="margin-bottom:2px">FROM</div>
-            <div class="inv-bill-name">${staff.name}</div>
-            <div class="inv-bill-sub">${staff.role || staff.channel || '—'}</div>
+            <div class="inv-company-name">NEW ERA CONSULTING ENTERPRISE</div>
+            <div class="inv-reg">202503018811 (MA0326725-T)</div>
+            <div class="inv-address">No 21, Jalan Villa Puncak Desa 3,<br>Villa Puncak Desa, Taman Desa Petaling,<br>57100 Kuala Lumpur, W.P.</div>
           </div>
           <div>
             <div class="inv-label">INVOICE</div>
-            <div class="inv-meta">${MONTH_FULL[r.month]} ${r.year}</div>
+            <div class="inv-meta">No: ${genStaffDocNumber('S', r)}<br>Date: ${MONTH_FULL[r.month]} ${r.year}</div>
           </div>
         </div>
         <div class="inv-divider"></div>
         <div class="inv-bill-to">Bill To</div>
-        <div class="inv-bill-name">New Era Consulting Enterprise</div>
-        <div class="inv-bill-sub">202503018811 (MA0326725-T)</div>
+        <div class="inv-bill-name">${staff.name}</div>
+        <div class="inv-bill-sub">${staff.role || staff.channel || 'New Era Staff'}</div>
         <table class="inv-table">
           <thead><tr><th>Description</th><th>Amount</th></tr></thead>
           <tbody>
-            ${rows.map(row => `<tr><td>${row.label}</td><td>${row.amount === null ? '—' : (row.amount < 0 ? '−RM ' : 'RM ') + fmtNum(Math.abs(row.amount))}</td></tr>`).join('')}
-            <tr><td style="font-weight:700">Total</td><td style="font-weight:700">${amountDue === 0 ? 'RM 0.00' : (parseFloat(r.total_pay) < 0 ? '−RM ' : 'RM ') + fmtNum(amountDue)}</td></tr>
+            <tr>
+              <td>Commission Settlement Reconciliation for ${MONTH_FULL[r.month]} ${r.year}<br>
+              <span style="font-size:11px;color:#888">Coway paid more directly into this staff's own proxy account than was earned in commission this period — see the attached calculation sheet for the full breakdown.</span></td>
+              <td style="font-weight:700">RM ${fmtNum(amountDue)}</td>
+            </tr>
           </tbody>
         </table>
-        <div style="font-size:11px;color:#888;margin:-12px 0 16px">Earned commission was less than what Coway already paid directly into this staff's own proxy account — the difference is owed back to New Era.</div>
         <div class="inv-total-row">
           <div class="inv-total-box">
             <div class="inv-total-label">Total Amount Due to New Era</div>
@@ -3826,6 +3799,91 @@ function buildStaffInvoiceHTML(staff, r) {
       </div>`;
 }
 
+// Clean staff payslip — same single-line-item philosophy as the invoice
+// above, for the case where New Era still owes the staff money. Full
+// breakdown again lives in the separate Calculation worksheet.
+function buildStaffPayslipHTML(staff, r) {
+  const totalPay = parseFloat(r.total_pay || 0);
+  const isOutsider = r.commission_type === 'outsider';
+  return `
+      <div class="invoice-preview">
+        <div class="inv-header">
+          <div>
+            <div class="inv-company-name">NEW ERA CONSULTING ENTERPRISE</div>
+            <div class="inv-reg">202503018811 (MA0326725-T)</div>
+            <div class="inv-address">No 21, Jalan Villa Puncak Desa 3,<br>Villa Puncak Desa, Taman Desa Petaling,<br>57100 Kuala Lumpur, W.P.</div>
+          </div>
+          <div>
+            <div class="inv-label" style="color:#22c55e">PAYSLIP</div>
+            <div class="inv-meta">No: ${genStaffDocNumber('P', r)}<br>Date: ${MONTH_FULL[r.month]} ${r.year}</div>
+          </div>
+        </div>
+        <div class="inv-divider"></div>
+        <div class="inv-bill-to">Pay To</div>
+        <div class="inv-bill-name">${staff.name}</div>
+        <div class="inv-bill-sub">${staff.role || staff.channel || 'New Era Staff'}${isOutsider ? ' · Outsider' : ''}</div>
+        <table class="inv-table">
+          <thead><tr><th>Description</th><th>Amount</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Commission Settlement for ${MONTH_FULL[r.month]} ${r.year}<br>
+              <span style="font-size:11px;color:#888">${r.orders_count ? r.orders_count + ' payslip-verified orders. ' : ''}See the attached calculation sheet for the full breakdown.</span></td>
+              <td style="font-weight:700">RM ${fmtNum(totalPay)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="inv-total-row">
+          <div class="inv-total-box">
+            <div class="inv-total-label">Total Pay</div>
+            <div class="inv-total-amount" style="color:#22c55e">RM ${fmtNum(totalPay)}</div>
+          </div>
+        </div>
+        <div class="inv-footer">
+          Payment will be credited to this staff's registered bank account.
+        </div>
+      </div>`;
+}
+
+// Internal worksheet — NOT a billing document — showing the full
+// Sales/Claim/Coway Money/Outsider/Bonus breakdown so staff can check
+// their own numbers against New Era's calculation. Deliberately styled
+// differently from the invoice/payslip so the two are never confused.
+function buildCalculationHTML(staff, r) {
+  const rows = getSettlementBreakdown(r);
+  return `
+    <div style="max-width:680px;margin:0 auto;font-family:Inter,sans-serif;color:#111;background:#fff;padding:32px;border-radius:8px;border:2px dashed #ccc">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:16px;margin-bottom:16px">
+        <div>
+          <div style="font-size:18px;font-weight:800">Calculation Sheet</div>
+          <div style="font-size:12px;color:#666">Internal worksheet — not a billing document</div>
+        </div>
+        <div style="text-align:right;font-size:12px;color:#666">
+          <div>${staff.name} — ${MONTH_FULL[r.month]} ${r.year}</div>
+          <div>Generated: ${new Date().toISOString().slice(0,10)}</div>
+        </div>
+      </div>
+      <div style="background:#f5f5f5;border-radius:6px;padding:12px;margin-bottom:12px;font-size:13px">
+        ${r.orders_count ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Orders</span><span>${r.orders_count}</span></div>` : ''}
+        ${rows.map(row => `<div style="display:flex;justify-content:space-between;margin-bottom:4px${row.amount < 0 ? ';color:#c00' : ''}"><span>${row.label}</span><span>${row.amount === null ? '—' : (row.amount < 0 ? '−RM ' : 'RM ') + fmtNum(Math.abs(row.amount))}</span></div>`).join('')}
+        <div style="display:flex;justify-content:space-between;font-weight:800;font-size:15px;border-top:1px solid #ccc;margin-top:8px;padding-top:8px"><span>Total</span><span>${parseFloat(r.total_pay) < 0 ? '−' : ''}RM ${fmtNum(Math.abs(parseFloat(r.total_pay||0)))}</span></div>
+      </div>
+      ${parseFloat(r.epf_employer||0) > 0 ? `<div style="font-size:11px;color:#666;margin-bottom:6px">Employer EPF contribution (13%, company record only, not deducted from staff pay): RM ${fmtNum(r.epf_employer)}</div>` : ''}
+      ${r.notes ? `<div style="font-size:11px;color:#666;border-top:1px solid #ddd;padding-top:6px">${r.notes}</div>` : ''}
+    </div>`;
+}
+
+function generatePayrollCalculation(recordId) {
+  const r = payrollRecords?.find(x => x.id === recordId);
+  if (!r) { showToast('Record not found', 'error'); return; }
+  const staff = staffList.find(s => s.id === r.staff_id) || { name: 'Unknown', role: '', channel: '' };
+  const html = buildCalculationHTML(staff, r);
+  const win = window.open('', '_blank', 'width=760,height=900');
+  win.document.write(`<html><head><title>Calculation - ${staff.name} - ${MONTHS[r.month]} ${r.year}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>body{margin:24px;background:#f5f5f5}@media print{body{margin:0;background:#fff}}</style></head>
+    <body>${html}<button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#4f7cff;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
+}
+
 function generatePayrollRecordPayslip(recordId) {
   const r = payrollRecords?.find(x => x.id === recordId);
   if (!r) { showToast('Record not found', 'error'); return; }
@@ -3835,54 +3893,16 @@ function generatePayrollRecordPayslip(recordId) {
   // account came out negative, they already received more directly
   // from Coway than they earned — generate an invoice billing them for
   // the difference instead of a payslip.
-  if (isInvoiceRecord(r)) {
-    const html = buildStaffInvoiceHTML(staff, r);
-    const win = window.open('', '_blank', 'width=700,height=800');
-    win.document.write(`<html><head><title>Invoice - ${staff.name} - ${MONTHS[r.month]} ${r.year}</title>
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
-      <style>body{margin:40px;background:#f5f5f5;font-family:Inter,sans-serif}
-      ${INVOICE_PRINT_STYLE}
-      @media print{body{margin:0;background:#fff}.invoice-preview{box-shadow:none}}
-      </style></head><body>${html}<br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#4f7cff;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
-    return;
-  }
-
-  const epfEmployer = parseFloat(r.epf_employer || 0);
-  const isOutsider = r.commission_type === 'outsider';
-  const rows = getSettlementBreakdown(r);
-
-  const html = `
-    <div style="max-width:680px;margin:0 auto;font-family:Inter,sans-serif;color:#111;background:#fff;padding:32px;border-radius:8px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:16px;margin-bottom:16px">
-        <div>
-          <div style="font-size:20px;font-weight:800">New Era Consulting Enterprise</div>
-          <div style="font-size:12px;color:#666">Staff Payslip</div>
-        </div>
-        <div style="text-align:right;font-size:12px;color:#666">
-          <div>${MONTHS[r.month]} ${r.year}</div>
-          <div>Generated: ${new Date().toISOString().slice(0,10)}</div>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;margin-bottom:16px">
-        <div><strong>Name:</strong> ${staff.name}</div>
-        <div><strong>Role:</strong> ${staff.role || '—'}</div>
-        <div><strong>Channel:</strong> ${staff.channel || '—'}</div>
-        <div><strong>Type:</strong> ${staff.staff_type || '—'}${isOutsider ? ' (Outsider — full commission)' : ''}</div>
-      </div>
-      <div style="background:#f5f5f5;border-radius:6px;padding:12px;margin-bottom:16px;font-size:13px">
-        ${r.orders_count ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Orders</span><span>${r.orders_count}</span></div>` : ''}
-        ${rows.map(row => `<div style="display:flex;justify-content:space-between;margin-bottom:4px${row.amount < 0 ? ';color:#c00' : ''}"><span>${row.label}</span><span>${row.amount === null ? '—' : (row.amount < 0 ? '−RM ' : 'RM ') + fmtNum(Math.abs(row.amount))}</span></div>`).join('')}
-        <div style="display:flex;justify-content:space-between;font-weight:800;font-size:15px;border-top:1px solid #ccc;margin-top:8px;padding-top:8px"><span>Total Pay</span><span>RM ${fmtNum(r.total_pay)}</span></div>
-        ${epfEmployer > 0 ? `<div style="font-size:11px;color:#666;margin-top:6px">Employer EPF contribution (13%, company record only, not deducted from staff pay): RM ${fmtNum(epfEmployer)}</div>` : ''}
-        ${r.notes ? `<div style="font-size:11px;color:#666;margin-top:6px;border-top:1px solid #ddd;padding-top:6px">${r.notes}</div>` : ''}
-      </div>
-    </div>`;
-
-  const win = window.open('', '_blank', 'width=760,height=900');
-  win.document.write(`<html><head><title>Payslip - ${staff.name} - ${MONTHS[r.month]} ${r.year}</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <style>body{margin:24px;background:#f5f5f5}@media print{body{margin:0;background:#fff}}</style></head>
-    <body>${html}<button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#4f7cff;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
+  const isInv = isInvoiceRecord(r);
+  const html = isInv ? buildStaffInvoiceHTML(staff, r) : buildStaffPayslipHTML(staff, r);
+  const title = isInv ? 'Invoice' : 'Payslip';
+  const win = window.open('', '_blank', 'width=700,height=800');
+  win.document.write(`<html><head><title>${title} - ${staff.name} - ${MONTHS[r.month]} ${r.year}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <style>body{margin:40px;background:#f5f5f5;font-family:Inter,sans-serif}
+    ${INVOICE_PRINT_STYLE}
+    @media print{body{margin:0;background:#fff}.invoice-preview{box-shadow:none}}
+    </style></head><body>${html}<br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#4f7cff;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
 }
 
 async function openPayrollEntryModal() {
@@ -4156,46 +4176,50 @@ async function saveManagerSharing() {
       const p = payslips.find(x => x.manager_id === m.id);
       return sum + parseFloat(p?.pool_contribution || 0);
     }, 0);
-    if (pool > 0) {
-      // Overwrite any existing pooled split for this period first, so
-      // re-confirming doesn't pile up duplicate nec_manager_sharing rows.
-      for (const m of poolManagers) {
-        const existing = await sb('nec_manager_sharing', { filter: `manager_id=eq.${m.id}&year=eq.${year}&month=eq.${month}`, select: 'id' });
-        for (const e of existing) await sbDelete('nec_manager_sharing', `id=eq.${e.id}`);
-        const amount = pool * (m.share_percentage / 100);
-        await sb('nec_manager_sharing', {
-          method: 'POST',
-          body: { manager_id: m.id, year, month, coway_payslip_amount: pool, share_percentage: m.share_percentage, amount_received: amount }
-        });
-      }
-      await logAudit('CREATE', 'nec_manager_sharing', `Recorded pooled manager sharing for ${MONTHS[month]} ${year} — pool RM${pool.toFixed(2)}`);
-    } else {
-      showToast('No manager payslips uploaded yet — Manager Comm will be RM0 for this period', 'error');
-    }
-
-    // Push every manager's full Total (Comm + Acc Below + Manager Invoice
-    // + Outsider + Adjustments) into nec_payroll, so Payroll is the one
-    // place tracking who's been paid and when — for staff AND managers.
-    // Zehao is included even though he has no Manager Comm pool share.
-    const orderedManagers = MANAGER_ORDER.map(name => managerList.find(m => m.name === name)).filter(Boolean);
-    let pushedCount = 0, skippedNames = [];
-    for (const m of orderedManagers) {
-      if (!m.staff_id) { skippedNames.push(m.name); continue; }
-      const t = await getManagerTotalForPeriod(m, year, month);
-      const existing = await sb('nec_payroll', { filter: `staff_id=eq.${m.staff_id}&year=eq.${year}&month=eq.${month}`, select: 'id' });
-      for (const e of existing) await sbDelete('nec_payroll', `id=eq.${e.id}`);
-      const notes = `Manager Comm ${fmt(t.commTotal)} + Acc Below ${fmt(t.accBelowAmt)} + Manager Invoice ${fmt(t.invoiceAmt)} + Outsider ${fmt(t.outsiderAmt)} + Adjustments ${fmt(t.adjTotal)} = Total ${fmt(t.total)}`;
-      await sb('nec_payroll', {
+    if (pool <= 0) return showToast('No manager payslips uploaded for this period yet', 'error');
+    // Overwrite any existing pooled split for this period first, so
+    // re-confirming doesn't pile up duplicate nec_manager_sharing rows.
+    for (const m of poolManagers) {
+      const existing = await sb('nec_manager_sharing', { filter: `manager_id=eq.${m.id}&year=eq.${year}&month=eq.${month}`, select: 'id' });
+      for (const e of existing) await sbDelete('nec_manager_sharing', `id=eq.${e.id}`);
+      const amount = pool * (m.share_percentage / 100);
+      await sb('nec_manager_sharing', {
         method: 'POST',
-        body: { staff_id: m.staff_id, year, month, commission_earned: t.total, record_type: 'manager', notes }
+        body: { manager_id: m.id, year, month, coway_payslip_amount: pool, share_percentage: m.share_percentage, amount_received: amount }
       });
-      pushedCount++;
     }
-    if (skippedNames.length) showToast(`${skippedNames.join(', ')} not linked to a staff record yet — run the manager-staff link SQL`, 'error');
-
     closeModal('modalManagerEntry');
-    showToast(`Manager sharing saved — ${pushedCount} manager record(s) pushed to Payroll`);
+    showToast('Manager Comm pool split saved — go to Overview to Confirm each manager into Payroll');
+    await logAudit('CREATE', 'nec_manager_sharing', `Recorded pooled manager sharing for ${MONTHS[month]} ${year} — pool RM${pool.toFixed(2)}`);
     loadManagerSharing();
+    loadMgrAdjustments();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// Pushes ONE manager's current Total (Manager Comm + Acc Below + Manager
+// Invoice + Outsider + Adjustments) for the Overview tab's selected
+// period into nec_payroll — this is what makes Payroll the single place
+// tracking who's been paid and when, across staff and managers alike.
+// Safe to re-run: overwrites any existing record for that staff+period.
+async function confirmManagerToPayroll(managerId) {
+  const m = managerList.find(x => x.id === managerId);
+  if (!m) return;
+  if (!m.staff_id) return showToast(`${m.name} isn't linked to a staff record yet — run the manager-staff link SQL`, 'error');
+  const year = parseInt(document.getElementById('mgrYear').value);
+  const monthRaw = document.getElementById('mgrMonth').value;
+  if (!monthRaw) return showToast('Pick a specific month first — Payroll records are per month', 'error');
+  const month = parseInt(monthRaw);
+  try {
+    const t = await getManagerTotalForPeriod(m, year, month);
+    const existing = await sb('nec_payroll', { filter: `staff_id=eq.${m.staff_id}&year=eq.${year}&month=eq.${month}`, select: 'id' });
+    for (const e of existing) await sbDelete('nec_payroll', `id=eq.${e.id}`);
+    const notes = `Manager Comm ${fmt(t.commTotal)} + Acc Below ${fmt(t.accBelowAmt)} + Manager Invoice ${fmt(t.invoiceAmt)} + Outsider ${fmt(t.outsiderAmt)} + Adjustments ${fmt(t.adjTotal)} = Total ${fmt(t.total)}`;
+    await sb('nec_payroll', {
+      method: 'POST',
+      body: { staff_id: m.staff_id, year, month, commission_earned: t.total, record_type: 'manager', notes }
+    });
+    await logAudit('CREATE', 'nec_payroll', `Confirmed ${m.name}'s manager Total for ${MONTHS[month]} ${year} into Payroll — RM${t.total.toFixed(2)}`);
+    showToast(`${m.name} confirmed to Payroll ✓`);
     loadMgrAdjustments();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
@@ -4520,6 +4544,16 @@ async function loadMgrAdjustments() {
 
     const orderedManagers = MANAGER_ORDER.map(name => managerList.find(m => m.name === name)).filter(Boolean);
 
+    // Whether each manager's Total has already been confirmed into
+    // Payroll for this exact period — only meaningful for a specific
+    // month (a Payroll record is always one staff+year+month row, so
+    // "All Months" has no single record to check against).
+    const confirmedStaffIds = new Set();
+    if (month) {
+      const existingPayroll = await sb('nec_payroll', { filter: `year=eq.${year}&month=eq.${month}&record_type=eq.manager`, select: 'staff_id' });
+      existingPayroll.forEach(p => confirmedStaffIds.add(p.staff_id));
+    }
+
     // Outsider: full commission from any non-ad-sourced orders assigned
     // to this manager (manager_id → nec_managers.staff_id link), same
     // concept and matching pipeline as a regular staff member's
@@ -4580,6 +4614,16 @@ async function loadMgrAdjustments() {
       const mgrAdjustments = adjustments.filter(a => a.manager_id === m.id);
       const adjTotal = r2(mgrAdjustments.reduce((s,a) => s + parseFloat(a.amount||0), 0));
       const grandTotal = r2(commTotal + accBelowAmt + invoiceAmt + outsiderAmt + adjTotal);
+      let confirmCell;
+      if (!month) {
+        confirmCell = `<span style="font-size:11px;color:var(--muted)">Pick a month</span>`;
+      } else if (!m.staff_id) {
+        confirmCell = `<span style="font-size:11px;color:var(--red)">Not linked</span>`;
+      } else if (confirmedStaffIds.has(m.staff_id)) {
+        confirmCell = `<span class="badge badge-paid" style="margin-right:4px">✓ In Payroll</span><button class="btn btn-ghost btn-sm" onclick="confirmManagerToPayroll('${m.id}')">Re-confirm</button>`;
+      } else {
+        confirmCell = `<button class="btn btn-primary btn-sm" onclick="confirmManagerToPayroll('${m.id}')">Confirm</button>`;
+      }
       return `<tr>
         <td class="td-name">${m.name}</td>
         <td class="td-mono">${fmt(commTotal)}</td>
@@ -4588,6 +4632,7 @@ async function loadMgrAdjustments() {
         <td class="td-mono" style="color:${outsiderAmt === 0 ? 'var(--muted)' : 'var(--green)'}">${outsiderAmt === 0 ? '—' : fmt(outsiderAmt)}</td>
         <td class="td-mono" style="color:${adjTotal < 0 ? 'var(--red)' : 'var(--green)'}">${adjTotal >= 0 ? '+' : ''}${fmt(adjTotal)}</td>
         <td class="td-mono" style="font-weight:700;color:var(--accent)">${fmt(grandTotal)}</td>
+        <td>${confirmCell}</td>
       </tr>`;
     }).join('');
 
