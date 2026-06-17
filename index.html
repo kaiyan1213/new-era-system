@@ -467,9 +467,9 @@
         <div class="stat-sub">active members</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">This Month Payroll</div>
+        <div class="stat-label" id="statPayrollNetLabel">Net This Month</div>
         <div class="stat-value" id="statPayrollMonth">—</div>
-        <div class="stat-sub">total payout</div>
+        <div class="stat-sub" id="statPayrollNetSub">total payout</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Sales Staff</div>
@@ -1595,6 +1595,36 @@
     <div class="form-actions">
       <button class="btn btn-ghost" onclick="closeModal('modalPayrollEntry')">Cancel</button>
       <button class="btn btn-primary" onclick="savePayroll()">Save Payroll</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Payroll Adjustment Modal — for Claim/Bonus/Deductions that aren't
+     derivable from order matching and need to be added after the fact -->
+<div class="modal-bg hidden" id="modalEditPayroll">
+  <div class="modal">
+    <div class="modal-title">Edit Payroll Record</div>
+    <input type="hidden" id="epId">
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px" id="epStaffLabel"></div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">Claim Amount (RM) — reimbursements/expense claims owed to staff</label>
+        <input type="number" id="epClaim" class="form-input" placeholder="0.00">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Bonus (RM)</label>
+          <input type="number" id="epBonus" class="form-input" placeholder="0.00">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Deductions (RM)</label>
+          <input type="number" id="epDeduct" class="form-input" placeholder="0.00">
+        </div>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalEditPayroll')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEditPayroll()">Save Changes</button>
     </div>
   </div>
 </div>
@@ -2870,8 +2900,27 @@ async function loadPayroll() {
     document.getElementById('statStaffCount').textContent = staffList.length;
     document.getElementById('statSalesStaff').textContent = salesStaff.length;
     document.getElementById('statAdminStaff').textContent = adminStaff.length;
-    const monthTotal = records.reduce((s,r) => s + parseFloat(r.total_pay||0), 0);
-    document.getElementById('statPayrollMonth').textContent = fmt(monthTotal);
+
+    // Net cash position across EVERYONE in nec_payroll for this period —
+    // staff, admin, and managers (manager Totals pushed here via Manager
+    // Sharing's "Record This Month") — so one glance answers "does the
+    // company pay out or collect this month".
+    const toPay = records.filter(r => parseFloat(r.total_pay||0) > 0).reduce((s,r) => s + parseFloat(r.total_pay||0), 0);
+    const toReceive = records.filter(r => parseFloat(r.total_pay||0) < 0).reduce((s,r) => s + Math.abs(parseFloat(r.total_pay||0)), 0);
+    const net = toPay - toReceive;
+    const netLabelEl = document.getElementById('statPayrollNetLabel');
+    const netValEl = document.getElementById('statPayrollMonth');
+    const netSubEl = document.getElementById('statPayrollNetSub');
+    if (net >= 0) {
+      netLabelEl.textContent = 'Net This Month — Pay Out';
+      netValEl.textContent = fmt(net);
+      netValEl.style.color = 'var(--green)';
+    } else {
+      netLabelEl.textContent = 'Net This Month — Receivable';
+      netValEl.textContent = fmt(Math.abs(net));
+      netValEl.style.color = 'var(--red)';
+    }
+    netSubEl.textContent = `Pay RM ${fmtNum(toPay)} · Receive RM ${fmtNum(toReceive)}`;
 
     const tbody = document.getElementById('payrollTableBody');
     if (filtered.length === 0) {
@@ -2880,7 +2929,7 @@ async function loadPayroll() {
     }
     tbody.innerHTML = filtered.map(r => {
       const staff = staffList.find(s => s.id === r.staff_id) || { name: 'Unknown', staff_type: 'sales', channel: 'DM' };
-      const isInvoice = r.settlement_type === 'invoice';
+      const isInvoice = isInvoiceRecord(r);
       const isManager = r.record_type === 'manager';
       return `<tr>
         <td class="td-name">${staff.name}</td>
@@ -2890,12 +2939,13 @@ async function loadPayroll() {
         <td class="td-mono">${r.orders_count || 0}</td>
         <td class="td-mono">${fmt(r.commission_earned)}</td>
         <td class="td-mono">${fmt(r.base_salary)}${parseFloat(r.epf_employee||0) > 0 ? `<div style="font-size:10px;color:var(--red)">−EPF ${fmt(r.epf_employee)}</div>` : ''}${parseFloat(r.own_proxy_offset||0) > 0 ? `<div style="font-size:10px;color:var(--red)">−Own proxy ${fmt(r.own_proxy_offset)}</div>` : ''}</td>
-        <td class="td-mono">${fmt(r.bonus)}</td>
+        <td class="td-mono">${fmt(r.bonus)}${parseFloat(r.claim_amount||0) !== 0 ? `<div style="font-size:10px;color:var(--green)">+Claim ${fmt(r.claim_amount)}</div>` : ''}</td>
         <td class="td-mono" style="color:${parseFloat(r.total_pay) < 0 ? 'var(--red)' : 'var(--green)'};font-weight:600">${fmt(r.total_pay)}</td>
         <td>${r.payment_date
           ? `<span class="badge badge-paid">${r.payment_date}</span>`
           : `<button class="btn btn-ghost btn-sm" onclick="markPayrollPaid('${r.id}')">Mark Paid</button>`}</td>
         <td>
+          <button class="btn btn-ghost btn-sm" onclick="openEditPayrollModal('${r.id}')">Edit</button>
           <button class="btn btn-ghost btn-sm" onclick="generatePayrollRecordPayslip('${r.id}')">${isInvoice ? '🖨 Invoice' : '🖨 Payslip'}</button>
           <button class="btn btn-danger btn-sm" onclick="deletePayroll('${r.id}')">✕</button>
         </td>
@@ -3546,6 +3596,16 @@ function viewAutoCommOrders(idx) {
   alert(`${row.staff.name} — ${MONTHS[row.month]} ${row.year}\n${row.orders.length} payslip-verified orders:\n\n${list || '(none)'}`);
 }
 
+// Whether a payroll record nets out negative (the staff received more
+// from their own Coway proxy than they earned, so they owe New Era
+// back) — derived live from own_proxy_offset + total_pay's sign rather
+// than trusting the stored settlement_type, so editing claim/bonus/
+// deductions after the initial save always flips the document type
+// correctly instead of going stale.
+function isInvoiceRecord(r) {
+  return parseFloat(r.own_proxy_offset||0) > 0 && parseFloat(r.total_pay||0) < 0;
+}
+
 // This period's payslip amount from a staff's OWN Coway proxy account
 // (if they have one linked) — Coway pays this directly, bypassing New
 // Era, so it must be netted against what they actually earned.
@@ -3574,12 +3634,19 @@ async function saveAutoCommissionRow(idx) {
   const ownProxyOffset = await getOwnProxyPayslipAmount(row.staff.own_proxy_id, row.year, row.month);
   const netPay = r2(row.commission + (row.staff.base_salary || 0) - epfEmployee - ownProxyOffset);
   const settlementType = ownProxyOffset > 0 ? (netPay >= 0 ? 'payslip' : 'invoice') : null;
+  // A row can mix DM/TM + Outsider orders, but nec_payroll only has one
+  // commission_type slot — tag it 'outsider' when every matched order
+  // this period used the outsider algorithm (e.g. a manager's outsider-
+  // only commission), since that's the common case that actually needs
+  // the distinct label; mixed rows fall back to the normal 'tiered' tag.
+  const allOutsider = row.orders.length > 0 && row.orders.every(o => o.commission_algo === 'outsider');
   const body = {
     staff_id: row.staff.id,
     year: row.year,
     month: row.month,
     orders_count: row.orders.length,
     commission_earned: row.commission,
+    commission_type: allOutsider ? 'outsider' : 'tiered',
     base_salary: row.staff.base_salary || 0,
     bonus: 0,
     deductions: 0,
@@ -3603,21 +3670,53 @@ async function saveAutoCommissionRow(idx) {
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
-// Generates a simple printable payslip for a staff member based on the
-// auto-calculated commission for the selected month.
-function generateStaffPayslip(idx) {
+// Generates a printable preview for a staff member based on the
+// auto-calculated commission for the selected month, BEFORE confirming
+// via "Save to Payroll" — mirrors exactly what saving would produce
+// (including own-proxy netting and EPF) so it's a true preview, not
+// just the raw commission figure.
+async function generateStaffPayslip(idx) {
   const row = autoCommissionData[idx];
   if (!row) return;
   const { staff, orders, commission, breakdown, year, month } = row;
   const baseSalary = parseFloat(staff.base_salary || 0);
-  const total = commission + baseSalary;
+  let epfEmployee = 0, epfEmployer = 0;
+  if (staff.epf_applicable) {
+    const epf = calcEpf(baseSalary);
+    epfEmployee = epf.employee;
+    epfEmployer = epf.employer;
+  }
+  const ownProxyOffset = await getOwnProxyPayslipAmount(staff.own_proxy_id, year, month);
+  const allOutsider = orders.length > 0 && orders.every(o => o.commission_algo === 'outsider');
+  const totalPay = r2(commission + baseSalary - epfEmployee - ownProxyOffset);
 
+  // Build a record-shaped object so this preview can reuse the exact
+  // same breakdown/invoice rendering as a saved Payroll record — no
+  // separate calculation logic to keep in sync.
+  const fakeRecord = {
+    commission_earned: commission, commission_type: allOutsider ? 'outsider' : 'tiered',
+    base_salary: baseSalary, bonus: 0, claim_amount: 0, deductions: 0,
+    epf_employee: epfEmployee, epf_employer: epfEmployer, own_proxy_offset: ownProxyOffset,
+    total_pay: totalPay, month, year, orders_count: orders.length, notes: null,
+  };
+
+  if (isInvoiceRecord(fakeRecord)) {
+    const html = buildStaffInvoiceHTML(staff, fakeRecord);
+    const win = window.open('', '_blank', 'width=700,height=800');
+    win.document.write(`<html><head><title>Invoice Preview - ${staff.name} - ${MONTHS[month]} ${year}</title>
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
+      <style>body{margin:40px;background:#f5f5f5;font-family:Inter,sans-serif}
+      ${INVOICE_PRINT_STYLE}
+      @media print{body{margin:0;background:#fff}.invoice-preview{box-shadow:none}}
+      </style></head><body><div style="max-width:700px;margin:0 auto 12px;font-size:12px;color:#c00;font-weight:600">⚠ Preview only — not yet saved to Payroll</div>${html}<br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#4f7cff;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
+    return;
+  }
+
+  const rows = getSettlementBreakdown(fakeRecord);
   const orderRows = orders.map((o,i) => `
     <tr>
       <td style="padding:4px 8px;border-bottom:1px solid #eee">${i+1}</td>
       <td style="padding:4px 8px;border-bottom:1px solid #eee">${o.customer_name || '—'}</td>
-      <td style="padding:4px 8px;border-bottom:1px solid #eee">${o.order_no || '—'}</td>
-      <td style="padding:4px 8px;border-bottom:1px solid #eee">${o.product_model || '—'}</td>
     </tr>`).join('');
 
   const html = `
@@ -3625,7 +3724,7 @@ function generateStaffPayslip(idx) {
       <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:16px;margin-bottom:16px">
         <div>
           <div style="font-size:20px;font-weight:800">New Era Consulting Enterprise</div>
-          <div style="font-size:12px;color:#666">Staff Commission Payslip</div>
+          <div style="font-size:12px;color:#666">Staff Commission Payslip (Preview)</div>
         </div>
         <div style="text-align:right;font-size:12px;color:#666">
           <div>${MONTHS[month]} ${year}</div>
@@ -3639,35 +3738,54 @@ function generateStaffPayslip(idx) {
         <div><strong>Verified Orders:</strong> ${orders.length}</div>
       </div>
       <div style="background:#f5f5f5;border-radius:6px;padding:12px;margin-bottom:16px;font-size:13px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Base Salary</span><span>RM ${fmtNum(baseSalary)}</span></div>
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Commission (${orders.length} payslip-verified orders)</span><span>RM ${fmtNum(commission)}</span></div>
+        ${rows.map(row => `<div style="display:flex;justify-content:space-between;margin-bottom:4px${row.amount < 0 ? ';color:#c00' : ''}"><span>${row.label}</span><span>${row.amount === null ? '—' : (row.amount < 0 ? '−RM ' : 'RM ') + fmtNum(Math.abs(row.amount))}</span></div>`).join('')}
         <div style="font-size:11px;color:#666;margin-top:4px">${breakdown}</div>
-        <div style="display:flex;justify-content:space-between;font-weight:800;font-size:15px;border-top:1px solid #ccc;margin-top:8px;padding-top:8px"><span>Total Pay</span><span>RM ${fmtNum(total)}</span></div>
+        <div style="display:flex;justify-content:space-between;font-weight:800;font-size:15px;border-top:1px solid #ccc;margin-top:8px;padding-top:8px"><span>Total Pay</span><span>RM ${fmtNum(totalPay)}</span></div>
       </div>
       <div style="font-size:12px;font-weight:700;margin-bottom:6px">Verified Orders Detail</div>
       <table style="width:100%;border-collapse:collapse;font-size:12px">
         <thead><tr style="background:#f0f0f0">
           <th style="padding:4px 8px;text-align:left">#</th>
           <th style="padding:4px 8px;text-align:left">Customer</th>
-          <th style="padding:4px 8px;text-align:left">Order No</th>
-          <th style="padding:4px 8px;text-align:left">Proxy</th>
         </tr></thead>
-        <tbody>${orderRows || `<tr><td colspan="4" style="padding:8px;color:#999">No verified orders this month</td></tr>`}</tbody>
+        <tbody>${orderRows || `<tr><td colspan="2" style="padding:8px;color:#999">No verified orders this month</td></tr>`}</tbody>
       </table>
     </div>`;
 
   const win = window.open('', '_blank', 'width=760,height=900');
-  win.document.write(`<html><head><title>Payslip - ${staff.name} - ${MONTHS[month]} ${year}</title>
+  win.document.write(`<html><head><title>Payslip Preview - ${staff.name} - ${MONTHS[month]} ${year}</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>body{margin:24px;background:#f5f5f5}@media print{body{margin:0;background:#fff}}</style></head>
-    <body>${html}<button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#4f7cff;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
+    <body><div style="max-width:680px;margin:0 auto 12px;font-size:12px;color:#c00;font-weight:600">⚠ Preview only — not yet saved to Payroll</div>${html}<button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#4f7cff;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
 }
 
 // Payslip generator for a manually-recorded nec_payroll row — works for
 // any staff type (sales/admin), includes EPF breakdown when applicable
 // and flags Outsider commission records.
+// Settlement breakdown rows in the same shape the staff already track
+// manually (Sales / Claim / Coway Money / Outsider / Bonus / Total) so
+// the printed document is something they can directly check against
+// their own numbers. Base Salary/Deductions/EPF only appear when
+// non-zero (most sales staff don't have them); Sales/Claim/Coway
+// Money/Outsider/Bonus always appear (blank when not applicable) to
+// match the staff's own reconciliation sheet layout.
+function getSettlementBreakdown(r) {
+  const isOutsider = r.commission_type === 'outsider';
+  const rows = [];
+  if (parseFloat(r.base_salary||0) > 0) rows.push({ label: 'Base Salary', amount: parseFloat(r.base_salary) });
+  rows.push({ label: 'Sales', amount: isOutsider ? null : parseFloat(r.commission_earned||0) });
+  rows.push({ label: 'Claim', amount: parseFloat(r.claim_amount||0) || null });
+  rows.push({ label: 'Coway Money', amount: parseFloat(r.own_proxy_offset||0) > 0 ? -parseFloat(r.own_proxy_offset) : null });
+  rows.push({ label: 'Outsider', amount: isOutsider ? parseFloat(r.commission_earned||0) : null });
+  rows.push({ label: 'Bonus', amount: parseFloat(r.bonus||0) || null });
+  if (parseFloat(r.deductions||0) > 0) rows.push({ label: 'Deductions', amount: -parseFloat(r.deductions) });
+  if (parseFloat(r.epf_employee||0) > 0) rows.push({ label: 'EPF Employee (11%)', amount: -parseFloat(r.epf_employee) });
+  return rows;
+}
+
 function buildStaffInvoiceHTML(staff, r) {
   const amountDue = Math.abs(parseFloat(r.total_pay || 0));
+  const rows = getSettlementBreakdown(r);
   return `
       <div class="invoice-preview">
         <div class="inv-header">
@@ -3688,13 +3806,11 @@ function buildStaffInvoiceHTML(staff, r) {
         <table class="inv-table">
           <thead><tr><th>Description</th><th>Amount</th></tr></thead>
           <tbody>
-            <tr>
-              <td>Settlement for ${MONTH_FULL[r.month]} ${r.year}<br>
-              <span style="font-size:11px;color:#888">Earned commission (RM ${fmtNum(r.commission_earned)}) was less than the RM ${fmtNum(r.own_proxy_offset)} Coway already paid directly into this staff's own proxy account — the difference is owed back to New Era.</span></td>
-              <td style="font-weight:700">RM ${fmtNum(amountDue)}</td>
-            </tr>
+            ${rows.map(row => `<tr><td>${row.label}</td><td>${row.amount === null ? '—' : (row.amount < 0 ? '−RM ' : 'RM ') + fmtNum(Math.abs(row.amount))}</td></tr>`).join('')}
+            <tr><td style="font-weight:700">Total</td><td style="font-weight:700">${amountDue === 0 ? 'RM 0.00' : (parseFloat(r.total_pay) < 0 ? '−RM ' : 'RM ') + fmtNum(amountDue)}</td></tr>
           </tbody>
         </table>
+        <div style="font-size:11px;color:#888;margin:-12px 0 16px">Earned commission was less than what Coway already paid directly into this staff's own proxy account — the difference is owed back to New Era.</div>
         <div class="inv-total-row">
           <div class="inv-total-box">
             <div class="inv-total-label">Total Amount Due to New Era</div>
@@ -3719,7 +3835,7 @@ function generatePayrollRecordPayslip(recordId) {
   // account came out negative, they already received more directly
   // from Coway than they earned — generate an invoice billing them for
   // the difference instead of a payslip.
-  if (r.settlement_type === 'invoice') {
+  if (isInvoiceRecord(r)) {
     const html = buildStaffInvoiceHTML(staff, r);
     const win = window.open('', '_blank', 'width=700,height=800');
     win.document.write(`<html><head><title>Invoice - ${staff.name} - ${MONTHS[r.month]} ${r.year}</title>
@@ -3731,10 +3847,9 @@ function generatePayrollRecordPayslip(recordId) {
     return;
   }
 
-  const epfEmployee = parseFloat(r.epf_employee || 0);
   const epfEmployer = parseFloat(r.epf_employer || 0);
-  const ownProxyOffset = parseFloat(r.own_proxy_offset || 0);
   const isOutsider = r.commission_type === 'outsider';
+  const rows = getSettlementBreakdown(r);
 
   const html = `
     <div style="max-width:680px;margin:0 auto;font-family:Inter,sans-serif;color:#111;background:#fff;padding:32px;border-radius:8px">
@@ -3756,12 +3871,7 @@ function generatePayrollRecordPayslip(recordId) {
       </div>
       <div style="background:#f5f5f5;border-radius:6px;padding:12px;margin-bottom:16px;font-size:13px">
         ${r.orders_count ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Orders</span><span>${r.orders_count}</span></div>` : ''}
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Base Salary</span><span>RM ${fmtNum(r.base_salary)}</span></div>
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Commission${isOutsider ? ' (Outsider, full payslip amount)' : ''}</span><span>RM ${fmtNum(r.commission_earned)}</span></div>
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Bonus</span><span>RM ${fmtNum(r.bonus)}</span></div>
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Deductions</span><span>−RM ${fmtNum(r.deductions)}</span></div>
-        ${epfEmployee > 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px;color:#c00"><span>EPF Employee (11%)</span><span>−RM ${fmtNum(epfEmployee)}</span></div>` : ''}
-        ${ownProxyOffset > 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:4px;color:#c00"><span>Less: Own Proxy Account Payslip (already paid by Coway)</span><span>−RM ${fmtNum(ownProxyOffset)}</span></div>` : ''}
+        ${rows.map(row => `<div style="display:flex;justify-content:space-between;margin-bottom:4px${row.amount < 0 ? ';color:#c00' : ''}"><span>${row.label}</span><span>${row.amount === null ? '—' : (row.amount < 0 ? '−RM ' : 'RM ') + fmtNum(Math.abs(row.amount))}</span></div>`).join('')}
         <div style="display:flex;justify-content:space-between;font-weight:800;font-size:15px;border-top:1px solid #ccc;margin-top:8px;padding-top:8px"><span>Total Pay</span><span>RM ${fmtNum(r.total_pay)}</span></div>
         ${epfEmployer > 0 ? `<div style="font-size:11px;color:#666;margin-top:6px">Employer EPF contribution (13%, company record only, not deducted from staff pay): RM ${fmtNum(epfEmployer)}</div>` : ''}
         ${r.notes ? `<div style="font-size:11px;color:#666;margin-top:6px;border-top:1px solid #ddd;padding-top:6px">${r.notes}</div>` : ''}
@@ -3889,6 +3999,34 @@ async function savePayroll() {
     const staffName = staffList.find(s => s.id === body.staff_id)?.name || body.staff_id;
     const settleNote = body.own_proxy_offset ? ` — netted against own proxy account RM${body.own_proxy_offset.toFixed(2)} (${body.settlement_type})` : '';
     await logAudit('CREATE', 'nec_payroll', `Payroll for ${staffName} — ${MONTHS[body.month]} ${body.year} — RM${netPay.toFixed(2)}${body.commission_type === 'outsider' ? ' (outsider, full commission)' : ''}${settleNote}`);
+    loadPayroll();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+function openEditPayrollModal(id) {
+  const r = payrollRecords?.find(x => x.id === id);
+  if (!r) return;
+  const staff = staffList.find(s => s.id === r.staff_id) || { name: 'Unknown' };
+  document.getElementById('epId').value = r.id;
+  document.getElementById('epStaffLabel').textContent = `${staff.name} — ${MONTHS[r.month]} ${r.year}`;
+  document.getElementById('epClaim').value = r.claim_amount || 0;
+  document.getElementById('epBonus').value = r.bonus || 0;
+  document.getElementById('epDeduct').value = r.deductions || 0;
+  openModal('modalEditPayroll');
+}
+
+async function saveEditPayroll() {
+  const id = document.getElementById('epId').value;
+  const body = {
+    claim_amount: parseFloat(document.getElementById('epClaim').value) || 0,
+    bonus: parseFloat(document.getElementById('epBonus').value) || 0,
+    deductions: parseFloat(document.getElementById('epDeduct').value) || 0,
+  };
+  try {
+    await sb('nec_payroll', { method: 'PATCH', filter: `id=eq.${id}`, body });
+    await logAudit('UPDATE', 'nec_payroll', `Edited payroll record ${id} — claim RM${body.claim_amount.toFixed(2)}, bonus RM${body.bonus.toFixed(2)}, deductions RM${body.deductions.toFixed(2)}`);
+    closeModal('modalEditPayroll');
+    showToast('Saved ✓');
     loadPayroll();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
@@ -4855,11 +4993,12 @@ CREATE TABLE IF NOT EXISTS nec_payroll (
   commission_type text DEFAULT 'tiered',
   base_salary numeric(10,2) DEFAULT 0,
   bonus numeric(10,2) DEFAULT 0,
+  claim_amount numeric(10,2) DEFAULT 0,
   deductions numeric(10,2) DEFAULT 0,
   epf_employee numeric(10,2) DEFAULT 0,
   epf_employer numeric(10,2) DEFAULT 0,
   own_proxy_offset numeric(10,2) DEFAULT 0,
-  total_pay numeric(10,2) GENERATED ALWAYS AS (commission_earned + base_salary + bonus - deductions - epf_employee - own_proxy_offset) STORED,
+  total_pay numeric(10,2) GENERATED ALWAYS AS (commission_earned + base_salary + bonus + claim_amount - deductions - epf_employee - own_proxy_offset) STORED,
   settlement_type text,
   record_type text DEFAULT 'staff',
   notes text,
@@ -4874,22 +5013,27 @@ ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS epf_employer numeric(10,2) DEFA
 -- own_proxy_offset: this period's payslip amount from the staff's OWN
 -- Coway proxy account (Coway already paid this directly, bypassing New
 -- Era) — netted against commission_earned to find the real settlement.
--- settlement_type: 'payslip' when the net is positive (New Era still
--- owes the staff money) or 'invoice' when negative (the staff already
--- received more from Coway directly than they earned, so they owe New
--- Era back the difference) — decided automatically at save time.
+-- claim_amount: manual reimbursements/claims owed TO the staff (e.g.
+-- expense claims) — additive, entered after the fact via the Payroll
+-- "Edit" action since these aren't derivable from order matching.
+-- settlement_type is no longer trusted as the source of truth for
+-- payslip-vs-invoice — that's now derived live from own_proxy_offset and
+-- total_pay's sign (see isInvoiceRecord in the app) so it stays correct
+-- even after editing claim/bonus/deductions later; this column is kept
+-- only for audit/filtering convenience.
 -- record_type: 'staff' (normal sales/admin payroll) or 'manager' (a
 -- Manager Sharing period's confirmed Total, pushed here so Payroll is
 -- the single place tracking who's been paid and when, across everyone).
 ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS own_proxy_offset numeric(10,2) DEFAULT 0;
+ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS claim_amount numeric(10,2) DEFAULT 0;
 ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS settlement_type text;
 ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS record_type text DEFAULT 'staff';
 ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS notes text;
 ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS payment_date date;
--- If nec_payroll already existed before epf_employee/own_proxy_offset were
--- added, total_pay's generated formula won't include them automatically —
--- drop and recreate the column so existing deployments pick up the new
--- formula.
+-- If nec_payroll already existed before epf_employee/own_proxy_offset/
+-- claim_amount were added, total_pay's generated formula won't include
+-- them automatically — drop and recreate the column so existing
+-- deployments pick up the new formula.
 DO $$
 BEGIN
   IF EXISTS (
@@ -4899,7 +5043,7 @@ BEGIN
     ALTER TABLE nec_payroll DROP COLUMN total_pay;
   END IF;
   ALTER TABLE nec_payroll ADD COLUMN total_pay numeric(10,2)
-    GENERATED ALWAYS AS (commission_earned + base_salary + bonus - deductions - epf_employee - own_proxy_offset) STORED;
+    GENERATED ALWAYS AS (commission_earned + base_salary + bonus + claim_amount - deductions - epf_employee - own_proxy_offset) STORED;
 END $$;
 
 
