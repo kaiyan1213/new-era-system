@@ -270,15 +270,15 @@
   </div>
   <div style="display:flex;align-items:center;gap:8px">
     <div class="nav-links">
-      <a class="nav-link" onclick="showPage('proxy')">Proxy Inv</a>
+      <a class="nav-link" onclick="showPage('proxy')">Inv</a>
       <a class="nav-link" onclick="showPage('directory')">Directory</a>
       <a class="nav-link" onclick="showPage('payroll')">Payroll</a>
-      <a class="nav-link" onclick="showPage('bankdir')">Bank Details</a>
-      <a class="nav-link" onclick="showPage('manager')">Manager Sharing</a>
+      <a class="nav-link" onclick="showPage('manager')">Manager</a>
       <a class="nav-link" onclick="showPage('pl')">P&amp;L</a>
+      <a class="nav-link" onclick="showPage('breakdown')">Breakdown</a>
+      <a class="nav-link" onclick="showPage('bankdir')">Bank Details</a>
       <a class="nav-link" onclick="showPage('export')">Export</a>
       <a class="nav-link" id="auditNavLink" onclick="showPage('audit')" style="display:none">Audit Log</a>
-      <a class="nav-link" onclick="showPage('breakdown')">Breakdown</a>
       <a class="nav-link" onclick="showPage('setup')">Setup</a>    </div>
     <div class="nav-user">
       <div class="user-chip" id="userChip" style="display:none">
@@ -312,7 +312,7 @@
         <div class="page-sub">Track proxy accounts & generate monthly invoices for Marketing Services</div>
       </div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost" onclick="openAddProxyModal()">+ Add Proxy</button>
+        <button class="btn btn-ghost" onclick="openAddProxyModal()">+Add Acc</button>
         <button class="btn btn-ghost" onclick="printAllInvoices()">🖨 Print All Invoices (this filter)</button>
         <button class="btn btn-ghost" onclick="showPage('upload')" style="color:var(--yellow);border-color:rgba(245,158,11,0.3)">⬆ Bulk Upload Payslips</button>
         <button class="btn btn-primary" onclick="openNewInvoiceModal()">New Invoice Entry</button>
@@ -447,17 +447,20 @@
         <div class="page-sub">Sales commission + Admin fixed salary — covers everyone, not just sales staff</div>
       </div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost" onclick="openAddStaffModal()">+ Add Staff</button>
-        <button class="btn btn-primary" onclick="openPayrollEntryModal()">Record Payroll</button>
+        <button class="btn btn-ghost" id="btnAddStaffHeader" onclick="openAddStaffModal()" style="display:none">+ Add Staff</button>
+        <button class="btn btn-primary" id="btnRecordPayrollHeader" onclick="openPayrollEntryModal()">Record Payroll</button>
       </div>
     </div>
 
     <div class="tabs">
       <div class="tab active" id="payrollTab-records" onclick="switchPayrollTab('records')">Payroll</div>
+      <div class="tab" id="payrollTab-stafflist" onclick="switchPayrollTab('stafflist')">Staff List</div>
       <div class="tab" id="payrollTab-automatch" onclick="switchPayrollTab('automatch')">Auto Commission Matching</div>
     </div>
 
-    <!-- PAYROLL TAB: stats, staff list, payroll records -->
+    <!-- PAYROLL TAB: stats + payroll records — only people whose payslip
+         has actually been saved/confirmed into nec_payroll show up here,
+         never the full staff roster (that's the Staff List tab now). -->
     <div id="payrollPane-records">
 
     <div class="stats-row">
@@ -506,28 +509,6 @@
       </div>
     </div>
 
-    <!-- Staff List -->
-    <div class="table-wrap" style="margin-bottom:20px">
-      <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">Staff List</div>
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Role</th>
-            <th>Channel</th>
-            <th>Type</th>
-            <th>Comm/Order</th>
-            <th>Base Salary</th>
-            <th>收单追踪 Staff Name</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="staffListTableBody">
-          <tr><td colspan="8"><div class="empty"><div class="empty-text">Loading staff...</div></div></td></tr>
-        </tbody>
-      </table>
-    </div>
-
     <div class="table-wrap">
       <table>
         <thead>
@@ -553,6 +534,30 @@
 
     </div>
     <!-- end PAYROLL TAB -->
+
+    <!-- STAFF LIST TAB -->
+    <div id="payrollPane-stafflist" class="hidden">
+      <div class="table-wrap" style="margin-bottom:20px">
+        <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">Staff List</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Role</th>
+              <th>Channel</th>
+              <th>Type</th>
+              <th>Comm/Order</th>
+              <th>Base Salary</th>
+              <th>收单追踪 Staff Name</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="staffListTableBody">
+            <tr><td colspan="8"><div class="empty"><div class="empty-text">Loading staff...</div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
 
     <!-- AUTO COMMISSION MATCHING TAB -->
     <div id="payrollPane-automatch" class="hidden">
@@ -4816,12 +4821,16 @@ function switchManagerTab(tab) {
 // reconciliation preview + bulk manual match tool), kept separate since
 // they're different workflows that happened to share a page before.
 function switchPayrollTab(tab) {
-  ['records', 'automatch'].forEach(t => {
+  ['records', 'stafflist', 'automatch'].forEach(t => {
     const pane = document.getElementById(`payrollPane-${t}`);
     const tabEl = document.getElementById(`payrollTab-${t}`);
     if (t === tab) { pane.classList.remove('hidden'); tabEl.classList.add('active'); }
     else { pane.classList.add('hidden'); tabEl.classList.remove('active'); }
   });
+  // Header buttons only make sense on their own tab — Record Payroll on
+  // the Payroll tab, Add Staff on the Staff List tab.
+  document.getElementById('btnRecordPayrollHeader').style.display = tab === 'records' ? '' : 'none';
+  document.getElementById('btnAddStaffHeader').style.display = tab === 'stafflist' ? '' : 'none';
 }
 
 // Refreshes everything on the Manager Sharing page — called on page load
