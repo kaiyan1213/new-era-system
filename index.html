@@ -619,11 +619,11 @@
 
     <div class="toolbar">
       <div class="toolbar-left">
-        <select id="mgrYear" onchange="loadManagerSharing(); loadMgrPayslips();">
+        <select id="mgrYear" onchange="loadManagerSharing(); loadMgrPayslips(); loadMgrAdjustments();">
           <option value="2025">2025</option>
           <option value="2026" selected>2026</option>
         </select>
-        <select id="mgrMonth" onchange="loadManagerSharing(); loadMgrPayslips();">
+        <select id="mgrMonth" onchange="loadManagerSharing(); loadMgrPayslips(); loadMgrAdjustments();">
           <option value="">All Months</option>
           <option value="1">January</option><option value="2">February</option>
           <option value="3">March</option><option value="4">April</option>
@@ -657,6 +657,69 @@
         </thead>
         <tbody id="mgrPayslipTableBody">
           <tr><td colspan="7"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="table-wrap" style="margin-bottom:20px">
+      <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <span>Acc Below — Manager Invoice (auto) + manual adjustments</span>
+        <button class="btn btn-primary btn-sm" onclick="openMgrAdjustmentModal()">Add Adjustment</button>
+      </div>
+      <div style="padding:10px 14px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)">
+        Manager Invoice is auto-computed per manager as the sum of each of their proxies' (Coway payslip − New Era invoice) for the period — the same PIC liability shown on the Directory page, kept with the manager instead of collected from the proxy directly. Manual adjustments (Claim/Mistake/Gift/Loan Claim/etc) are added on top: positive = manager receives, negative = manager owes. Applies to all 5 managers including Zehao, who has Acc Below but no Manager Comm pool share.
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Manager</th>
+            <th>Manager Invoice (auto)</th>
+            <th>Adjustments</th>
+            <th>Acc Below Total</th>
+          </tr>
+        </thead>
+        <tbody id="accBelowSummaryBody">
+          <tr><td colspan="4"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="table-wrap" style="margin-bottom:20px">
+      <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">
+        Acc Below — manual adjustment entries
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Manager</th>
+            <th>Month</th>
+            <th>Category</th>
+            <th>Description</th>
+            <th>Amount</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="mgrAdjustmentTableBody">
+          <tr><td colspan="6"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="table-wrap" style="margin-bottom:20px">
+      <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">
+        Total per manager (Manager Comm + Acc Below)
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Manager</th>
+            <th>Manager Comm</th>
+            <th>Acc Below</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody id="mgrGrandTotalBody">
+          <tr><td colspan="4"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
         </tbody>
       </table>
     </div>
@@ -1538,6 +1601,65 @@
   </div>
 </div>
 
+<!-- Manager Adjustment Entry Modal -->
+<div class="modal-bg hidden" id="modalMgrAdjustment">
+  <div class="modal">
+    <div class="modal-title">Add Acc Below Adjustment</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Positive amount = manager receives this much. Negative amount = manager owes/pays this much. This is added on top of the auto-computed Manager Invoice to get the manager's Acc Below total. Available for all 5 managers, including Zehao.</div>
+    <div class="form-grid">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Manager</label>
+          <select id="maManager" class="form-input">
+            <!-- filled by JS, includes all 5 managers -->
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Year</label>
+          <select id="maYear" class="form-input"><option value="2025">2025</option><option value="2026" selected>2026</option></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Month</label>
+          <select id="maMonth" class="form-input">
+            <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
+            <option value="4">Apr</option><option value="5">May</option><option value="6" selected>Jun</option>
+            <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
+            <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Category</label>
+          <select id="maCategory" class="form-input">
+            <option value="Claim">Claim</option>
+            <option value="Mistake">Mistake</option>
+            <option value="Gift">Gift</option>
+            <option value="Both Company Loan Claim">Both Company Loan Claim</option>
+            <option value="Alpha C Claim">Alpha C Claim</option>
+            <option value="Return Back">Return Back</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Amount (RM)</label>
+          <input type="number" id="maAmount" class="form-input" placeholder="e.g. 200 or -200" step="0.01">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description</label>
+        <input type="text" id="maDescription" class="form-input" placeholder="Optional notes">
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalMgrAdjustment')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveMgrAdjustment()">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Cost Entry Modal -->
 <div class="modal-bg hidden" id="modalCostEntry">
   <div class="modal">
@@ -1766,6 +1888,7 @@ async function sbDelete(table, filter) {
 
 function fmt(n) { return 'RM ' + parseFloat(n || 0).toLocaleString('en-MY', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function fmtNum(n) { return parseFloat(n || 0).toLocaleString('en-MY', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function r2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
 
 function showPage(page) {
   ['proxy','payroll','manager','pl','export','audit','upload','breakdown','setup','directory','bankdir'].forEach(p => {
@@ -1778,7 +1901,7 @@ function showPage(page) {
   event?.target?.classList.add('active');
   if (page === 'proxy') loadInvoices();
   if (page === 'payroll') loadPayroll();
-  if (page === 'manager') { loadManagerSharing(); loadMgrPayslips(); }
+  if (page === 'manager') { loadManagerSharing(); loadMgrPayslips(); loadMgrAdjustments(); }
   if (page === 'pl') loadPL();
   if (page === 'audit') loadAuditLog();
   if (page === 'breakdown') loadBreakdown();
@@ -3372,7 +3495,8 @@ async function loadManagers() {
 
 async function openManagerEntryModal() {
   await loadManagers();
-  document.getElementById('managerEntryFields').innerHTML = managerList.map(m => `
+  const poolManagers = managerList.filter(m => isPoolManager(m.name));
+  document.getElementById('managerEntryFields').innerHTML = poolManagers.map(m => `
     <div style="display:flex;align-items:center;gap:10px">
       <div style="font-weight:500;min-width:100px">${m.name}</div>
       <div style="font-size:11px;color:var(--muted);min-width:60px">${m.share_percentage}% share</div>
@@ -3388,22 +3512,28 @@ async function openManagerEntryModal() {
 // Pulls each manager's uploaded pool_contribution for the selected period
 // from nec_manager_payslips, sums all of them into one pool, then splits
 // that pool by each manager's share_percentage — this is the actual rule
-// (NOT each manager's own contribution times their own %).
+// (NOT each manager's own contribution times their own %). Restricted to
+// the 4 pool managers (isPoolManager) — Zehao has a 0% share_percentage
+// row in nec_managers (so he can receive Acc Below adjustments via the
+// same manager_id foreign key) but must never appear in this pool split,
+// even though 0% would mathematically be harmless — explicit exclusion
+// is safer than relying on his percentage always staying 0.
 async function loadMgrEntryPreview() {
   const year = parseInt(document.getElementById('meYear').value);
   const month = parseInt(document.getElementById('meMonth').value);
   if (!managerList.length) await loadManagers();
+  const poolManagers = managerList.filter(m => isPoolManager(m.name));
   let payslips = [];
   try {
     payslips = await sb('nec_manager_payslips', { filter: `year=eq.${year}&month=eq.${month}` });
   } catch(e) { /* table may not exist yet */ }
 
-  const pool = managerList.reduce((sum, m) => {
+  const pool = poolManagers.reduce((sum, m) => {
     const p = payslips.find(x => x.manager_id === m.id);
     return sum + parseFloat(p?.pool_contribution || 0);
   }, 0);
 
-  managerList.forEach(m => {
+  poolManagers.forEach(m => {
     const p = payslips.find(x => x.manager_id === m.id);
     const contrib = parseFloat(p?.pool_contribution || 0);
     const share = pool * (parseFloat(m.share_percentage) / 100);
@@ -3419,14 +3549,15 @@ async function loadMgrEntryPreview() {
 async function saveManagerSharing() {
   const year = parseInt(document.getElementById('meYear').value);
   const month = parseInt(document.getElementById('meMonth').value);
+  const poolManagers = managerList.filter(m => isPoolManager(m.name));
   try {
     const payslips = await sb('nec_manager_payslips', { filter: `year=eq.${year}&month=eq.${month}` });
-    const pool = managerList.reduce((sum, m) => {
+    const pool = poolManagers.reduce((sum, m) => {
       const p = payslips.find(x => x.manager_id === m.id);
       return sum + parseFloat(p?.pool_contribution || 0);
     }, 0);
     if (pool <= 0) return showToast('No manager payslips uploaded for this period yet', 'error');
-    for (const m of managerList) {
+    for (const m of poolManagers) {
       const amount = pool * (m.share_percentage / 100);
       await sb('nec_manager_sharing', {
         method: 'POST',
@@ -3437,6 +3568,7 @@ async function saveManagerSharing() {
     showToast('Manager sharing saved');
     await logAudit('CREATE', 'nec_manager_sharing', `Recorded pooled manager sharing for ${MONTHS[month]} ${year} — pool RM${pool.toFixed(2)}`);
     loadManagerSharing();
+    loadMgrAdjustments();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
@@ -3567,6 +3699,156 @@ async function deleteMgrPayslip(id) {
   loadMgrPayslips();
 }
 
+// ---- Acc Below: Manager Invoice (auto) + manual adjustments ----
+
+async function openMgrAdjustmentModal() {
+  await loadManagers();
+  const sel = document.getElementById('maManager');
+  // All 5 managers (including Zehao) can receive Acc Below adjustments —
+  // unlike the Manager Comm pool, which is pool-managers-only.
+  sel.innerHTML = managerList
+    .slice()
+    .sort((a,b) => MANAGER_ORDER.indexOf(a.name) - MANAGER_ORDER.indexOf(b.name))
+    .map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+  document.getElementById('maAmount').value = '';
+  document.getElementById('maDescription').value = '';
+  openModal('modalMgrAdjustment');
+}
+
+async function saveMgrAdjustment() {
+  const managerId = document.getElementById('maManager').value;
+  const year = parseInt(document.getElementById('maYear').value);
+  const month = parseInt(document.getElementById('maMonth').value);
+  const category = document.getElementById('maCategory').value;
+  const amount = parseFloat(document.getElementById('maAmount').value);
+  const description = document.getElementById('maDescription').value.trim();
+  if (!managerId) return showToast('Select a manager', 'error');
+  if (isNaN(amount) || amount === 0) return showToast('Enter a non-zero amount', 'error');
+  try {
+    await sb('nec_manager_adjustments', {
+      method: 'POST',
+      body: { manager_id: managerId, year, month, category, description: description || null, amount }
+    });
+    const mgrName = managerList.find(m => m.id === managerId)?.name || managerId;
+    await logAudit('CREATE', 'nec_manager_adjustments', `Added ${category} adjustment for ${mgrName} — ${MONTHS[month]} ${year} — RM${amount.toFixed(2)}`);
+    closeModal('modalMgrAdjustment');
+    showToast('Adjustment saved');
+    loadMgrAdjustments();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteMgrAdjustment(id) {
+  if (!confirm('Delete this adjustment?')) return;
+  await sbDelete('nec_manager_adjustments', `id=eq.${id}`);
+  showToast('Deleted');
+  loadMgrAdjustments();
+}
+
+// Computes, for every manager in MANAGER_ORDER (all 5, including Zehao),
+// the auto Manager Invoice (sum of Math.max(0, payslip-invoice) across
+// that manager's proxies for the selected period — the same PIC liability
+// formula used on the Directory page) plus the sum of manual adjustments
+// for that manager/period, then renders three tables: the Acc Below
+// summary, the raw adjustment entries list, and the final grand total
+// (Manager Comm + Acc Below) per manager.
+async function loadMgrAdjustments() {
+  const year = parseInt(document.getElementById('mgrYear').value);
+  const monthRaw = document.getElementById('mgrMonth').value;
+  const month = monthRaw ? parseInt(monthRaw) : null;
+  const summaryBody = document.getElementById('accBelowSummaryBody');
+  const entriesBody = document.getElementById('mgrAdjustmentTableBody');
+  const grandTotalBody = document.getElementById('mgrGrandTotalBody');
+  if (!summaryBody) return;
+
+  try {
+    if (!managerList.length) await loadManagers();
+    await loadProxies();
+
+    // Manager Invoice (auto): same PIC liability formula as Directory page,
+    // grouped by proxy_accounts.manager (text name), summed per manager.
+    let invFilter = `year=eq.${year}`;
+    if (month) invFilter += `&month=eq.${month}`;
+    const invoices = await sb('proxy_invoices', {
+      filter: invFilter,
+      select: 'id,proxy_id,coway_payslip_amount,invoice_amount'
+    });
+    const proxyManagerMap = {};
+    proxyList.forEach(p => { proxyManagerMap[p.id] = p.manager; });
+    const managerInvoiceTotals = {};
+    MANAGER_ORDER.forEach(m => managerInvoiceTotals[m] = 0);
+    invoices.forEach(inv => {
+      const mgrName = proxyManagerMap[inv.proxy_id];
+      if (mgrName && MANAGER_ORDER.includes(mgrName)) {
+        const picAmt = Math.max(0, parseFloat(inv.coway_payslip_amount||0) - parseFloat(inv.invoice_amount||0));
+        managerInvoiceTotals[mgrName] = r2(managerInvoiceTotals[mgrName] + picAmt);
+      }
+    });
+
+    // Manual adjustments, grouped by manager_id
+    let adjFilter = `year=eq.${year}`;
+    if (month) adjFilter += `&month=eq.${month}`;
+    const adjustments = await sb('nec_manager_adjustments', { filter: adjFilter });
+
+    // Manager Comm (for the grand total table) — only pool managers have this
+    let commFilter = `year=eq.${year}`;
+    if (month) commFilter += `&month=eq.${month}`;
+    const commRecords = await sb('nec_manager_sharing', { filter: commFilter });
+
+    const orderedManagers = MANAGER_ORDER.map(name => managerList.find(m => m.name === name)).filter(Boolean);
+
+    // Acc Below summary table
+    summaryBody.innerHTML = orderedManagers.map(m => {
+      const invoiceAmt = managerInvoiceTotals[m.name] || 0;
+      const mgrAdjustments = adjustments.filter(a => a.manager_id === m.id);
+      const adjTotal = r2(mgrAdjustments.reduce((s,a) => s + parseFloat(a.amount||0), 0));
+      const accBelowTotal = r2(invoiceAmt + adjTotal);
+      return `<tr>
+        <td class="td-name">${m.name}</td>
+        <td class="td-mono">${fmt(invoiceAmt)}</td>
+        <td class="td-mono" style="color:${adjTotal < 0 ? 'var(--red)' : 'var(--green)'}">${adjTotal >= 0 ? '+' : ''}${fmt(adjTotal)}</td>
+        <td class="td-mono" style="font-weight:700">${fmt(accBelowTotal)}</td>
+      </tr>`;
+    }).join('');
+
+    // Manual adjustment entries table
+    if (adjustments.length === 0) {
+      entriesBody.innerHTML = `<tr><td colspan="6"><div class="empty"><div class="empty-text">No manual adjustments for this period</div></div></td></tr>`;
+    } else {
+      entriesBody.innerHTML = adjustments.map(a => {
+        const mgr = managerList.find(m => m.id === a.manager_id) || { name: 'Unknown' };
+        const amt = parseFloat(a.amount||0);
+        return `<tr>
+          <td class="td-name">${mgr.name}</td>
+          <td class="td-mono">${MONTHS[a.month]} ${a.year}</td>
+          <td>${a.category}</td>
+          <td style="color:var(--muted);font-size:12px">${a.description || '—'}</td>
+          <td class="td-mono" style="color:${amt < 0 ? 'var(--red)' : 'var(--green)'}">${amt >= 0 ? '+' : ''}${fmt(amt)}</td>
+          <td><button class="btn btn-danger btn-sm" onclick="deleteMgrAdjustment('${a.id}')">✕</button></td>
+        </tr>`;
+      }).join('');
+    }
+
+    // Grand total table: Manager Comm + Acc Below
+    grandTotalBody.innerHTML = orderedManagers.map(m => {
+      const commRows = commRecords.filter(r => r.manager_id === m.id);
+      const commTotal = r2(commRows.reduce((s,r) => s + parseFloat(r.amount_received||0), 0));
+      const invoiceAmt = managerInvoiceTotals[m.name] || 0;
+      const mgrAdjustments = adjustments.filter(a => a.manager_id === m.id);
+      const adjTotal = r2(mgrAdjustments.reduce((s,a) => s + parseFloat(a.amount||0), 0));
+      const accBelowTotal = r2(invoiceAmt + adjTotal);
+      const grandTotal = r2(commTotal + accBelowTotal);
+      return `<tr>
+        <td class="td-name">${m.name}</td>
+        <td class="td-mono">${fmt(commTotal)}</td>
+        <td class="td-mono">${fmt(accBelowTotal)}</td>
+        <td class="td-mono" style="font-weight:700;color:var(--accent)">${fmt(grandTotal)}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    summaryBody.innerHTML = `<tr><td colspan="4"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Table not set up yet. Go to Setup tab.</div></div></td></tr>`;
+  }
+}
+
 async function loadManagerSharing() {
   const year = document.getElementById('mgrYear').value;
   const month = document.getElementById('mgrMonth').value;
@@ -3576,8 +3858,15 @@ async function loadManagerSharing() {
     if (month) filter += `&month=eq.${month}`;
     const records = await sb('nec_manager_sharing', { filter });
 
-    // Update stat cards
-    managerList.forEach((m, i) => {
+    // Update stat cards (4 slots — pool managers only, Zehao excluded since
+    // he has no Manager Comm pool share and there's no mgr4 card). Sort
+    // explicitly by MANAGER_ORDER so the index mapping to mgr0-mgr3 (which
+    // correspond to fixed "Kai Yan"/"Chloe"/"Carine"/"Jess" card labels in
+    // the HTML) doesn't depend on DB row insertion order.
+    const poolManagersForStats = managerList
+      .filter(m => isPoolManager(m.name))
+      .sort((a,b) => MANAGER_ORDER.indexOf(a.name) - MANAGER_ORDER.indexOf(b.name));
+    poolManagersForStats.forEach((m, i) => {
       const mRecords = records.filter(r => r.manager_id === m.id);
       const total = mRecords.reduce((s,r) => s + parseFloat(r.amount_received||0), 0);
       if (document.getElementById(`mgr${i}`)) {
@@ -3613,6 +3902,7 @@ async function deleteManagerRecord(id) {
   await sbDelete('nec_manager_sharing', `id=eq.${id}`);
   showToast('Deleted');
   loadManagerSharing();
+  loadMgrAdjustments();
 }
 
 // ============ P&L ============
@@ -3942,6 +4232,26 @@ CREATE TABLE IF NOT EXISTS nec_manager_payslips (
   UNIQUE(manager_id, year, month)
 );
 
+-- Acc Below manual adjustments: per-manager, per-period entries for items
+-- like Claim/Mistake/Gift/Both-Company-Loan-Claim/Alpha-C-Claim/Return-Back
+-- that aren't automated. Positive amount = manager receives this much;
+-- negative amount = manager owes/pays out this much. This is ADDED to the
+-- auto-computed Manager Invoice (sum of Math.max(0, payslip-invoice) across
+-- this manager's proxies for the period) to get the manager's Acc Below
+-- total. Note: this table intentionally does NOT include an "Outsider"
+-- category — that concept belongs to individual staff/proxy commission
+-- calculation (Payroll page, commission_type='outsider'), not here.
+CREATE TABLE IF NOT EXISTS nec_manager_adjustments (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  manager_id uuid REFERENCES nec_managers(id),
+  year int NOT NULL,
+  month int NOT NULL,
+  category text NOT NULL,
+  description text,
+  amount numeric(10,2) NOT NULL,
+  created_at timestamptz DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS nec_pl_costs (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   year int NOT NULL,
@@ -4010,6 +4320,7 @@ const DEFAULT_MANAGERS = [
   { name: 'Chloe', share_percentage: 28 },
   { name: 'Carine', share_percentage: 28 },
   { name: 'Jess', share_percentage: 15 },
+  { name: 'Zehao', share_percentage: 0 },
 ];
 
 function loadSetup() {
@@ -4059,7 +4370,7 @@ async function saveManagers() {
 async function testConnection() {
   const result = document.getElementById('connTestResult');
   result.textContent = 'Testing...';
-  const tables = ['proxy_accounts','proxy_invoices','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_manager_payslips','nec_pl_costs','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads','nec_order_assignments','monthly_config'];
+  const tables = ['proxy_accounts','proxy_invoices','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_manager_payslips','nec_manager_adjustments','nec_pl_costs','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads','nec_order_assignments','monthly_config'];
   const results = [];
   for (const t of tables) {
     try {
