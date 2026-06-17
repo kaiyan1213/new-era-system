@@ -376,11 +376,23 @@ function parseCowayPayslip(text) {
       }
     }
 
-    // Find section subtotal
+    // Find section subtotal (backward search — last standalone decimal)
     let subtotal = 0;
     for (let j = sLines.length-1; j >= 0; j--) {
       const m = sLines[j].match(/^([\d,]+\.\d{2})$/);
       if (m) { subtotal = pn(m[1]); break; }
+    }
+
+    // For "Overidding" sections, the section total sits at the VERY START of
+    // sLines (first standalone decimal), not at the end. Using the backward
+    // search (`subtotal`) gives the wrong value because an intermediate
+    // sub-section total can appear later in the same section's text block.
+    let overridingLeadTotal = 0;
+    if (sec.name.includes('Overidding')) {
+      for (let j = 0; j < sLines.length; j++) {
+        const m = sLines[j].match(/^([\d,]+\.\d{2})$/);
+        if (m) { overridingLeadTotal = pn(m[1]); break; }
+      }
     }
 
     // Pair and accumulate
@@ -396,14 +408,16 @@ function parseCowayPayslip(text) {
       const trailing = numRows.filter(n => n.months > 1).reduce((s,n) => r2(s+n.amount), 0);
       passive_and_tbc_total = r2(passive_and_tbc_total + trailing);
       newAmt.forEach(pairMonths1);
-      // For "Overidding" sections specifically (e.g. the "Other Installment
-      // Month" variant, whose section-ending subtotal is computed above as
-      // `subtotal`), also capture it into overriding_1st_install_total —
-      // this is one of the two figures (with allowance_total) used for a
-      // manager's Manager Comm pool. Doesn't affect the bonus-order
-      // pairing logic above, which is unchanged.
+      // For "Overidding" sections (the "Other Installment Month" variant —
+      // the "1st Installment Month" variant is already handled in the
+      // special-case block above and never reaches here), capture the
+      // section total into overriding_1st_install_total. Use the forward
+      // scan (overridingLeadTotal = first standalone decimal in sLines)
+      // rather than the backward scan (subtotal = last standalone decimal),
+      // because the section total always appears at the START of the block
+      // while intermediate sub-section values can appear near the end.
       if (sec.name.includes('Overidding')) {
-        overriding_1st_install_total = r2(overriding_1st_install_total + subtotal);
+        overriding_1st_install_total = r2(overriding_1st_install_total + overridingLeadTotal);
       }
     } else if (isOtherInstall) {
       // The "1st Installment Month" and "Other Installment Month" sections share one
