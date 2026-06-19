@@ -314,7 +314,7 @@
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost" onclick="openAddProxyModal()">+Add Acc</button>
-        <button class="btn btn-ghost" onclick="printAllInvoices()">📥 Save All as PDF</button>
+        <button class="btn btn-ghost" onclick="printAllInvoices()">📦 Save All as ZIP</button>
         <button class="btn btn-ghost" onclick="showPage('upload')" style="color:var(--yellow);border-color:rgba(245,158,11,0.3)">⬆ Bulk Upload Payslips</button>
         <button class="btn btn-primary" onclick="openNewInvoiceModal()">New Invoice Entry</button>
       </div>
@@ -2922,8 +2922,21 @@ async function previewInvoice(id) {
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
-// Downloads ALL filtered invoices as one PDF, grouped by manager.
-// Each invoice gets its own page; a manager-separator line precedes each group.
+// Loads JSZip from cdnjs on demand.
+function loadJSZip() {
+  if (window.JSZip) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('Failed to load JSZip'));
+    document.head.appendChild(s);
+  });
+}
+
+// Downloads ALL filtered invoices as a ZIP file.
+// Inside the ZIP: one folder per manager named "{Manager} Below Acc",
+// each containing one PDF per proxy named after the acc holder.
 async function printAllInvoices() {
   const year = document.getElementById('filterYear').value;
   const month = document.getElementById('filterMonth').value;
@@ -2937,10 +2950,11 @@ async function printAllInvoices() {
     });
     if (!invoices.length) return showToast('No invoices for this filter', 'error');
 
-    showToast(`Generating PDF for ${invoices.length} invoices…`);
+    showToast(`Building ZIP for ${invoices.length} invoices…`);
     await loadJsPDF();
+    await loadJSZip();
 
-    // Group by manager, MANAGER_ORDER then alphabetical within
+    // Group by manager
     const groups = {};
     invoices.forEach(inv => {
       const proxy = proxyList.find(p => p.id === inv.proxy_id) || { name: 'Unknown', manager: null };
@@ -2950,25 +2964,29 @@ async function printAllInvoices() {
     });
     const groupOrder = [...MANAGER_ORDER.filter(m => groups[m]), ...Object.keys(groups).filter(m => !MANAGER_ORDER.includes(m)).sort()];
 
-    const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-    let firstPage = true;
+    const zip = new JSZip();
 
-    groupOrder.forEach(mgr => {
+    for (const mgr of groupOrder) {
+      const folderName = `${mgr} Below Acc`;
+      const folder = zip.folder(folderName);
       const rows = groups[mgr].sort((a,b) => a.proxy.name.localeCompare(b.proxy.name));
-      rows.forEach(({ inv, proxy }) => {
-        if (!firstPage) doc.addPage();
-        firstPage = false;
-        // Small manager label at very top of each invoice page in this group
-        const w = doc.internal.pageSize.getWidth();
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(79, 124, 255);
-        doc.text(`${mgr} (PIC)`, w / 2, 10, { align: 'center' });
+      for (const { inv, proxy } of rows) {
+        const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
         drawInvoiceOnPDF(doc, inv, proxy);
-      });
-    });
+        const blob = doc.output('arraybuffer');
+        const safeName = (proxy.name || 'Invoice').replace(/[/\\?%*:|"<>]/g, '-');
+        folder.file(`${safeName}.pdf`, blob);
+      }
+    }
 
     const periodLabel = month ? `${MONTH_FULL[parseInt(month)]} ${year}` : year;
-    doc.save(`NEC Invoices ${periodLabel}.pdf`);
-    showToast(`Downloaded ${invoices.length} invoices`);
+    const content = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(content);
+    a.download = `NEC Invoices ${periodLabel}.zip`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showToast(`Downloaded ${invoices.length} invoices as ZIP`);
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
