@@ -6095,6 +6095,26 @@ function renderBreakdownSidebar() {
   }).join('');
 }
 
+// Sets ALL orders in a breakdown record to the same team in one shot —
+// fetches the current categories_json, maps every order to the new team,
+// writes back, then re-renders the card so the dropdowns update visually.
+async function setAllBreakdownTeams(breakdownId, team) {
+  try {
+    const [rec] = await sb('nec_payslip_breakdown', { filter: `id=eq.${breakdownId}`, select: 'id,categories_json' });
+    if (!rec) return showToast('Record not found', 'error');
+    const orders = JSON.parse(rec.categories_json || '[]');
+    const updated = orders.map(o => ({ ...o, team }));
+    await fetch(`${SUPABASE_URL}/rest/v1/nec_payslip_breakdown?id=eq.${breakdownId}`, {
+      method: 'PATCH',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ categories_json: JSON.stringify(updated) })
+    });
+    await logAudit('UPDATE', 'nec_payslip_breakdown', `All orders in breakdown ${breakdownId} → ${team}`);
+    showToast(`All orders → ${team} ✓`);
+    showBreakdown(breakdownId); // re-render the card to reflect all dropdowns updated
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
 // Patches one order's team tag in nec_payslip_breakdown.categories_json.
 // Fetches the current record, updates the target order_no, writes back.
 // Called from per-order Team dropdowns in the Breakdown page.
@@ -6161,11 +6181,18 @@ async function showBreakdown(id) {
         acTotal > 0 ? `<span style="color:#f97316">AC RM${fmtNum(acTotal)}</span>` : '',
         osTotal > 0 ? `<span style="color:var(--muted)">OS RM${fmtNum(osTotal)} (not billed)</span>` : '',
       ].filter(Boolean).join(' · ');
+      const setAllBtns = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <span style="font-size:11px;color:var(--muted)">Set all orders:</span>
+        <button onclick="setAllBreakdownTeams('${bdId}','New Era')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #4f7cff;color:#4f7cff;background:transparent;cursor:pointer">New Era</button>
+        <button onclick="setAllBreakdownTeams('${bdId}','Alpha C')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #f97316;color:#f97316;background:transparent;cursor:pointer">Alpha C</button>
+        <button onclick="setAllBreakdownTeams('${bdId}','Outsider')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid var(--muted);color:var(--muted);background:transparent;cursor:pointer">Outsider</button>
+      </div>`;
       catHTML = rawCats.length > 0 ? `<div class="cat-section">
         <div class="cat-section-title">
           <span>New Orders (${rawCats.length} units)</span>
           <span style="color:var(--green)">RM ${fmtNum(ordersTotal)}</span>
         </div>
+        ${setAllBtns}
         ${summaryParts ? `<div style="font-size:11px;margin-bottom:6px">${summaryParts}</div>` : ''}
         <div class="order-row header" style="font-size:10px">
           <span>Order No</span><span>Customer</span><span>Product</span><span>Months</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team</span>
