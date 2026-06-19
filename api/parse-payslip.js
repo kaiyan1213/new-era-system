@@ -77,10 +77,19 @@ function parseCowayPayslip(text) {
       // App Type is usually "REN" (rental new order) but can be "INS" (outright
       // sale, e.g. "Sales Commission (Outright) - PV" section like KOK YIAT LEE's
       // 2 air-purifier units) — both represent a new order that should be counted.
-      const m = l.match(/^(\d{7,})([A-Z].+?)(REN|INS)(.*?)(\d{1,2})\s*$/);
+      const m = l.match(/^(\d{7,})([A-Z].+?)(REN|INS)/);
       if (m) {
+        // Optionally extract product description and months count from
+        // the rest of the line after the REN/INS type token. The months
+        // digit sits at the very end; everything between REN/INS and
+        // that digit is the product. Some rows have no product/months
+        // suffix at all — that's fine, we still track the order.
+        const rest = l.slice(m[0].length).trim();
+        const monthsM = rest.match(/^(.*?)\s*(\d{1,2})\s*$/);
+        const product = monthsM ? monthsM[1].trim() : rest;
+        const months = monthsM ? parseInt(monthsM[2]) : null;
         newOrderNos.add(m[1]);
-        bonusOrders.push({ order_no: m[1], customer_name: m[2].trim(), product: m[4].trim(), months: parseInt(m[5]) });
+        bonusOrders.push({ order_no: m[1], customer_name: m[2].trim(), product, months });
       }
     }
   }
