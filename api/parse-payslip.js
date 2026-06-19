@@ -197,16 +197,17 @@ function parseCowayPayslip(text) {
   // Find section boundaries. Coway's PDF text extraction is inconsistent
   // about whitespace inside section headers — e.g. "1st  Installment" with
   // a double space sometimes, single space other times — so compare with
-  // whitespace collapsed to avoid silently missing a section occurrence
-  // (which previously caused some "Overidding ... 1st Installment Month"
-  // sections to be swallowed into a neighboring section instead of being
-  // recognized on their own).
+  // whitespace collapsed to avoid silently missing a section occurrence.
+  // Case is also inconsistently preserved (e.g. "ALLOWANCE" vs "Allowance"),
+  // so all comparisons are done case-insensitively.
   const normWs = s => s.replace(/\s+/g, ' ').trim();
   const secBounds = [];
   for (let i = 0; i < lines.length; i++) {
     const normLine = normWs(lines[i]);
+    const normLineLower = normLine.toLowerCase();
     for (const s of SECTION_STARTS) {
-      if (normLine === s || normLine.includes(s)) {
+      const sLower = s.toLowerCase();
+      if (normLine === s || normLine.includes(s) || normLineLower === sLower || normLineLower.includes(sLower)) {
         secBounds.push({ name: s, idx: i }); break;
       }
     }
@@ -250,38 +251,47 @@ function parseCowayPayslip(text) {
     const sLines = lines.slice(sec.idx + 1, nextIdx);
 
     if (sec.name === 'Allowance') {
-      // pdf-parse layout: amounts appear BEFORE the Allowance header; look
-      // backward to collect them. Labels appear AFTER the header in
-      // sLines, each on its own line (not merged with the amount).
+      // Primary: amounts appear BEFORE the Allowance header in most layouts.
       const allowHeaderIdx = sec.idx;
       const amountsBefore = [];
       for (let k = allowHeaderIdx - 1; k >= Math.max(0, allowHeaderIdx - 15); k--) {
         const m = lines[k].match(/^\s*([\d,]+\.\d{2})\s*$/);
         if (m) amountsBefore.unshift(pn(m[1]));
-        else if (lines[k].includes('Food Supplements') || lines[k].includes('Order No')) break;
+        else if (lines[k].toLowerCase().includes('food supplements') || lines[k].includes('Order No')) break;
       }
-      if (amountsBefore.length > 1) {
-        const maxVal = Math.max(...amountsBefore);
-        const indivAmounts = amountsBefore.filter(n => n !== maxVal);
-        // Collect description labels from sLines: any non-numeric,
-        // non-header line before the first order-number-like line.
-        const descLabels = [];
+      // Fallback: amounts appear AFTER the Allowance header in some layouts.
+      const amountsAfter = [];
+      const labelsAfter = [];
+      for (const l of sLines) {
+        if (l === 'Description' || l === 'Amount') continue;
+        if (l.match(/^\d{7,}/)) break; // order-number line → end of section
+        const am = l.match(/^([\d,]+\.\d{2})$/);
+        if (am) { amountsAfter.push(pn(am[1])); continue; }
+        if (l.match(/^\d+$/)) continue;
+        labelsAfter.push(l);
+      }
+      const rawAmounts = amountsBefore.length > 0 ? amountsBefore : amountsAfter;
+      // Collect description labels from sLines (same source for both paths)
+      const collectLabels = () => {
+        const dl = [];
         for (const l of sLines) {
           if (l === 'Description' || l === 'Amount') continue;
           if (l.match(/^[\d,]+\.\d{2}$/) || l.match(/^\d+$/)) continue;
-          if (l.match(/^\d{4,}/)) break;
-          descLabels.push(l);
+          if (l.match(/^\d{7,}/)) break;
+          dl.push(l);
         }
+        return dl;
+      };
+      if (rawAmounts.length > 1) {
+        const maxVal = Math.max(...rawAmounts);
+        const indivAmounts = rawAmounts.filter(n => n !== maxVal);
+        const descLabels = collectLabels();
         descLabels.forEach((desc, i) => {
           if (i < indivAmounts.length) allowances.push({ description: desc, amount: indivAmounts[i] });
         });
-      } else if (amountsBefore.length === 1) {
-        for (const l of sLines) {
-          if (l === 'Description' || l === 'Amount' || l.match(/^[\d,]+\.?\d*$/) || l.match(/^\d+$/)) continue;
-          if (l.match(/^\d{4,}/)) break;
-          allowances.push({ description: l, amount: amountsBefore[0] });
-          break;
-        }
+      } else if (rawAmounts.length === 1) {
+        const descLabels = collectLabels();
+        allowances.push({ description: descLabels[0] || 'Allowance', amount: rawAmounts[0] });
       }
       continue;
     }
