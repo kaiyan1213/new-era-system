@@ -2840,13 +2840,17 @@ async function previewInvoice(id) {
     await loadHtml2Pdf();
 
     const el = document.createElement('div');
-    el.style.cssText = 'position:fixed;left:-9999px;top:0;width:700px;background:#fff;font-family:Inter,sans-serif;padding:40px';
-    el.innerHTML = `<style>${INVOICE_PRINT_STYLE}</style>${html}`;
+    // position:fixed is a known html2canvas bug that causes blank output —
+    // use position:absolute with a large negative left offset instead.
+    el.style.cssText = 'position:absolute;left:-9999px;top:0;width:740px;background:#fff;font-family:Inter,sans-serif;padding:40px;box-sizing:border-box';
+    el.innerHTML = `<style>${INVOICE_PRINT_STYLE.replace(/var\(--[^)]+\)/g, '#333')}</style>${html}`;
     document.body.appendChild(el);
+    // Short delay so the browser paints the element before html2canvas captures it
+    await new Promise(r => setTimeout(r, 200));
     await html2pdf().set({
       filename,
       image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
+      html2canvas: { scale: 2, useCORS: true, logging: false },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
       pagebreak: { mode: 'avoid-all' }
     }).from(el).save();
@@ -2897,13 +2901,14 @@ async function printAllInvoices() {
     const filename = `NEC Invoices ${periodLabel}.pdf`;
 
     const el = document.createElement('div');
-    el.style.cssText = 'position:fixed;left:-9999px;top:0;width:750px;background:#fff;font-family:Inter,sans-serif';
-    el.innerHTML = `<style>${INVOICE_PRINT_STYLE} .invoice-preview{box-shadow:none;border:1px solid #eee}</style>${pagesHtml}`;
+    el.style.cssText = 'position:absolute;left:-9999px;top:0;width:760px;background:#fff;font-family:Inter,sans-serif;box-sizing:border-box';
+    el.innerHTML = `<style>${INVOICE_PRINT_STYLE.replace(/var\(--[^)]+\)/g, '#333')} .invoice-preview{box-shadow:none;border:1px solid #eee}</style>${pagesHtml}`;
     document.body.appendChild(el);
+    await new Promise(r => setTimeout(r, 300));
     await html2pdf().set({
       filename,
       image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
+      html2canvas: { scale: 2, useCORS: true, logging: false },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
       pagebreak: { mode: 'css', before: '[style*="page-break-after"]' }
     }).from(el).save();
