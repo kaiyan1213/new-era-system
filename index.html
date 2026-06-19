@@ -235,7 +235,7 @@
   .breakdown-content { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; overflow-y: auto; max-height: calc(100vh - 200px); }
   .cat-section { margin-bottom: 20px; }
   .cat-section-title { font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; padding: 8px 0; border-bottom: 1px solid var(--border); margin-bottom: 8px; display: flex; justify-content: space-between; }
-  .order-row { display: grid; grid-template-columns: 110px 1fr 120px 50px 80px 80px 90px; gap: 8px; font-size: 11px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.04); align-items: center; }
+  .order-row { display: grid; grid-template-columns: 110px 1fr 120px 50px 80px 80px 90px 80px; gap: 8px; font-size: 11px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.04); align-items: center; }
   .order-row:last-child { border-bottom: none; }
   .order-row.header { color: var(--muted); font-weight: 600; font-size: 10px; text-transform: uppercase; }
 </style>
@@ -873,8 +873,13 @@
       </div>
     </div>
 
+    <!-- By Team cards -->
+    <div class="section-title" style="margin-top:8px">By Team</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px" id="plTeams">
+      <!-- filled by JS -->
+    </div>
+
     <!-- Channel P&L -->
-    <div class="section-title" style="margin-top:8px">By Channel</div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:28px" id="plChannels">
       <!-- filled by JS -->
     </div>
@@ -1492,6 +1497,16 @@
       </div>
       <div class="form-row">
         <div class="form-group">
+          <label class="form-label">Company Team</label>
+          <select id="editStaffTeam" class="form-input">
+            <option value="New Era">New Era</option>
+            <option value="Alpha C">Alpha C</option>
+          </select>
+        </div>
+        <div class="form-group"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
           <label class="form-label">Commission per Order (RM)</label>
           <input type="number" id="editStaffComm" class="form-input" placeholder="0.00">
         </div>
@@ -1821,6 +1836,14 @@
             <option value="DM">DM</option><option value="TM">TM</option>
             <option value="XHS">XHS</option><option value="OTHER">Other Channel</option>
             <option value="SHARED">SHARED (company-wide)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Company Team</label>
+          <select id="ceTeam" class="form-input">
+            <option value="">Shared (both teams)</option>
+            <option value="New Era">New Era</option>
+            <option value="Alpha C">Alpha C</option>
           </select>
         </div>
       </div>
@@ -3149,6 +3172,7 @@ async function openEditStaffModal(id) {
   document.getElementById('editStaffRole').value = s.role || '';
   document.getElementById('editStaffType').value = s.staff_type || 'sales';
   document.getElementById('editStaffChannel').value = s.channel || 'DM';
+  document.getElementById('editStaffTeam').value = s.company_team || 'New Era';
   document.getElementById('editStaffComm').value = s.commission_per_order || 0;
   document.getElementById('editStaffSalary').value = s.base_salary || 0;
   document.getElementById('editStaffLeadName').value = s.lead_staff_name || '';
@@ -3170,6 +3194,7 @@ async function saveEditStaff() {
     role: document.getElementById('editStaffRole').value,
     staff_type: document.getElementById('editStaffType').value,
     channel: document.getElementById('editStaffChannel').value,
+    company_team: document.getElementById('editStaffTeam').value,
     commission_per_order: parseFloat(document.getElementById('editStaffComm').value) || 0,
     base_salary: parseFloat(document.getElementById('editStaffSalary').value) || 0,
     lead_staff_name: document.getElementById('editStaffLeadName').value.trim() || null,
@@ -5012,17 +5037,20 @@ async function loadPL() {
   try {
     let invFilter = `year=eq.${year}`;
     if (month) invFilter += `&month=eq.${month}`;
-    const invoices = await sb('proxy_invoices', { filter: invFilter, select: 'proxy_id,invoice_amount' });
-    const proxies = await sb('proxy_accounts', { select: 'id,channel' });
+    const invoices = await sb('proxy_invoices', { filter: invFilter, select: 'proxy_id,invoice_amount,company_team' });
+    const proxies = await sb('proxy_accounts', { select: 'id,channel,company_team' });
 
     const costs = await sb('nec_pl_costs', { filter: invFilter });
 
-    // Revenue by channel
+    // Revenue by channel AND by team
     const revByChannel = { DM:0, TM:0, XHS:0, OTHER:0 };
+    const revByTeam = { 'New Era':0, 'Alpha C':0 };
     for (const inv of invoices) {
       const proxy = proxies.find(p => p.id === inv.proxy_id);
       const ch = proxy?.channel || 'OTHER';
+      const tm = inv.company_team || proxy?.company_team || 'New Era';
       revByChannel[ch] = (revByChannel[ch] || 0) + parseFloat(inv.invoice_amount || 0);
+      revByTeam[tm] = (revByTeam[tm] || 0) + parseFloat(inv.invoice_amount || 0);
     }
     const totalRev = Object.values(revByChannel).reduce((s,v) => s+v, 0);
 
@@ -5041,6 +5069,35 @@ async function loadPL() {
     const mgEl = document.getElementById('plMargin');
     mgEl.textContent = margin.toFixed(1) + '%';
     mgEl.style.color = margin >= 20 ? 'var(--green)' : margin >= 0 ? 'var(--yellow)' : 'var(--red)';
+
+    // By Team cards
+    const TEAMS = ['New Era', 'Alpha C'];
+    const costByTeam = {};
+    costs.forEach(c => {
+      const t = c.company_team || null;
+      if (t) costByTeam[t] = (costByTeam[t]||0) + parseFloat(c.amount||0);
+      else {
+        // Shared costs (no team) split equally
+        TEAMS.forEach(tm => { costByTeam[tm] = (costByTeam[tm]||0) + parseFloat(c.amount||0) / TEAMS.length; });
+      }
+    });
+    const teamColors = { 'New Era': '#4f7cff', 'Alpha C': '#f97316' };
+    document.getElementById('plTeams').innerHTML = TEAMS.map(tm => {
+      const rev = revByTeam[tm] || 0;
+      const cost = costByTeam[tm] || 0;
+      const net = rev - cost;
+      const pct = totalRev > 0 ? (rev / totalRev * 100).toFixed(1) : '0.0';
+      return `<div class="stat-card">
+        <div class="stat-label" style="color:${teamColors[tm]};font-weight:700">${tm}</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">${pct}% of total revenue</div>
+        <div style="display:grid;gap:6px;font-size:12px">
+          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Revenue</span><span style="font-family:var(--mono);color:var(--green)">${fmt(rev)}</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Costs</span><span style="font-family:var(--mono);color:var(--red)">${fmt(cost)}</span></div>
+          <div style="height:1px;background:var(--border);margin:2px 0"></div>
+          <div style="display:flex;justify-content:space-between"><span style="font-weight:600">Net</span><span style="font-family:var(--mono);font-weight:700;color:${net>=0?'var(--green)':'var(--red)'}">${fmt(net)}</span></div>
+        </div>
+      </div>`;
+    }).join('');
 
     // Channel cards
     const sharedCostPerChannel = costByChannel.SHARED / 4;
@@ -5086,6 +5143,7 @@ async function saveCostEntry() {
     year: parseInt(document.getElementById('ceYear').value),
     month: parseInt(document.getElementById('ceMonth').value),
     channel: document.getElementById('ceChannel').value,
+    company_team: document.getElementById('ceTeam').value || null,
     category: document.getElementById('ceCategory').value,
     description: document.getElementById('ceDesc').value,
     amount: parseFloat(document.getElementById('ceAmount').value),
@@ -5215,6 +5273,7 @@ CREATE TABLE IF NOT EXISTS proxy_accounts (
 ALTER TABLE proxy_accounts ADD COLUMN IF NOT EXISTS manager text;
 ALTER TABLE proxy_accounts ADD COLUMN IF NOT EXISTS relationship text;
 ALTER TABLE proxy_accounts ADD COLUMN IF NOT EXISTS direct text;
+ALTER TABLE proxy_accounts ADD COLUMN IF NOT EXISTS company_team text DEFAULT 'New Era';
 -- True for the 4 pool managers' OWN Coway accounts (KY/Chloe/Carine/
 -- Jess). Their payslips already feed Manager Comm separately via the
 -- dedicated Manager Payslip upload (nec_manager_payslips) — they aren't
@@ -5239,6 +5298,8 @@ CREATE TABLE IF NOT EXISTS proxy_invoices (
 );
 
 ALTER TABLE proxy_invoices ADD COLUMN IF NOT EXISTS payment_date date;
+ALTER TABLE proxy_invoices ADD COLUMN IF NOT EXISTS company_team text DEFAULT 'New Era';
+ALTER TABLE nec_pl_costs ADD COLUMN IF NOT EXISTS company_team text;
 
 CREATE TABLE IF NOT EXISTS nec_staff (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -5256,6 +5317,7 @@ CREATE TABLE IF NOT EXISTS nec_staff (
 
 ALTER TABLE nec_staff ADD COLUMN IF NOT EXISTS lead_staff_name text;
 ALTER TABLE nec_staff ADD COLUMN IF NOT EXISTS epf_applicable boolean DEFAULT false;
+ALTER TABLE nec_staff ADD COLUMN IF NOT EXISTS company_team text DEFAULT 'New Era';
 -- NOTE: Channel (DM/TM) on a sales staff IS the commission algorithm —
 -- there is intentionally no separate "default commission algorithm"
 -- field. A staff's Channel determines which formula applies by default
@@ -5566,6 +5628,35 @@ function copySQL() {
 // ============ BULK PDF UPLOAD ============
 
 let parsedPayslips = []; // holds parsed results before saving
+// Client-side team assignments for the current bulk upload session.
+// { [distributor_code]: 'New Era' | 'Alpha C' }
+// Per-order overrides: { [distributor_code + '|' + order_no]: team }
+const _teamMap = {};
+
+function getOrderTeam(code, orderNo) {
+  const perOrder = _teamMap[`${code}|${orderNo}`];
+  if (perOrder) return perOrder;
+  return _teamMap[code] || 'New Era';
+}
+
+function setOrderTeam(code, orderNo, team) {
+  _teamMap[`${code}|${orderNo}`] = team;
+}
+
+function setAllOrderTeams(code, team) {
+  // Set the proxy-level default
+  _teamMap[code] = team;
+  // Also update all per-order dropdowns within this card
+  document.querySelectorAll(`.team-select-${CSS.escape(code)}`).forEach(sel => {
+    sel.value = team;
+    _teamMap[`${code}|${sel.dataset.orderNo}`] = team;
+  });
+  // Update the "Select All" button highlights
+  ['New Era','Alpha C'].forEach(t => {
+    const btn = document.getElementById(`teamBtn_${CSS.escape(code)}_${t.replace(' ','_')}`);
+    if (btn) btn.style.fontWeight = t === team ? '700' : '400';
+  });
+}
 
 async function handlePDFDrop(e) {
   const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
@@ -5658,15 +5749,29 @@ function renderParseResult(result) {
   const statusText = result.matched ? `✓ Matched: ${result.proxy?.name}` : '✗ No match found in system';
   const matchColor = result._match ? 'var(--green)' : 'var(--yellow)';
   const matchIcon = result._match ? '✓' : '⚠';
+  const code = result.distributor_code || result.filename;
 
-  const orderRows = (result.new_orders || []).map(o =>
-    `<div class="order-row">
+  // Default to proxy's saved team if available, otherwise New Era
+  const defaultTeam = result.proxy?.company_team || 'New Era';
+  _teamMap[code] = defaultTeam;
+
+  const orderRows = (result.new_orders || []).map(o => {
+    const oKey = `${code}|${o.order_no}`;
+    _teamMap[oKey] = defaultTeam;
+    return `<div class="order-row">
       <span style="color:var(--muted);font-family:var(--mono);font-size:10px">${o.order_no}</span>
       <span>${o.customer_name}</span>
       <span style="font-family:var(--mono)">${fmtNum(o.com_from_payslip)}</span>
       <span style="font-family:var(--mono);color:var(--yellow)">${fmtNum(o.allowance_portion)}</span>
       <span style="font-family:var(--mono);font-weight:700;color:var(--green)">${fmtNum(o.total_com)}</span>
-    </div>`).join('');
+      <select class="team-select-${code}" data-order-no="${o.order_no}"
+              onchange="setOrderTeam('${code}','${o.order_no}',this.value)"
+              style="font-size:10px;padding:2px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer">
+        <option value="New Era"${defaultTeam==='New Era'?' selected':''}>New Era</option>
+        <option value="Alpha C"${defaultTeam==='Alpha C'?' selected':''}>Alpha C</option>
+      </select>
+    </div>`;
+  }).join('');
 
   container.innerHTML += `
     <div class="parse-result-card">
@@ -5676,6 +5781,17 @@ function renderParseResult(result) {
           <div style="font-size:11px;color:var(--muted);margin-top:2px">Code: ${result.distributor_code || '—'} | ${result.member_level || '—'} | ${result.period_date || '—'}</div>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:11px;color:var(--muted)">Set all:</span>
+            <button id="teamBtn_${code}_New_Era" onclick="setAllOrderTeams('${code}','New Era')"
+              style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-weight:${defaultTeam==='New Era'?'700':'400'}">
+              New Era
+            </button>
+            <button id="teamBtn_${code}_Alpha_C" onclick="setAllOrderTeams('${code}','Alpha C')"
+              style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-weight:${defaultTeam==='Alpha C'?'700':'400'}">
+              Alpha C
+            </button>
+          </div>
           <span class="parse-status ${statusCls}">${statusText}</span>
           <div class="parse-result-amount">RM ${fmtNum(result.total_net_payable)}</div>
         </div>
@@ -5700,7 +5816,7 @@ function renderParseResult(result) {
         <span style="color:${matchColor};margin-left:6px">${matchIcon}</span>
       </div>
       ${orderRows.length > 0 ? `
-        <div class="order-row header" style="font-size:10px"><span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span></div>
+        <div class="order-row header" style="font-size:10px"><span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team</span></div>
         ${orderRows}` : ''}
       ${result.allowances && result.allowances.length > 0 ? `<div style="font-size:10px;color:var(--muted);margin-top:6px">Allowance items: ${result.allowances.map(a => `${a.description} RM${fmtNum(a.amount)}`).join(', ')}</div>` : (result.allowance_total > 0 ? '' : `<div style="font-size:10px;color:var(--muted);margin-top:4px">No Allowance section found in PDF</div>`)}
       ${!result.matched ? `<div style="margin-top:10px;font-size:12px;color:var(--red)">⚠ Add "${result.distributor_name}" as proxy first, then re-upload.</div>` : ''}
@@ -5792,6 +5908,12 @@ async function confirmBulkSave() {
         created++;
       }
 
+      const code = p.distributor_code || p.filename;
+      const proxyTeam = _teamMap[code] || 'New Era';
+      const ordersWithTeam = (p.new_orders || []).map(o => ({
+        ...o,
+        team: _teamMap[`${code}|${o.order_no}`] || proxyTeam
+      }));
       const invoiceAmount = Math.round(p.total_net_payable * (1 + deductPct/100) * 100) / 100;
       // deductPct < 0 => deduct (invoice < payslip amount); deductPct > 0 => add on top
       const adjLabel = deductPct === 0 ? '±0%' : (deductPct > 0 ? `+${deductPct}%` : `${deductPct}%`);
@@ -5802,15 +5924,16 @@ async function confirmBulkSave() {
           proxy_id: p.proxy_id,
           year, month,
           coway_payslip_amount: p.total_net_payable,
-          invoice_amount: invoiceAmount, // = payslip amount adjusted by the global %, admin can edit per-invoice afterwards
+          invoice_amount: invoiceAmount,
           invoice_number: invoiceNumber,
           status: prevStatus,
           payment_date: prevPaymentDate,
+          company_team: proxyTeam,
           notes: `Auto-imported from PDF: ${p.filename} (${adjLabel})`
         }
       });
 
-      // Save breakdown data
+      // Save breakdown data (include per-order team in categories_json)
       await sb('nec_payslip_breakdown', {
         method: 'POST',
         body: {
@@ -5820,7 +5943,7 @@ async function confirmBulkSave() {
           member_level: p.member_level,
           total_net_payable: p.total_net_payable,
           withholding_tax: p.withholding_tax || 0,
-          categories_json: JSON.stringify(p.new_orders || []),
+          categories_json: JSON.stringify(ordersWithTeam),
           allowances_json: JSON.stringify(p.allowances || []),
           team_building_total: p.tbc_total || 0,
           raw_filename: p.filename
