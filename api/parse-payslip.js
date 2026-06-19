@@ -77,10 +77,10 @@ function parseCowayPayslip(text) {
       // App Type is usually "REN" (rental new order) but can be "INS" (outright
       // sale, e.g. "Sales Commission (Outright) - PV" section like KOK YIAT LEE's
       // 2 air-purifier units) — both represent a new order that should be counted.
-      const m = l.match(/^(\d{7,})([A-Z].+?)(REN|INS)/);
+      const m = l.match(/^(\d{7,})([A-Z].+?)(REN|INS)(.*?)(\d{1,2})\s*$/);
       if (m) {
         newOrderNos.add(m[1]);
-        bonusOrders.push({ order_no: m[1], customer_name: m[2].trim() });
+        bonusOrders.push({ order_no: m[1], customer_name: m[2].trim(), product: m[4].trim(), months: parseInt(m[5]) });
       }
     }
   }
@@ -500,6 +500,8 @@ function parseCowayPayslip(text) {
     new_orders_detail.push({
       order_no: o.order_no,
       customer_name: o.customer_name,
+      product: o.product || '',
+      months: o.months || null,
       com_from_payslip: comFromPayslip,
       allowance_portion: allowancePerOrder,
       total_com: totalCom
