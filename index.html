@@ -376,11 +376,12 @@
             <th>Invoice Amount</th>
             <th>PIC (Diff)</th>
             <th>YTD Profit/Loss</th>
+            <th>Company</th>
             <th>Actions</th>
           </tr>
         </thead>
         <tbody id="invoiceTableBody">
-          <tr><td colspan="7"><div class="empty"><div class="empty-icon">📄</div><div class="empty-text">Loading invoices...</div></div></td></tr>
+          <tr><td colspan="8"><div class="empty"><div class="empty-icon">📄</div><div class="empty-text">Loading invoices...</div></div></td></tr>
         </tbody>
       </table>
     </div>
@@ -544,8 +545,7 @@
           <thead>
             <tr>
               <th>Name</th>
-              <th>Role</th>
-              <th>Channel</th>
+              <th>Company</th>
               <th>Type</th>
               <th>Comm/Order</th>
               <th>Base Salary</th>
@@ -554,7 +554,7 @@
             </tr>
           </thead>
           <tbody id="staffListTableBody">
-            <tr><td colspan="8"><div class="empty"><div class="empty-text">Loading staff...</div></div></td></tr>
+            <tr><td colspan="7"><div class="empty"><div class="empty-text">Loading staff...</div></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -2085,7 +2085,7 @@ async function loadInvoices() {
   try {
     await loadProxies();
     const invoices = await sb('proxy_invoices', {
-      filter, select: 'id,proxy_id,year,month,coway_payslip_amount,invoice_amount,invoice_number,notes'
+      filter, select: 'id,proxy_id,year,month,coway_payslip_amount,invoice_amount,invoice_number,notes,company_team'
     });
 
     const filtered = invoices;
@@ -2116,7 +2116,7 @@ async function loadInvoices() {
     // Render table
     const tbody = document.getElementById('invoiceTableBody');
     if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-icon">📄</div><div class="empty-text">No invoices found for this filter</div></div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-icon">📄</div><div class="empty-text">No invoices found for this filter</div></div></td></tr>`;
       return;
     }
 
@@ -2131,23 +2131,27 @@ async function loadInvoices() {
     });
     const groupOrder = [...MANAGER_ORDER.filter(m => groups[m]), ...Object.keys(groups).filter(m => !MANAGER_ORDER.includes(m)).sort()];
 
+    const teamColorMap = { 'New Era': '#4f7cff', 'Alpha C': '#f97316' };
+
     let html = '';
     groupOrder.forEach(mgr => {
       const rows = groups[mgr].sort((a,b) => a.proxy.name.localeCompare(b.proxy.name));
-      html += `<tr class="group-row" data-group-header="${mgr}"><td colspan="7" style="background:var(--surface);font-weight:700;color:var(--accent);padding:10px 14px">${mgr} (PIC)</td></tr>`;
+      html += `<tr class="group-row" data-group-header="${mgr}"><td colspan="8" style="background:var(--surface);font-weight:700;color:var(--accent);padding:10px 14px">${mgr} (PIC)</td></tr>`;
       html += rows.map(({inv, proxy}) => {
-        // YTD = cumulative (payslip - invoice) across the year for this proxy.
-        // Positive = we've accumulated "profit" given to the proxy (invoice < payslip,
-        //   proxy paid less than they actually received) — next month bill them more.
-        // Negative = we've accumulated "loss" (invoice > payslip) — next month bill them less.
         const ytd = Object.values(ytdMap[inv.proxy_id] || {}).reduce((s,v) => s + v, 0);
         const pct = Math.min(100, (Math.abs(ytd) / 5000) * 100);
         const cls = Math.abs(ytd) >= 5000 ? 'over' : Math.abs(ytd) >= 4000 ? 'warn' : 'safe';
         const ytdLabel = ytd > 0 ? 'profit' : ytd < 0 ? 'loss' : '—';
-        // PIC only owes the company when invoice < payslip (we collected less than
-        // Coway actually paid out). If invoice >= payslip, PIC owes nothing (0) —
-        // any extra collected is simply company profit, not a PIC liability.
         const picDiff = Math.max(0, parseFloat(inv.coway_payslip_amount||0) - parseFloat(inv.invoice_amount||0));
+        const team = inv.company_team;
+        const tc = teamColorMap[team];
+        const teamCell = team
+          ? `<span style="font-size:11px;font-weight:600;color:${tc}">${team}</span>
+             <button class="icon-btn" title="Change team" onclick="assignInvoiceTeam('${inv.id}', '${team === 'New Era' ? 'Alpha C' : 'New Era'}')">✎</button>`
+          : `<div style="display:flex;gap:4px">
+               <button onclick="assignInvoiceTeam('${inv.id}','New Era')" style="padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid #4f7cff;color:#4f7cff;background:transparent;cursor:pointer">New Era</button>
+               <button onclick="assignInvoiceTeam('${inv.id}','Alpha C')" style="padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid #f97316;color:#f97316;background:transparent;cursor:pointer">Alpha C</button>
+             </div>`;
         return `
         <tr data-search="${(proxy.name + ' ' + (proxy.coway_id||'')).toLowerCase()}" data-group="${mgr}">
           <td><div class="td-name">${proxy.name}</div><div class="td-muted">${proxy.coway_id || '—'}</div></td>
@@ -2169,6 +2173,7 @@ async function loadInvoices() {
               </div>
             </div>
           </td>
+          <td>${teamCell}</td>
           <td>
             <div style="display:flex;gap:4px">
               <button class="btn btn-ghost btn-sm" onclick="previewInvoice('${inv.id}')">Preview</button>
@@ -2181,7 +2186,7 @@ async function loadInvoices() {
     tbody.innerHTML = html;
   } catch(e) {
     console.error(e);
-    document.getElementById('invoiceTableBody').innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading data. Check Setup tab to create tables first.</div></div></td></tr>`;
+    document.getElementById('invoiceTableBody').innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading data. Check Setup tab to create tables first.</div></div></td></tr>`;
     document.getElementById('setupBanner').style.display = 'flex';
   }
 }
@@ -2208,6 +2213,24 @@ function filterInvoiceTable() {
       row.style.display = groupHasVisible[row.dataset.groupHeader] ? '' : 'none';
     }
   });
+}
+
+// One-click team assignment for an existing invoice — taps the DB and
+// refreshes just the affected row's Company cell so the page doesn't
+// need a full reload. The ✎ toggle on already-assigned invoices cycles
+// between New Era and Alpha C (clicking the pencil assigns the other team).
+async function assignInvoiceTeam(invoiceId, team) {
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/proxy_invoices?id=eq.${invoiceId}`;
+    await fetch(url, {
+      method: 'PATCH',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ company_team: team })
+    });
+    await logAudit('UPDATE', 'proxy_invoices', `Assigned invoice ${invoiceId} to team: ${team}`);
+    showToast(`Assigned to ${team} ✓`);
+    loadInvoices(); // refresh the table
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
 async function editInvoiceField(invoiceId, field, spanId) {
@@ -3148,20 +3171,33 @@ function renderStaffList() {
   const tbody = document.getElementById('staffListTableBody');
   if (!tbody) return;
   if (!staffList.length) {
-    tbody.innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-text">No staff yet. Click "+ Add Staff" above.</div></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-text">No staff yet. Click "+ Add Staff" above.</div></div></td></tr>`;
     return;
   }
-  tbody.innerHTML = staffList.map(s => `
-    <tr>
-      <td class="td-name">${s.name}</td>
-      <td class="td-muted">${s.role || '—'}</td>
-      <td><span class="badge badge-${(s.channel||'dm').toLowerCase()}">${s.channel || '—'}</span></td>
-      <td><span class="badge badge-${s.staff_type === 'sales' ? 'dm' : 'other'}">${s.staff_type}</span>${s.epf_applicable ? ' <span class="badge badge-other" title="EPF applicable">EPF</span>' : ''}</td>
+  // Derive TYPE badge from staff_type + channel — consolidated into 5 types
+  // matching what the business uses: DM | TM | Admin | Manager | Outsider
+  const managerStaffIds = new Set(managerList.map(m => m.staff_id).filter(Boolean));
+  const getStaffType = (s) => {
+    if (managerStaffIds.has(s.id)) return { label: 'Manager', color: 'var(--accent)' };
+    if (s.staff_type === 'admin') return { label: 'Admin', color: 'var(--muted)' };
+    if (s.channel === 'TM') return { label: 'TM', color: '#f97316' };
+    if (s.channel === 'DM') return { label: 'DM', color: '#22c55e' };
+    return { label: 'Outsider', color: 'var(--yellow)' };
+  };
+  const teamColor = (t) => t === 'Alpha C' ? '#f97316' : '#4f7cff';
+  tbody.innerHTML = staffList.map(s => {
+    const { label, color } = getStaffType(s);
+    const team = s.company_team || 'New Era';
+    return `<tr>
+      <td class="td-name">${s.name}${s.epf_applicable ? ' <span style="font-size:10px;color:var(--muted)">(EPF)</span>' : ''}</td>
+      <td><span style="font-size:11px;font-weight:600;color:${teamColor(team)}">${team}</span></td>
+      <td><span class="badge" style="background:${color}22;color:${color};border:1px solid ${color}44;font-size:11px">${label}</span></td>
       <td class="td-mono">${fmt(s.commission_per_order)}</td>
       <td class="td-mono">${fmt(s.base_salary)}</td>
       <td class="td-mono">${s.lead_staff_name || '<span class="td-muted">— not mapped —</span>'}</td>
       <td><button class="btn btn-ghost btn-sm" onclick="openEditStaffModal('${s.id}')">Edit</button></td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 
 async function openEditStaffModal(id) {
