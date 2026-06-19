@@ -2813,54 +2813,117 @@ const INVOICE_PRINT_STYLE = `
       .inv-total-amount{font-size:22px;font-weight:800;color:#4f7cff;margin-top:4px;font-family:'JetBrains Mono',monospace}
       .inv-footer{margin-top:32px;padding-top:16px;border-top:1px solid #eee;font-size:11px;color:#999}`;
 
-// Loads html2pdf.js from cdnjs on demand (first call only).
-// Returns a promise that resolves once the library is ready.
-function loadHtml2Pdf() {
-  if (window.html2pdf) return Promise.resolve();
+// Loads jsPDF from cdnjs on demand (first call only).
+function loadJsPDF() {
+  if (window.jspdf) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
     s.onload = resolve;
     s.onerror = () => reject(new Error('Failed to load PDF library'));
     document.head.appendChild(s);
   });
 }
 
-// Builds a temporary off-screen div with the invoice HTML styled ready
-// for PDF generation, then uses html2pdf.js to download it directly —
-// no print dialog, filename is "ProxyName - InvNumber.pdf".
+// Draws one invoice onto a jsPDF doc starting at page Y offset.
+// Returns the doc so multiple invoices can be chained with addPage().
+function drawInvoiceOnPDF(doc, inv, proxy) {
+  const w = doc.internal.pageSize.getWidth();
+  const blue = [79, 124, 255], dark = [26, 26, 46], grey = [120, 120, 120], lightgrey = [220, 220, 220];
+  let y = 22;
+
+  // ── Company header (left) ──────────────────────────────────────
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...dark);
+  doc.text('NEW ERA CONSULTING ENTERPRISE', 18, y);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...grey);
+  doc.text('202503018811 (MA0326725-T)', 18, y + 5);
+  doc.text('No 21, Jalan Villa Puncak Desa 3, Villa Puncak Desa,', 18, y + 10);
+  doc.text('Taman Desa Petaling, 57100 Kuala Lumpur, W.P.', 18, y + 15);
+
+  // ── INVOICE label (right) ──────────────────────────────────────
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(22); doc.setTextColor(...blue);
+  doc.text('INVOICE', w - 18, y, { align: 'right' });
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...grey);
+  doc.text(`No: ${inv.invoice_number || 'DRAFT'}`, w - 18, y + 8, { align: 'right' });
+  doc.text(`Date: ${MONTH_FULL[inv.month]} ${inv.year}`, w - 18, y + 13, { align: 'right' });
+
+  y += 24;
+  // ── Divider ───────────────────────────────────────────────────
+  doc.setDrawColor(...blue); doc.setLineWidth(0.6);
+  doc.line(18, y, w - 18, y);
+  y += 8;
+
+  // ── Bill To ───────────────────────────────────────────────────
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(...grey);
+  doc.text('BILL TO', 18, y);
+  y += 5;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...dark);
+  doc.text(proxy.name || 'Unknown', 18, y);
+  y += 5;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...grey);
+  doc.text(`IC: ${proxy.ic_number || '—'}`, 18, y);
+  y += 14;
+
+  // ── Table header ──────────────────────────────────────────────
+  doc.setFillColor(240, 244, 255);
+  doc.rect(18, y, w - 36, 9, 'F');
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(...blue);
+  doc.text('DESCRIPTION', 22, y + 6);
+  doc.text('AMOUNT', w - 22, y + 6, { align: 'right' });
+  y += 12;
+
+  // ── Table row ─────────────────────────────────────────────────
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(50, 50, 50);
+  doc.text(`Digital Marketing Services for ${MONTH_FULL[inv.month]} ${inv.year}`, 22, y);
+  doc.setFontSize(7); doc.setTextColor(...grey);
+  doc.text('Lead generation, ad management & customer acquisition services', 22, y + 5);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...dark);
+  doc.text(`RM ${fmtNum(inv.invoice_amount)}`, w - 22, y, { align: 'right' });
+  doc.setDrawColor(...lightgrey); doc.setLineWidth(0.2);
+  doc.line(18, y + 10, w - 18, y + 10);
+  y += 18;
+
+  // ── Total box ─────────────────────────────────────────────────
+  const bw = 72, bx = w - 18 - bw;
+  doc.setFillColor(240, 244, 255);
+  doc.roundedRect(bx, y, bw, 20, 2, 2, 'F');
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...grey);
+  doc.text('Total Amount Due', bx + bw / 2, y + 7, { align: 'center' });
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(...blue);
+  doc.text(`RM ${fmtNum(inv.invoice_amount)}`, bx + bw / 2, y + 16, { align: 'center' });
+  y += 28;
+
+  // ── Footer ────────────────────────────────────────────────────
+  doc.setDrawColor(...lightgrey); doc.setLineWidth(0.3);
+  doc.line(18, y, w - 18, y);
+  y += 6;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(...grey);
+  doc.text('Payment Information', 18, y);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
+  doc.text('Bank: Public Bank Berhad', 18, y + 5);
+  doc.text('Account Name: New Era Consulting Enterprise', 18, y + 10);
+  doc.text('Account No: 3243542608', 18, y + 15);
+  doc.text('This invoice is issued by New Era Consulting Enterprise for marketing services rendered.', 18, y + 22);
+
+  return doc;
+}
+
+// Downloads a single invoice as a named PDF — no print dialog.
 async function previewInvoice(id) {
   try {
     const [inv] = await sb('proxy_invoices', { filter: `id=eq.${id}` });
     const proxy = proxyList.find(p => p.id === inv.proxy_id) || {};
-    const html = buildInvoiceHTML(inv, proxy);
-    const filename = `${(proxy.name || 'Invoice').replace(/[/\\?%*:|"<>]/g, '-')} - ${inv.invoice_number || 'DRAFT'}.pdf`;
-
     showToast('Generating PDF…');
-    await loadHtml2Pdf();
-
-    const el = document.createElement('div');
-    // position:fixed is a known html2canvas bug that causes blank output —
-    // use position:absolute with a large negative left offset instead.
-    el.style.cssText = 'position:absolute;left:-9999px;top:0;width:740px;background:#fff;font-family:Inter,sans-serif;padding:40px;box-sizing:border-box';
-    el.innerHTML = `<style>${INVOICE_PRINT_STYLE.replace(/var\(--[^)]+\)/g, '#333')}</style>${html}`;
-    document.body.appendChild(el);
-    // Short delay so the browser paints the element before html2canvas captures it
-    await new Promise(r => setTimeout(r, 200));
-    await html2pdf().set({
-      filename,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, logging: false },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: 'avoid-all' }
-    }).from(el).save();
-    document.body.removeChild(el);
+    await loadJsPDF();
+    const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    drawInvoiceOnPDF(doc, inv, proxy);
+    const filename = `${(proxy.name || 'Invoice').replace(/[/\\?%*:|"<>]/g, '-')} - ${inv.invoice_number || 'DRAFT'}.pdf`;
+    doc.save(filename);
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
-// Downloads ALL filtered invoices as a single PDF, grouped by manager
-// (MANAGER_ORDER then alphabetical within each group). Uses html2pdf.js
-// so the user gets a direct file download with no print dialog.
+// Downloads ALL filtered invoices as one PDF, grouped by manager.
+// Each invoice gets its own page; a manager-separator line precedes each group.
 async function printAllInvoices() {
   const year = document.getElementById('filterYear').value;
   const month = document.getElementById('filterMonth').value;
@@ -2875,9 +2938,9 @@ async function printAllInvoices() {
     if (!invoices.length) return showToast('No invoices for this filter', 'error');
 
     showToast(`Generating PDF for ${invoices.length} invoices…`);
-    await loadHtml2Pdf();
+    await loadJsPDF();
 
-    // Group by manager
+    // Group by manager, MANAGER_ORDER then alphabetical within
     const groups = {};
     invoices.forEach(inv => {
       const proxy = proxyList.find(p => p.id === inv.proxy_id) || { name: 'Unknown', manager: null };
@@ -2887,33 +2950,25 @@ async function printAllInvoices() {
     });
     const groupOrder = [...MANAGER_ORDER.filter(m => groups[m]), ...Object.keys(groups).filter(m => !MANAGER_ORDER.includes(m)).sort()];
 
-    // Build all pages into one off-screen div
-    let pagesHtml = '';
+    const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    let firstPage = true;
+
     groupOrder.forEach(mgr => {
       const rows = groups[mgr].sort((a,b) => a.proxy.name.localeCompare(b.proxy.name));
-      pagesHtml += `<div style="padding:10px 40px 4px;font-size:11px;font-weight:700;color:#4f7cff;text-transform:uppercase;letter-spacing:.06em;border-top:2px solid #4f7cff;margin-top:24px">${mgr} (PIC) — ${rows.length} invoices</div>`;
       rows.forEach(({ inv, proxy }) => {
-        pagesHtml += `<div style="padding:40px;page-break-after:always">${buildInvoiceHTML(inv, proxy)}</div>`;
+        if (!firstPage) doc.addPage();
+        firstPage = false;
+        // Small manager label at very top of each invoice page in this group
+        const w = doc.internal.pageSize.getWidth();
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(79, 124, 255);
+        doc.text(`${mgr} (PIC)`, w / 2, 10, { align: 'center' });
+        drawInvoiceOnPDF(doc, inv, proxy);
       });
     });
 
     const periodLabel = month ? `${MONTH_FULL[parseInt(month)]} ${year}` : year;
-    const filename = `NEC Invoices ${periodLabel}.pdf`;
-
-    const el = document.createElement('div');
-    el.style.cssText = 'position:absolute;left:-9999px;top:0;width:760px;background:#fff;font-family:Inter,sans-serif;box-sizing:border-box';
-    el.innerHTML = `<style>${INVOICE_PRINT_STYLE.replace(/var\(--[^)]+\)/g, '#333')} .invoice-preview{box-shadow:none;border:1px solid #eee}</style>${pagesHtml}`;
-    document.body.appendChild(el);
-    await new Promise(r => setTimeout(r, 300));
-    await html2pdf().set({
-      filename,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, logging: false },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: 'css', before: '[style*="page-break-after"]' }
-    }).from(el).save();
-    document.body.removeChild(el);
-    showToast(`Downloaded: ${filename}`);
+    doc.save(`NEC Invoices ${periodLabel}.pdf`);
+    showToast(`Downloaded ${invoices.length} invoices`);
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
@@ -5629,6 +5684,7 @@ function renderParseResult(result) {
       ${orderRows.length > 0 ? `
         <div class="order-row header" style="font-size:10px"><span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span></div>
         ${orderRows}` : ''}
+      ${result.allowances && result.allowances.length > 0 ? `<div style="font-size:10px;color:var(--muted);margin-top:6px">Allowance items: ${result.allowances.map(a => `${a.description} RM${fmtNum(a.amount)}`).join(', ')}</div>` : (result.allowance_total > 0 ? '' : `<div style="font-size:10px;color:var(--muted);margin-top:4px">No Allowance section found in PDF</div>`)}
       ${!result.matched ? `<div style="margin-top:10px;font-size:12px;color:var(--red)">⚠ Add "${result.distributor_name}" as proxy first, then re-upload.</div>` : ''}
     </div>`;
 }
