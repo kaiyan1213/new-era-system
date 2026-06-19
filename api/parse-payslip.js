@@ -303,9 +303,15 @@ function parseCowayPayslip(text) {
         const maxVal = Math.max(...rawAmounts);
         const indivAmounts = rawAmounts.filter(n => n !== maxVal);
         const descLabels = collectLabels();
-        descLabels.forEach((desc, i) => {
-          if (i < indivAmounts.length) allowances.push({ description: desc, amount: indivAmounts[i] });
-        });
+        if (indivAmounts.length === 0) {
+          // All amounts are equal (individual == total, e.g. HP NEW PI: 1600 individual,
+          // 1600 total). There's really only one allowance item — use maxVal for it.
+          allowances.push({ description: descLabels[0] || 'Allowance', amount: maxVal });
+        } else {
+          descLabels.forEach((desc, i) => {
+            if (i < indivAmounts.length) allowances.push({ description: desc, amount: indivAmounts[i] });
+          });
+        }
       } else if (rawAmounts.length === 1) {
         const descLabels = collectLabels();
         allowances.push({ description: descLabels[0] || 'Allowance', amount: rawAmounts[0] });
