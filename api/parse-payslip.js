@@ -252,12 +252,29 @@ function parseCowayPayslip(text) {
 
     if (sec.name === 'Allowance') {
       // Primary: amounts appear BEFORE the Allowance header in most layouts.
+      // Two patterns: (a) standalone decimal line "1,270.00", or
+      // (b) multi-value line like "3 1,600.00 1,600.00" where the LAST
+      // decimal is the total. We capture both so payslip layouts where the
+      // allowance amounts appear alongside other numbers (e.g. after the
+      // Food Supplements section) aren't missed.
       const allowHeaderIdx = sec.idx;
       const amountsBefore = [];
-      for (let k = allowHeaderIdx - 1; k >= Math.max(0, allowHeaderIdx - 15); k--) {
-        const m = lines[k].match(/^\s*([\d,]+\.\d{2})\s*$/);
-        if (m) amountsBefore.unshift(pn(m[1]));
-        else if (lines[k].toLowerCase().includes('food supplements') || lines[k].includes('Order No')) break;
+      for (let k = allowHeaderIdx - 1; k >= Math.max(0, allowHeaderIdx - 20); k--) {
+        const l = lines[k];
+        // (a) Standalone decimal — exact match
+        const standalone = l.match(/^\s*([\d,]+\.\d{2})\s*$/);
+        if (standalone) { amountsBefore.unshift(pn(standalone[1])); continue; }
+        // Stop scanning if we hit a section header-like line
+        if (l.toLowerCase().includes('food supplements') || l === 'Order No' || l.match(/^[A-Z][a-z].*Commission/)) break;
+        // (b) Multi-value line — take the LAST decimal as the total
+        const multiVals = l.match(/([\d,]+\.\d{2})/g);
+        if (multiVals && multiVals.length > 0) {
+          const lastVal = pn(multiVals[multiVals.length - 1]);
+          if (lastVal > 0 && lastVal < 50000) { // sanity cap; allowances are never this large
+            amountsBefore.unshift(lastVal);
+            break; // one multi-value line is enough — don't keep scanning into unrelated rows
+          }
+        }
       }
       // Fallback: amounts appear AFTER the Allowance header in some layouts.
       const amountsAfter = [];
