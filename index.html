@@ -5069,10 +5069,37 @@ async function loadPL() {
   try {
     let invFilter = `year=eq.${year}`;
     if (month) invFilter += `&month=eq.${month}`;
-    const invoices = await sb('proxy_invoices', { filter: invFilter, select: 'proxy_id,invoice_amount,company_team' });
+    const invoices = await sb('proxy_invoices', { filter: invFilter, select: 'proxy_id,year,month,invoice_amount,company_team' });
     const proxies = await sb('proxy_accounts', { select: 'id,channel,company_team' });
-
     const costs = await sb('nec_pl_costs', { filter: invFilter });
+
+    // Fetch per-order team breakdowns — these are the authoritative source for
+    // team split, since team is now assigned per-order in the Breakdown page.
+    // Each breakdown's categories_json is a flat order array with a .team field.
+    const breakdowns = await sb('nec_payslip_breakdown', { filter: invFilter, select: 'proxy_id,year,month,categories_json' });
+
+    // Build proportion lookup: "proxy_year_month" → { 'New Era': 0.7, 'Alpha C': 0.3, 'Outsider': 0 }
+    // Proportions are of total_com so we can split invoice_amount fairly.
+    // Outsider orders are excluded from company revenue entirely.
+    const breakdownShares = {};
+    for (const bd of breakdowns) {
+      const key = `${bd.proxy_id}_${bd.year}_${bd.month}`;
+      try {
+        const orders = JSON.parse(bd.categories_json || '[]');
+        const teamTotals = {};
+        let grand = 0;
+        orders.forEach(o => {
+          const t = o.team || 'New Era';
+          const com = parseFloat(o.total_com || 0);
+          if (t !== 'Outsider') {
+            teamTotals[t] = (teamTotals[t] || 0) + com;
+            grand += com;
+          }
+        });
+        if (grand > 0) breakdownShares[key] = Object.fromEntries(Object.entries(teamTotals).map(([t,v]) => [t, v/grand]));
+        else breakdownShares[key] = {}; // all Outsider — no company revenue
+      } catch(e) { /* malformed json */ }
+    }
 
     // Revenue by channel AND by team
     const revByChannel = { DM:0, TM:0, XHS:0, OTHER:0 };
@@ -5080,11 +5107,24 @@ async function loadPL() {
     for (const inv of invoices) {
       const proxy = proxies.find(p => p.id === inv.proxy_id);
       const ch = proxy?.channel || 'OTHER';
-      const tm = inv.company_team || proxy?.company_team || 'New Era';
-      revByChannel[ch] = (revByChannel[ch] || 0) + parseFloat(inv.invoice_amount || 0);
-      revByTeam[tm] = (revByTeam[tm] || 0) + parseFloat(inv.invoice_amount || 0);
+      const amount = parseFloat(inv.invoice_amount || 0);
+      revByChannel[ch] = (revByChannel[ch] || 0) + amount;
+
+      const key = `${inv.proxy_id}_${inv.year}_${inv.month}`;
+      const shares = breakdownShares[key];
+      if (shares) {
+        // Per-order team proportions available — split invoice_amount accordingly
+        Object.entries(shares).forEach(([t, share]) => {
+          revByTeam[t] = (revByTeam[t] || 0) + amount * share;
+        });
+      } else {
+        // No breakdown data — fall back to invoice-level company_team
+        const tm = inv.company_team || proxy?.company_team || 'New Era';
+        if (tm !== 'Outsider') revByTeam[tm] = (revByTeam[tm] || 0) + amount;
+      }
     }
-    const totalRev = Object.values(revByChannel).reduce((s,v) => s+v, 0);
+    // Total revenue excludes Outsider (company has 0 revenue from those orders)
+    const totalRev = r2(revByTeam['New Era'] + revByTeam['Alpha C']);
 
     // Costs by channel
     const costByChannel = { DM:0, TM:0, XHS:0, OTHER:0, SHARED:0 };
