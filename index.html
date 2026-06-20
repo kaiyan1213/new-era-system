@@ -858,12 +858,12 @@
       <div class="stat-card">
         <div class="stat-label">Total Revenue</div>
         <div class="stat-value green" id="plTotalRev">—</div>
-        <div class="stat-sub">from proxy invoices</div>
+        <div class="stat-sub">Coway payslip total (actual money paid out)</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Total Costs</div>
         <div class="stat-value red" id="plTotalCost">—</div>
-        <div class="stat-sub">all expenses</div>
+        <div class="stat-sub">expenses + payroll (staff commission/salary)</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Net Profit</div>
@@ -879,7 +879,7 @@
 
     <!-- By Team cards -->
     <div class="section-title" style="margin-top:8px">By Team</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px" id="plTeams">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:16px;margin-bottom:24px" id="plTeams">
       <!-- filled by JS -->
     </div>
 
@@ -1943,16 +1943,21 @@
     <div id="ccProgress" class="hidden" style="margin-bottom:12px;font-size:13px;color:var(--muted)">Reading statement…</div>
 
     <div id="ccReviewWrap" class="hidden">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div style="font-size:13px;color:var(--muted)"><span id="ccCount">0</span> transactions found — Total: <span id="ccTotal" style="color:var(--accent);font-weight:700">RM 0.00</span></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <div style="font-size:13px;color:var(--muted)">
+          <span id="ccCount">0</span> transactions found — Total: <span id="ccTotal" style="color:var(--accent);font-weight:700">RM 0.00</span>
+          <span id="ccBalanceWrap" class="hidden" style="margin-left:10px">· Statement Balance (per bank): <span id="ccBalance" style="color:var(--text);font-weight:700">RM 0.00</span></span>
+        </div>
         <div style="display:flex;gap:8px;align-items:center">
           <span style="font-size:11px;color:var(--muted)">Set all:</span>
           <select id="ccBulkYear" style="font-size:11px;padding:3px 6px"></select>
           <select id="ccBulkMonth" style="font-size:11px;padding:3px 6px"></select>
           <select id="ccBulkCategory" style="font-size:11px;padding:3px 6px" onchange="handleCCBulkCategoryChange(this)"></select>
+          <select id="ccBulkChannel" style="font-size:11px;padding:3px 6px" onchange="applyCCBulk('channel', this.value)"></select>
           <select id="ccBulkTeam" style="font-size:11px;padding:3px 6px" onchange="applyCCBulk('company_team', this.value)"></select>
         </div>
       </div>
+      <div id="ccBalanceNote" class="hidden" style="font-size:11px;color:var(--muted);margin:-6px 0 10px">The two totals can differ — rebates, fees, or other non-purchase lines aren't itemized below but are reflected in the bank's balance.</div>
       <div id="ccCategorySummary" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px"></div>
       <div class="table-wrap" style="max-height:420px;overflow-y:auto">
         <table>
@@ -5227,25 +5232,26 @@ async function deleteManagerRecord(id) {
 // ============ P&L ============
 
 async function loadPL() {
-  const year = document.getElementById('plYear').value;
-  const month = document.getElementById('plMonth').value;
+  const year = parseInt(document.getElementById('plYear').value);
+  const monthRaw = document.getElementById('plMonth').value;
+  const month = monthRaw ? parseInt(monthRaw) : null;
   await loadCostCategories();
 
   try {
     let invFilter = `year=eq.${year}`;
     if (month) invFilter += `&month=eq.${month}`;
-    const invoices = await sb('proxy_invoices', { filter: invFilter, select: 'proxy_id,year,month,invoice_amount,company_team' });
+    // Revenue = every ringgit that moves into the company via a proxy's
+    // Coway payslip, full stop — regardless of category/team/channel.
+    // (Not invoice_amount: proxies don't reliably pay the invoiced amount
+    // at face value, so that's not real collected revenue.)
+    const invoices = await sb('proxy_invoices', { filter: invFilter, select: 'proxy_id,year,month,coway_payslip_amount,company_team' });
     const proxies = await sb('proxy_accounts', { select: 'id,channel,company_team' });
     const costs = await sb('nec_pl_costs', { filter: invFilter });
-
-    // Fetch per-order team breakdowns — these are the authoritative source for
-    // team split, since team is now assigned per-order in the Breakdown page.
-    // Each breakdown's categories_json is a flat order array with a .team field.
     const breakdowns = await sb('nec_payslip_breakdown', { filter: invFilter, select: 'proxy_id,year,month,categories_json' });
 
-    // Build proportion lookup: "proxy_year_month" → { 'New Era': 0.7, 'Alpha C': 0.3, 'Outsider': 0 }
-    // Proportions are of total_com so we can split invoice_amount fairly.
-    // Outsider orders are excluded from company revenue entirely.
+    // Build per-proxy team-split proportions — New Era / Alpha C / Outsider
+    // ALL counted (nothing excluded). This only decides which bucket each
+    // ringgit of revenue lands in, not whether it counts at all.
     const breakdownShares = {};
     for (const bd of breakdowns) {
       const key = `${bd.proxy_id}_${bd.year}_${bd.month}`;
@@ -5256,46 +5262,110 @@ async function loadPL() {
         orders.forEach(o => {
           const t = o.team || 'New Era';
           const com = parseFloat(o.total_com || 0);
-          if (t !== 'Outsider') {
-            teamTotals[t] = (teamTotals[t] || 0) + com;
-            grand += com;
-          }
+          grand += com;
+          teamTotals[t] = (teamTotals[t] || 0) + com;
         });
         if (grand > 0) breakdownShares[key] = Object.fromEntries(Object.entries(teamTotals).map(([t,v]) => [t, v/grand]));
-        else breakdownShares[key] = {}; // all Outsider — no company revenue
+        else breakdownShares[key] = {};
       } catch(e) { /* malformed json */ }
     }
 
-    // Revenue by channel AND by team
+    // Revenue by channel AND by team/bucket — full coway_payslip_amount,
+    // nothing excluded. Outsider is its own legitimate bucket now (not
+    // excluded from revenue), since that money still flows through the
+    // company's books before being paid back out.
     const revByChannel = { DM:0, TM:0, XHS:0, OTHER:0 };
-    const revByTeam = { 'New Era':0, 'Alpha C':0 };
+    const revByTeam = { 'New Era':0, 'Alpha C':0, 'Outsider':0 };
     for (const inv of invoices) {
       const proxy = proxies.find(p => p.id === inv.proxy_id);
       const ch = proxy?.channel || 'OTHER';
-      const amount = parseFloat(inv.invoice_amount || 0);
+      const amount = parseFloat(inv.coway_payslip_amount || 0);
       revByChannel[ch] = (revByChannel[ch] || 0) + amount;
 
       const key = `${inv.proxy_id}_${inv.year}_${inv.month}`;
       const shares = breakdownShares[key];
-      if (shares) {
-        // Per-order team proportions available — split invoice_amount accordingly
+      if (shares && Object.keys(shares).length) {
         Object.entries(shares).forEach(([t, share]) => {
           revByTeam[t] = (revByTeam[t] || 0) + amount * share;
         });
       } else {
-        // No breakdown data — fall back to invoice-level company_team
+        // No per-order breakdown data — fall back to invoice-level company_team
         const tm = inv.company_team || proxy?.company_team || 'New Era';
-        if (tm !== 'Outsider') revByTeam[tm] = (revByTeam[tm] || 0) + amount;
+        revByTeam[tm] = (revByTeam[tm] || 0) + amount;
       }
     }
-    // Total revenue excludes Outsider (company has 0 revenue from those orders)
-    const totalRev = r2(revByTeam['New Era'] + revByTeam['Alpha C']);
 
-    // Costs by channel
+    // Manager Pool revenue — the 4 profit-sharing managers' own Coway
+    // payslip income (Overriding 1st Install + Allowance) that gets pooled
+    // together and split by % share. This money is company-administered
+    // (uploaded, pooled, redistributed) even though it never creates a
+    // proxy_invoices row, so it counts as revenue just like proxy revenue —
+    // with the matching cost being what's paid back out to the managers.
+    const mgrPayslipFilter = month ? `year=eq.${year}&month=eq.${month}` : `year=eq.${year}`;
+    const mgrPayslips = await sb('nec_manager_payslips', { filter: mgrPayslipFilter, select: 'pool_contribution' });
+    const managerPoolRevenue = r2(mgrPayslips.reduce((s,m) => s + parseFloat(m.pool_contribution || 0), 0));
+
+    const totalRev = r2(revByTeam['New Era'] + revByTeam['Alpha C'] + revByTeam['Outsider'] + managerPoolRevenue);
+
+    // ── Payroll costs ──────────────────────────────────────────
+    // Every ringgit the company pays out is a cost — staff commission,
+    // admin salary, AND manager profit-share settlements (the matching
+    // manager pool money is counted as revenue above, so including the
+    // full settlement here keeps both sides of that flow visible).
+    let payFilter = `year=eq.${year}`;
+    if (month) payFilter += `&month=eq.${month}`;
+    const payrollRows = await sb('nec_payroll', { filter: payFilter, select: 'staff_id,month,total_pay,commission_type,record_type' });
+    const allStaff = await sb('nec_staff', { select: 'id,staff_type,channel,company_team' });
+    const staffMap = {};
+    allStaff.forEach(s => staffMap[s.id] = s);
+
+    const payrollCostLines = []; // {label, bucket, amount}
+    payrollRows.forEach(p => {
+      const netPay = parseFloat(p.total_pay || 0);
+      if (netPay === 0) return;
+      if (p.record_type === 'manager') {
+        payrollCostLines.push({ label: 'Manager Settlement', bucket: 'Manager Pool', amount: netPay });
+        return;
+      }
+      const staff = staffMap[p.staff_id];
+      if (p.commission_type === 'outsider') {
+        payrollCostLines.push({ label: 'Outsider Commission', bucket: 'Outsider', amount: netPay });
+      } else if (staff?.staff_type === 'sales') {
+        const chLabel = staff.channel === 'TM' ? 'TM' : 'DM';
+        payrollCostLines.push({ label: `Staff Commission (${chLabel})`, bucket: staff?.company_team || 'New Era', amount: netPay });
+      } else {
+        payrollCostLines.push({ label: 'Admin Salary', bucket: staff?.company_team || 'New Era', amount: netPay });
+      }
+    });
+
+    // Costs by channel (manual/CC-statement entries only — channel here
+    // means acquisition channel, a separate dimension from team/bucket)
     const costByChannel = { DM:0, TM:0, XHS:0, OTHER:0, SHARED:0 };
     costs.forEach(c => { costByChannel[c.channel] = (costByChannel[c.channel]||0) + parseFloat(c.amount||0); });
-    const totalCost = Object.values(costByChannel).reduce((s,v) => s+v, 0);
-    const netProfit = totalRev - totalCost;
+
+    // Cost category breakdown PER BUCKET (New Era / Alpha C / Outsider /
+    // Manager Pool) — merges manual costs with payroll-derived lines, so
+    // each card can show exactly what makes up its costs.
+    const BUCKETS = ['New Era', 'Alpha C', 'Outsider', 'Manager Pool'];
+    const costCategoryByBucket = {}; BUCKETS.forEach(b => costCategoryByBucket[b] = {});
+    function addCat(bucket, label, amt) {
+      if (!costCategoryByBucket[bucket]) costCategoryByBucket[bucket] = {};
+      costCategoryByBucket[bucket][label] = (costCategoryByBucket[bucket][label] || 0) + amt;
+    }
+    costs.forEach(c => {
+      const amt = parseFloat(c.amount || 0);
+      const label = categoryLabel(c.category);
+      const t = c.company_team || null; // manual costs can only be New Era/Alpha C/shared — never Outsider/Manager Pool
+      if (t === 'New Era' || t === 'Alpha C') addCat(t, label, amt);
+      else { addCat('New Era', label, amt/2); addCat('Alpha C', label, amt/2); } // shared cost split equally
+    });
+    payrollCostLines.forEach(p => addCat(p.bucket, p.label, p.amount));
+
+    const costByBucket = {};
+    BUCKETS.forEach(b => { costByBucket[b] = r2(Object.values(costCategoryByBucket[b] || {}).reduce((s,v) => s+v, 0)); });
+    const totalCost = r2(BUCKETS.reduce((s,b) => s + costByBucket[b], 0));
+
+    const netProfit = r2(totalRev - totalCost);
     const margin = totalRev > 0 ? (netProfit / totalRev * 100) : 0;
 
     document.getElementById('plTotalRev').textContent = fmt(totalRev);
@@ -5307,36 +5377,36 @@ async function loadPL() {
     mgEl.textContent = margin.toFixed(1) + '%';
     mgEl.style.color = margin >= 20 ? 'var(--green)' : margin >= 0 ? 'var(--yellow)' : 'var(--red)';
 
-    // By Team cards
-    const TEAMS = ['New Era', 'Alpha C'];
-    const costByTeam = {};
-    costs.forEach(c => {
-      const t = c.company_team || null;
-      if (t) costByTeam[t] = (costByTeam[t]||0) + parseFloat(c.amount||0);
-      else {
-        // Shared costs (no team) split equally
-        TEAMS.forEach(tm => { costByTeam[tm] = (costByTeam[tm]||0) + parseFloat(c.amount||0) / TEAMS.length; });
-      }
-    });
-    const teamColors = { 'New Era': '#4f7cff', 'Alpha C': '#f97316' };
-    document.getElementById('plTeams').innerHTML = TEAMS.map(tm => {
-      const rev = revByTeam[tm] || 0;
-      const cost = costByTeam[tm] || 0;
+    // By Team/Bucket cards — 4 symmetric cards (New Era, Alpha C, Outsider,
+    // Manager Pool), each with full Revenue, a category-by-category Cost
+    // breakdown, and Net — nothing hidden or pre-netted.
+    const bucketColors = { 'New Era': '#4f7cff', 'Alpha C': '#f97316', 'Outsider': '#f59e0b', 'Manager Pool': '#a855f7' };
+    const bucketRev = { 'New Era': revByTeam['New Era'], 'Alpha C': revByTeam['Alpha C'], 'Outsider': revByTeam['Outsider'], 'Manager Pool': managerPoolRevenue };
+    document.getElementById('plTeams').innerHTML = BUCKETS.map(b => {
+      const rev = bucketRev[b] || 0;
+      const cost = costByBucket[b] || 0;
       const net = rev - cost;
       const pct = totalRev > 0 ? (rev / totalRev * 100).toFixed(1) : '0.0';
+      const catEntries = Object.entries(costCategoryByBucket[b] || {}).filter(([,v]) => v > 0.005).sort((a,b2) => b2[1]-a[1]);
+      const catHtml = catEntries.length ? catEntries.map(([label, amt]) => `
+          <div style="display:flex;justify-content:space-between;font-size:11px;padding-left:8px">
+            <span style="color:var(--muted)">${label}</span>
+            <span style="font-family:var(--mono);color:var(--red)">${fmt(amt)}</span>
+          </div>`).join('') : `<div style="font-size:11px;color:var(--muted);padding-left:8px">No costs this period</div>`;
       return `<div class="stat-card">
-        <div class="stat-label" style="color:${teamColors[tm]};font-weight:700">${tm}</div>
+        <div class="stat-label" style="color:${bucketColors[b]};font-weight:700">${b}</div>
         <div style="font-size:11px;color:var(--muted);margin-bottom:8px">${pct}% of total revenue</div>
-        <div style="display:grid;gap:6px;font-size:12px">
-          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Revenue</span><span style="font-family:var(--mono);color:var(--green)">${fmt(rev)}</span></div>
-          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Costs</span><span style="font-family:var(--mono);color:var(--red)">${fmt(cost)}</span></div>
-          <div style="height:1px;background:var(--border);margin:2px 0"></div>
-          <div style="display:flex;justify-content:space-between"><span style="font-weight:600">Net</span><span style="font-family:var(--mono);font-weight:700;color:${net>=0?'var(--green)':'var(--red)'}">${fmt(net)}</span></div>
-        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span style="color:var(--muted)">Revenue</span><span style="font-family:var(--mono);color:var(--green)">${fmt(rev)}</span></div>
+        <div style="font-size:12px;color:var(--muted);margin:6px 0 4px">Costs</div>
+        <div style="display:grid;gap:3px;margin-bottom:6px">${catHtml}</div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600;padding-left:8px;border-top:1px solid var(--border);padding-top:4px"><span style="color:var(--muted)">Subtotal</span><span style="font-family:var(--mono);color:var(--red)">${fmt(cost)}</span></div>
+        <div style="height:1px;background:var(--border);margin:8px 0"></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px"><span style="font-weight:600">Net</span><span style="font-family:var(--mono);font-weight:700;color:${net>=0?'var(--green)':'var(--red)'}">${fmt(net)}</span></div>
       </div>`;
     }).join('');
 
-    // Channel cards
+    // Channel cards (acquisition channel — unchanged dimension, full
+    // payslip amount, nothing excluded)
     const sharedCostPerChannel = costByChannel.SHARED / 4;
     document.getElementById('plChannels').innerHTML = ['DM','TM','XHS','OTHER'].map(ch => {
       const rev = revByChannel[ch] || 0;
@@ -5355,6 +5425,9 @@ async function loadPL() {
 
     // Cost table — grouped card-by-card (mirrors the Inv page's
     // manager-grouping pattern) instead of one flat chronological list.
+    // This table only shows manual/CC-statement entries (the ones
+    // individually addable/removable here) — payroll costs are managed
+    // on the Payroll page and summarized above, not listed line-by-line here.
     const tbody = document.getElementById('plTableBody');
     if (costs.length === 0) {
       tbody.innerHTML = `<tr><td colspan="6"><div class="empty"><div class="empty-icon">📊</div><div class="empty-text">No cost entries. Click "Add Cost Entry" to start.</div></div></td></tr>`;
@@ -5441,6 +5514,7 @@ async function saveCostEntry() {
 // bulk-applies via the "Set all" controls) and explicitly confirms.
 // ──────────────────────────────────────────────────────────────
 let ccTransactions = []; // [{date, description, amount, category, channel, company_team}]
+let ccStatementBalance = null; // the bank's own printed statement balance, when Claude could find it — may differ from the sum of itemized transactions (rebates/fees aren't itemized but are reflected here)
 const CC_CHANNELS = ['DM','TM','XHS','OTHER','SHARED'];
 
 // ──────────────────────────────────────────────────────────────
@@ -5535,6 +5609,7 @@ async function promptAddCategory() {
 
 async function openCCStatementModal() {
   ccTransactions = [];
+  ccStatementBalance = null;
   document.getElementById('ccFileInput').value = '';
   document.getElementById('ccProgress').classList.add('hidden');
   document.getElementById('ccReviewWrap').classList.add('hidden');
@@ -5553,6 +5628,7 @@ async function openCCStatementModal() {
     yearSel.onchange = () => applyCCBulk('year', yearSel.value);
     monthSel.onchange = () => applyCCBulk('month', monthSel.value);
     document.getElementById('ccBulkTeam').innerHTML = `<option value="">Team…</option><option value="New Era">New Era</option><option value="Alpha C">Alpha C</option><option value="">Shared</option>`;
+    document.getElementById('ccBulkChannel').innerHTML = `<option value="">Channel…</option>` + CC_CHANNELS.map(c => `<option value="${c}">${c}</option>`).join('');
   }
   document.getElementById('ccBulkCategory').innerHTML = `<option value="">Category…</option>` + categoryOptionsHTML('');
   openModal('modalCCStatement');
@@ -5598,6 +5674,7 @@ async function processCCFile(file) {
     const defaultYear = parseInt(document.getElementById('ccBulkYear')?.value || '2026');
     const defaultMonth = new Date().getMonth() + 1;
     ccTransactions = data.transactions.map(t => ({ ...t, year: defaultYear, month: defaultMonth }));
+    ccStatementBalance = (typeof data.statement_balance === 'number') ? data.statement_balance : null;
 
     document.getElementById('ccProgress').classList.add('hidden');
     if (!ccTransactions.length) {
@@ -5678,8 +5755,19 @@ async function handleCCBulkCategoryChange(selectEl) {
 // (possibly user-edited) categorization, not just Claude's first guess.
 function updateCCSummary() {
   document.getElementById('ccCount').textContent = ccTransactions.length;
-  const total = ccTransactions.reduce((s,t) => s + t.amount, 0);
+  const total = r2(ccTransactions.reduce((s,t) => s + t.amount, 0));
   document.getElementById('ccTotal').textContent = `RM ${fmtNum(total)}`;
+
+  const balanceWrap = document.getElementById('ccBalanceWrap');
+  const balanceNote = document.getElementById('ccBalanceNote');
+  if (ccStatementBalance !== null) {
+    document.getElementById('ccBalance').textContent = `RM ${fmtNum(ccStatementBalance)}`;
+    balanceWrap.classList.remove('hidden');
+    balanceNote.classList.toggle('hidden', Math.abs(ccStatementBalance - total) < 0.01);
+  } else {
+    balanceWrap.classList.add('hidden');
+    balanceNote.classList.add('hidden');
+  }
 
   const byCategory = {};
   ccTransactions.forEach(t => { byCategory[t.category] = (byCategory[t.category] || 0) + t.amount; });
@@ -5736,6 +5824,9 @@ async function saveAllCCTransactions() {
     // If a card was linked, push this statement's total into the CC Tracker
     // so the "how much do I owe on this card" view is up to date immediately
     // — the user enters the actual amount paid + dates separately there.
+    // Prefer the bank's own printed statement balance when we found one
+    // (it correctly nets out rebates/fees that aren't itemized as costs);
+    // fall back to the sum of itemized transactions otherwise.
     if (cardId) {
       // Statements are normally one calendar period — use whichever
       // year/month appears most often across the transactions.
@@ -5743,7 +5834,8 @@ async function saveAllCCTransactions() {
       ccTransactions.forEach(t => { const k = `${t.year}-${t.month}`; counts[k] = (counts[k]||0)+1; });
       const topKey = Object.keys(counts).sort((a,b) => counts[b]-counts[a])[0];
       const [sYear, sMonth] = topKey.split('-').map(Number);
-      await upsertCCStatement(cardId, sYear, sMonth, { statement_amount: grandTotal });
+      const statementAmountToSave = ccStatementBalance !== null ? ccStatementBalance : grandTotal;
+      await upsertCCStatement(cardId, sYear, sMonth, { statement_amount: statementAmountToSave });
     }
 
     showToast(`Saved ${saved} cost entries ✓`);
