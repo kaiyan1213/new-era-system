@@ -12,7 +12,7 @@ import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 // project (Project Settings → Environment Variables). Without it, this
 // endpoint returns a clear error rather than failing silently.
 
-const CATEGORIES = ['ad_spend', 'gift', 'staff_pay', 'rental', 'admin', 'wifi', 'utilities', 'team_building', 'cleaning', 'other'];
+const CATEGORIES = ['ad_spend', 'ai_tools', 'gift', 'staff_pay', 'rental', 'admin', 'wifi', 'utilities', 'team_building', 'cleaning', 'other'];
 const CHANNELS = ['DM', 'TM', 'XHS', 'OTHER', 'SHARED'];
 const TEAMS = ['New Era', 'Alpha C', null];
 
@@ -52,6 +52,7 @@ For EVERY individual purchase/charge transaction (skip "PAYMENT RECEIVED", "TOTA
 Then classify each transaction:
 - category: pick the SINGLE best match from this exact list: ${JSON.stringify(CATEGORIES)}
   - "ad_spend" = Facebook/Meta/Google/TikTok ads, boosted posts, marketing platforms
+  - "ai_tools" = AI / SaaS software subscriptions — e.g. Anthropic, OpenAI, ChatGPT, ManyChat, Supabase, Vercel, GitHub, Notion AI, Midjourney, ElevenLabs, Claude, Make.com, Zapier, n8n, or any other AI/automation/dev-tool platform billing
   - "gift" = gift cards, flowers, hampers, retail purchases that read like client/staff gifts
   - "team_building" = restaurants, karaoke, team outings, events
   - "wifi" = internet/telco/broadband providers
@@ -59,7 +60,7 @@ Then classify each transaction:
   - "rental" = property/office rental payments
   - "cleaning" = cleaning services
   - "staff_pay" = anything reading like a salary/payroll transfer
-  - "admin" = office supplies, stationery, software subscriptions, bank fees
+  - "admin" = office supplies, stationery, bank fees, NON-AI/SaaS business admin costs (do NOT put software/AI subscriptions here — use "ai_tools" instead)
   - "other" = anything that doesn't clearly fit above
 - channel: pick from ${JSON.stringify(CHANNELS)} — only guess DM/TM/XHS if the merchant description clearly hints at one specific sales channel (rare); otherwise default "SHARED"
 - company_team: pick from ${JSON.stringify(TEAMS)} (use JSON null, not the string "null") — only guess "New Era" or "Alpha C" if the description clearly hints at one specific team; otherwise null (shared/unknown, the user will assign it manually)
