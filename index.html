@@ -1823,6 +1823,7 @@
           <label class="form-label">Category</label>
           <select id="ceCategory" class="form-input">
             <option value="ad_spend">Ad Spend</option>
+            <option value="ai_tools">AI Tools</option>
             <option value="gift">Gift</option>
             <option value="staff_pay">Staff Pay</option>
             <option value="rental">Office Rental</option>
@@ -1898,6 +1899,7 @@
           <select id="ccBulkTeam" style="font-size:11px;padding:3px 6px" onchange="applyCCBulk('company_team', this.value)"></select>
         </div>
       </div>
+      <div id="ccCategorySummary" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px"></div>
       <div class="table-wrap" style="max-height:420px;overflow-y:auto">
         <table>
           <thead>
@@ -5293,8 +5295,8 @@ async function saveCostEntry() {
 // bulk-applies via the "Set all" controls) and explicitly confirms.
 // ──────────────────────────────────────────────────────────────
 let ccTransactions = []; // [{date, description, amount, category, channel, company_team}]
-const CC_CATEGORIES = ['ad_spend','gift','staff_pay','rental','admin','wifi','utilities','team_building','cleaning','other'];
-const CC_CATEGORY_LABELS = { ad_spend:'Ad Spend', gift:'Gift', staff_pay:'Staff Pay', rental:'Office Rental', admin:'Admin', wifi:'Wifi', utilities:'Water & Electric', team_building:'Team Building', cleaning:'Cleaning Service', other:'Other' };
+const CC_CATEGORIES = ['ad_spend','ai_tools','gift','staff_pay','rental','admin','wifi','utilities','team_building','cleaning','other'];
+const CC_CATEGORY_LABELS = { ad_spend:'Ad Spend', ai_tools:'AI Tools', gift:'Gift', staff_pay:'Staff Pay', rental:'Office Rental', admin:'Admin', wifi:'Wifi', utilities:'Water & Electric', team_building:'Team Building', cleaning:'Cleaning Service', other:'Other' };
 const CC_CHANNELS = ['DM','TM','XHS','OTHER','SHARED'];
 
 function openCCStatementModal() {
@@ -5377,9 +5379,7 @@ async function processCCFile(file) {
 
 function renderCCTransactions() {
   const tbody = document.getElementById('ccTransactionBody');
-  document.getElementById('ccCount').textContent = ccTransactions.length;
-  const total = ccTransactions.reduce((s,t) => s + t.amount, 0);
-  document.getElementById('ccTotal').textContent = `RM ${fmtNum(total)}`;
+  updateCCSummary();
 
   tbody.innerHTML = ccTransactions.map((t, i) => `
     <tr>
@@ -5387,7 +5387,7 @@ function renderCCTransactions() {
       <td style="font-size:12px">${t.description}</td>
       <td class="td-mono">${fmtNum(t.amount)}</td>
       <td>
-        <select onchange="ccTransactions[${i}].category=this.value" style="font-size:11px;padding:3px 6px">
+        <select onchange="ccTransactions[${i}].category=this.value;updateCCSummary()" style="font-size:11px;padding:3px 6px">
           ${CC_CATEGORIES.map(c => `<option value="${c}"${t.category===c?' selected':''}>${CC_CATEGORY_LABELS[c]}</option>`).join('')}
         </select>
       </td>
@@ -5405,6 +5405,25 @@ function renderCCTransactions() {
       </td>
       <td><button class="btn btn-ghost btn-sm" onclick="removeCCTransaction(${i})">✕</button></td>
     </tr>`).join('');
+}
+
+// Recomputes the overall total and the per-category subtotal chips shown
+// above the table — called on initial render and whenever any row's
+// category dropdown changes, so the breakdown always reflects the current
+// (possibly user-edited) categorization, not just Claude's first guess.
+function updateCCSummary() {
+  document.getElementById('ccCount').textContent = ccTransactions.length;
+  const total = ccTransactions.reduce((s,t) => s + t.amount, 0);
+  document.getElementById('ccTotal').textContent = `RM ${fmtNum(total)}`;
+
+  const byCategory = {};
+  ccTransactions.forEach(t => { byCategory[t.category] = (byCategory[t.category] || 0) + t.amount; });
+  const order = CC_CATEGORIES.filter(c => byCategory[c] > 0);
+  document.getElementById('ccCategorySummary').innerHTML = order.map(c => `
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:11px">
+      <span style="color:var(--muted)">${CC_CATEGORY_LABELS[c]}</span>
+      <span style="font-family:var(--mono);font-weight:700;color:var(--text);margin-left:6px">RM ${fmtNum(byCategory[c])}</span>
+    </div>`).join('');
 }
 
 function removeCCTransaction(i) {
