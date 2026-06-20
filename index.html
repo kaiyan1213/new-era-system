@@ -828,7 +828,10 @@
         <div class="page-title">P&L Dashboard</div>
         <div class="page-sub">Revenue vs costs by channel & overall company</div>
       </div>
-      <button class="btn btn-primary" onclick="openCostEntryModal()">Add Cost Entry</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="openCCStatementModal()">📤 Upload Credit Card Statement</button>
+        <button class="btn btn-primary" onclick="openCostEntryModal()">Add Cost Entry</button>
+      </div>
     </div>
 
     <div class="toolbar">
@@ -1820,6 +1823,7 @@
           <label class="form-label">Category</label>
           <select id="ceCategory" class="form-input">
             <option value="ad_spend">Ad Spend</option>
+            <option value="gift">Gift</option>
             <option value="staff_pay">Staff Pay</option>
             <option value="rental">Office Rental</option>
             <option value="admin">Admin</option>
@@ -1863,8 +1867,59 @@
   </div>
 </div>
 
+<!-- Credit Card Statement Upload Modal -->
+<div class="modal-bg hidden" id="modalCCStatement">
+  <div class="modal" style="max-width:1100px;width:95vw">
+    <div class="modal-title">Upload Credit Card Statement</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px">
+      Drop the PDF statement — Claude will read every transaction and suggest a category, channel, and team for each. Nothing is saved until you review and click "Save All to P&L Costs" below.
+    </div>
+
+    <div id="ccUploadZone" class="upload-zone" style="margin-bottom:16px"
+         ondrop="handleCCDrop(event)" ondragover="event.preventDefault()"
+         onclick="document.getElementById('ccFileInput').click()">
+      <input type="file" id="ccFileInput" accept="application/pdf" style="display:none" onchange="handleCCFileSelect(event)">
+      <div style="text-align:center;padding:24px;cursor:pointer">
+        <div style="font-size:28px;margin-bottom:6px">📄</div>
+        <div>Click or drag & drop a credit card statement PDF here</div>
+      </div>
+    </div>
+
+    <div id="ccProgress" class="hidden" style="margin-bottom:12px;font-size:13px;color:var(--muted)">Reading statement…</div>
+
+    <div id="ccReviewWrap" class="hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:13px;color:var(--muted)"><span id="ccCount">0</span> transactions found — Total: <span id="ccTotal" style="color:var(--accent);font-weight:700">RM 0.00</span></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="font-size:11px;color:var(--muted)">Set all:</span>
+          <select id="ccBulkYear" style="font-size:11px;padding:3px 6px"></select>
+          <select id="ccBulkMonth" style="font-size:11px;padding:3px 6px"></select>
+          <select id="ccBulkCategory" style="font-size:11px;padding:3px 6px" onchange="applyCCBulk('category', this.value)"></select>
+          <select id="ccBulkTeam" style="font-size:11px;padding:3px 6px" onchange="applyCCBulk('company_team', this.value)"></select>
+        </div>
+      </div>
+      <div class="table-wrap" style="max-height:420px;overflow-y:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th><th>Description</th><th>Amount</th><th>Category</th><th>Channel</th><th>Team</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="ccTransactionBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalCCStatement')">Cancel</button>
+      <button class="btn btn-primary hidden" id="ccSaveAllBtn" onclick="saveAllCCTransactions()">✓ Save All to P&L Costs</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div class="toast" id="toast"></div>
+
 
 <script>
 const SUPABASE_URL = 'https://hgzbybtufyawewfsvmwx.supabase.co';
@@ -5228,6 +5283,178 @@ async function saveCostEntry() {
     await logAudit('CREATE', 'nec_pl_costs', `Cost: ${body.category} — ${body.channel} — RM${body.amount} (${MONTHS[body.month]} ${body.year})`);
     loadPL();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ──────────────────────────────────────────────────────────────
+// Credit Card Statement upload — reads a statement PDF, has Claude
+// extract + categorize every transaction, then shows an editable
+// review table before anything is written to nec_pl_costs. Nothing
+// auto-saves; the user reviews category/channel/team per row (or
+// bulk-applies via the "Set all" controls) and explicitly confirms.
+// ──────────────────────────────────────────────────────────────
+let ccTransactions = []; // [{date, description, amount, category, channel, company_team}]
+const CC_CATEGORIES = ['ad_spend','gift','staff_pay','rental','admin','wifi','utilities','team_building','cleaning','other'];
+const CC_CATEGORY_LABELS = { ad_spend:'Ad Spend', gift:'Gift', staff_pay:'Staff Pay', rental:'Office Rental', admin:'Admin', wifi:'Wifi', utilities:'Water & Electric', team_building:'Team Building', cleaning:'Cleaning Service', other:'Other' };
+const CC_CHANNELS = ['DM','TM','XHS','OTHER','SHARED'];
+
+function openCCStatementModal() {
+  ccTransactions = [];
+  document.getElementById('ccFileInput').value = '';
+  document.getElementById('ccProgress').classList.add('hidden');
+  document.getElementById('ccReviewWrap').classList.add('hidden');
+  document.getElementById('ccSaveAllBtn').classList.add('hidden');
+  document.getElementById('ccUploadZone').classList.remove('hidden');
+  // Populate bulk-set dropdowns once
+  const yearSel = document.getElementById('ccBulkYear');
+  const monthSel = document.getElementById('ccBulkMonth');
+  if (!yearSel.options.length) {
+    yearSel.innerHTML = `<option value="2025">2025</option><option value="2026" selected>2026</option>`;
+    monthSel.innerHTML = MONTHS.map((m,i) => i>0 ? `<option value="${i}"${i===new Date().getMonth()+1?' selected':''}>${m}</option>` : '').join('');
+    yearSel.onchange = () => applyCCBulk('year', yearSel.value);
+    monthSel.onchange = () => applyCCBulk('month', monthSel.value);
+    document.getElementById('ccBulkCategory').innerHTML = `<option value="">Category…</option>` + CC_CATEGORIES.map(c => `<option value="${c}">${CC_CATEGORY_LABELS[c]}</option>`).join('');
+    document.getElementById('ccBulkTeam').innerHTML = `<option value="">Team…</option><option value="New Era">New Era</option><option value="Alpha C">Alpha C</option><option value="">Shared</option>`;
+  }
+  openModal('modalCCStatement');
+}
+
+function handleCCDrop(e) {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (file) processCCFile(file);
+}
+function handleCCFileSelect(e) {
+  const file = e.target.files[0];
+  if (file) processCCFile(file);
+}
+
+async function processCCFile(file) {
+  if (file.type !== 'application/pdf') return showToast('Please upload a PDF', 'error');
+  document.getElementById('ccUploadZone').classList.add('hidden');
+  document.getElementById('ccProgress').textContent = `Reading ${file.name}…`;
+  document.getElementById('ccProgress').classList.remove('hidden');
+
+  try {
+    const base64 = await new Promise((res, rej) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        const comma = result.indexOf(',');
+        if (comma < 0) { rej(new Error('Could not read file')); return; }
+        res(result.substring(comma + 1));
+      };
+      reader.onerror = () => rej(new Error('File read error'));
+      reader.readAsDataURL(file);
+    });
+
+    const response = await fetch('/api/parse-cc-statement', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ base64 })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Failed to parse statement');
+
+    const defaultYear = parseInt(document.getElementById('ccBulkYear')?.value || '2026');
+    const defaultMonth = new Date().getMonth() + 1;
+    ccTransactions = data.transactions.map(t => ({ ...t, year: defaultYear, month: defaultMonth }));
+
+    document.getElementById('ccProgress').classList.add('hidden');
+    if (!ccTransactions.length) {
+      showToast('No transactions found in this PDF', 'error');
+      document.getElementById('ccUploadZone').classList.remove('hidden');
+      return;
+    }
+    renderCCTransactions();
+    document.getElementById('ccReviewWrap').classList.remove('hidden');
+    document.getElementById('ccSaveAllBtn').classList.remove('hidden');
+  } catch(e) {
+    document.getElementById('ccProgress').classList.add('hidden');
+    document.getElementById('ccUploadZone').classList.remove('hidden');
+    showToast('Error: ' + e.message, 'error');
+  }
+}
+
+function renderCCTransactions() {
+  const tbody = document.getElementById('ccTransactionBody');
+  document.getElementById('ccCount').textContent = ccTransactions.length;
+  const total = ccTransactions.reduce((s,t) => s + t.amount, 0);
+  document.getElementById('ccTotal').textContent = `RM ${fmtNum(total)}`;
+
+  tbody.innerHTML = ccTransactions.map((t, i) => `
+    <tr>
+      <td class="td-mono" style="font-size:11px">${t.date}</td>
+      <td style="font-size:12px">${t.description}</td>
+      <td class="td-mono">${fmtNum(t.amount)}</td>
+      <td>
+        <select onchange="ccTransactions[${i}].category=this.value" style="font-size:11px;padding:3px 6px">
+          ${CC_CATEGORIES.map(c => `<option value="${c}"${t.category===c?' selected':''}>${CC_CATEGORY_LABELS[c]}</option>`).join('')}
+        </select>
+      </td>
+      <td>
+        <select onchange="ccTransactions[${i}].channel=this.value" style="font-size:11px;padding:3px 6px">
+          ${CC_CHANNELS.map(c => `<option value="${c}"${t.channel===c?' selected':''}>${c}</option>`).join('')}
+        </select>
+      </td>
+      <td>
+        <select onchange="ccTransactions[${i}].company_team=this.value||null" style="font-size:11px;padding:3px 6px">
+          <option value=""${!t.company_team?' selected':''}>Shared</option>
+          <option value="New Era"${t.company_team==='New Era'?' selected':''}>New Era</option>
+          <option value="Alpha C"${t.company_team==='Alpha C'?' selected':''}>Alpha C</option>
+        </select>
+      </td>
+      <td><button class="btn btn-ghost btn-sm" onclick="removeCCTransaction(${i})">✕</button></td>
+    </tr>`).join('');
+}
+
+function removeCCTransaction(i) {
+  ccTransactions.splice(i, 1);
+  renderCCTransactions();
+  if (!ccTransactions.length) {
+    document.getElementById('ccReviewWrap').classList.add('hidden');
+    document.getElementById('ccSaveAllBtn').classList.add('hidden');
+    document.getElementById('ccUploadZone').classList.remove('hidden');
+  }
+}
+
+// Applies one field to every transaction at once (the "Set all" row above
+// the table) — used for year/month (statements are always one period) and
+// optionally to blanket-set category/team when most lines share one value.
+function applyCCBulk(field, value) {
+  if (!value && field !== 'company_team') return; // empty placeholder selected, no-op
+  ccTransactions.forEach(t => { t[field] = (field === 'year' || field === 'month') ? parseInt(value) : (value || null); });
+  renderCCTransactions();
+}
+
+async function saveAllCCTransactions() {
+  if (!ccTransactions.length) return;
+  const btn = document.getElementById('ccSaveAllBtn');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  let saved = 0;
+  try {
+    for (const t of ccTransactions) {
+      await sb('nec_pl_costs', {
+        method: 'POST',
+        body: {
+          year: t.year, month: t.month,
+          channel: t.channel, company_team: t.company_team,
+          category: t.category, description: t.description,
+          amount: t.amount
+        }
+      });
+      saved++;
+    }
+    await logAudit('CREATE', 'nec_pl_costs', `Bulk-imported ${saved} transactions from credit card statement, total RM${ccTransactions.reduce((s,t)=>s+t.amount,0).toFixed(2)}`);
+    showToast(`Saved ${saved} cost entries ✓`);
+    closeModal('modalCCStatement');
+    loadPL();
+  } catch(e) {
+    showToast(`Saved ${saved}/${ccTransactions.length} before error: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✓ Save All to P&L Costs';
+  }
 }
 
 async function deleteCost(id) {
