@@ -276,6 +276,7 @@
       <a class="nav-link" onclick="showPage('payroll')">Payroll</a>
       <a class="nav-link" onclick="showPage('manager')">Manager</a>
       <a class="nav-link" onclick="showPage('pl')">P&amp;L</a>
+      <a class="nav-link" onclick="showPage('cctracker')">CC Tracker</a>
       <a class="nav-link" onclick="showPage('breakdown')">Breakdown</a>
       <a class="nav-link" onclick="showPage('bankdir')">Bank Details</a>
       <a class="nav-link" onclick="showPage('export')">Export</a>
@@ -904,6 +905,55 @@
         <tbody id="plTableBody">
           <tr><td colspan="6"><div class="empty"><div class="empty-icon">📊</div><div class="empty-text">Loading cost entries...</div></div></td></tr>
         </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ========== CREDIT CARD TRACKER PAGE ========== -->
+  <div id="page-cctracker" class="hidden">
+    <div class="page-header">
+      <div>
+        <div class="page-title">Credit Card Tracker</div>
+        <div class="page-sub">Statement amounts, due dates, and payment status — card by card</div>
+      </div>
+      <button class="btn btn-primary" onclick="openAddCardModal()">+ Add Card</button>
+    </div>
+
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <select id="cctYear" onchange="loadCCTracker()">
+          <option value="2025">2025</option>
+          <option value="2026" selected>2026</option>
+        </select>
+        <select id="cctMonth" onchange="loadCCTracker()">
+          <option value="1">January</option><option value="2">February</option>
+          <option value="3">March</option><option value="4">April</option>
+          <option value="5">May</option><option value="6">June</option>
+          <option value="7">July</option><option value="8">August</option>
+          <option value="9">September</option><option value="10">October</option>
+          <option value="11">November</option><option value="12">December</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Card</th>
+            <th>Statement Amount</th>
+            <th>Payment Amount</th>
+            <th>Balance</th>
+            <th>Statement Date</th>
+            <th>Due Date</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="cctTableBody">
+          <tr><td colspan="8"><div class="empty"><div class="empty-icon">💳</div><div class="empty-text">Loading cards...</div></div></td></tr>
+        </tbody>
+        <tfoot id="cctTableFoot"></tfoot>
       </table>
     </div>
   </div>
@@ -1845,9 +1895,17 @@
         <label class="form-label">Description</label>
         <input type="text" id="ceDesc" class="form-input" placeholder="e.g. Facebook Ads June - DM team">
       </div>
-      <div class="form-group">
-        <label class="form-label">Amount (RM)</label>
-        <input type="number" id="ceAmount" class="form-input" placeholder="0.00" step="0.01">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Amount (RM)</label>
+          <input type="number" id="ceAmount" class="form-input" placeholder="0.00" step="0.01">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Credit Card (optional)</label>
+          <select id="ceCard" class="form-input">
+            <option value="">— Not linked to a card —</option>
+          </select>
+        </div>
       </div>
     </div>
     <div class="form-actions">
@@ -1863,6 +1921,13 @@
     <div class="modal-title">Upload Credit Card Statement</div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:16px">
       Drop the PDF statement — Claude will read every transaction and suggest a category, channel, and team for each. Nothing is saved until you review and click "Save All to P&L Costs" below.
+    </div>
+
+    <div class="form-group" style="margin-bottom:14px;max-width:320px">
+      <label class="form-label">Which card is this statement from? (optional)</label>
+      <select id="ccStatementCard" class="form-input">
+        <option value="">— Not linked to a specific card —</option>
+      </select>
     </div>
 
     <div id="ccUploadZone" class="upload-zone" style="margin-bottom:16px"
@@ -1904,6 +1969,53 @@
     <div class="form-actions">
       <button class="btn btn-ghost" onclick="closeModal('modalCCStatement')">Cancel</button>
       <button class="btn btn-primary hidden" id="ccSaveAllBtn" onclick="saveAllCCTransactions()">✓ Save All to P&L Costs</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Credit Card Modal -->
+<div class="modal-bg hidden" id="modalAddCard">
+  <div class="modal">
+    <div class="modal-title">Add Credit Card</div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">Card Name</label>
+        <input type="text" id="acCardName" class="form-input" placeholder="e.g. KY CIMB">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Bank</label>
+          <input type="text" id="acBank" class="form-input" placeholder="e.g. CIMB">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Statement Day (1-31)</label>
+          <input type="number" id="acStatementDay" class="form-input" min="1" max="31" placeholder="28">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Due Day (1-31)</label>
+          <input type="number" id="acDueDay" class="form-input" min="1" max="31" placeholder="17">
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--muted)">Statement/Due Day are used to auto-fill each month's dates — you can still adjust them per statement afterwards.</div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalAddCard')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveNewCard()">Add Card</button>
+    </div>
+  </div>
+</div>
+
+<!-- Credit Card Payment Reminder Modal -->
+<div class="modal-bg hidden" id="modalCCReminder">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-title">💳 Credit Card Payment Due</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px">The following cards are due soon (or overdue) and haven't been marked as paid yet.</div>
+    <div id="ccReminderList" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px"></div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalCCReminder')">Dismiss for now</button>
+      <button class="btn btn-primary" onclick="closeModal('modalCCReminder');showPage('cctracker')">Go to CC Tracker</button>
     </div>
   </div>
 </div>
@@ -1968,6 +2080,10 @@ function initUserUI() {
   if (currentUser.role === 'owner') {
     document.getElementById('auditNavLink').style.display = 'inline-flex';
   }
+  // Check for credit cards due soon/overdue — slight delay so this doesn't
+  // block the initial page render, and so it appears on top once the
+  // main UI has settled in.
+  setTimeout(() => checkCCReminders(), 800);
 }
 
 function getCurrentUser() {
@@ -2081,7 +2197,7 @@ function fmtNum(n) { return parseFloat(n || 0).toLocaleString('en-MY', {minimumF
 function r2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
 
 function showPage(page) {
-  ['proxy','payroll','manager','pl','export','audit','upload','breakdown','setup','directory','bankdir'].forEach(p => {
+  ['proxy','payroll','manager','pl','export','audit','upload','breakdown','setup','directory','bankdir','cctracker'].forEach(p => {
     const el = document.getElementById(`page-${p}`);
     if (el) el.classList.add('hidden');
   });
@@ -2093,6 +2209,7 @@ function showPage(page) {
   if (page === 'payroll') loadPayroll();
   if (page === 'manager') loadAllManagerData();
   if (page === 'pl') loadPL();
+  if (page === 'cctracker') loadCCTracker();
   if (page === 'audit') loadAuditLog();
   if (page === 'breakdown') loadBreakdown();
   if (page === 'setup') loadSetup();
@@ -5236,20 +5353,39 @@ async function loadPL() {
       </div>`;
     }).join('');
 
-    // Cost table
+    // Cost table — grouped card-by-card (mirrors the Inv page's
+    // manager-grouping pattern) instead of one flat chronological list.
     const tbody = document.getElementById('plTableBody');
     if (costs.length === 0) {
       tbody.innerHTML = `<tr><td colspan="6"><div class="empty"><div class="empty-icon">📊</div><div class="empty-text">No cost entries. Click "Add Cost Entry" to start.</div></div></td></tr>`;
       return;
     }
-    tbody.innerHTML = costs.map(c => `<tr>
-      <td class="td-mono">${MONTHS[c.month]} ${c.year}</td>
-      <td><span class="badge badge-${(c.channel||'other').toLowerCase()}">${c.channel}</span></td>
-      <td>${categoryLabel(c.category)}</td>
-      <td style="color:var(--muted);font-size:12px">${c.description || '—'}</td>
-      <td class="td-mono" style="color:var(--red)">${fmt(c.amount)}</td>
-      <td><button class="btn btn-danger btn-sm" onclick="deleteCost('${c.id}')">✕</button></td>
-    </tr>`).join('');
+    await loadCreditCards();
+    const groups = {}; // cardId|'_manual' -> costs[]
+    costs.forEach(c => {
+      const key = c.credit_card_id || '_manual';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(c);
+    });
+    const namedCardIds = ccCards.map(c => c.id).filter(id => groups[id]);
+    const groupOrder = [...namedCardIds, ...(groups['_manual'] ? ['_manual'] : [])];
+
+    let html = '';
+    groupOrder.forEach(key => {
+      const rows = groups[key];
+      const label = key === '_manual' ? 'Manual / Other Entries' : cardName(key);
+      const subtotal = r2(rows.reduce((s,c) => s + parseFloat(c.amount||0), 0));
+      html += `<tr class="group-row" data-group-header="${label}"><td colspan="6" style="background:var(--surface);font-weight:700;color:var(--accent);padding:10px 14px">${label} — RM ${fmtNum(subtotal)}</td></tr>`;
+      html += rows.map(c => `<tr>
+        <td class="td-mono">${MONTHS[c.month]} ${c.year}</td>
+        <td><span class="badge badge-${(c.channel||'other').toLowerCase()}">${c.channel}</span></td>
+        <td>${categoryLabel(c.category)}</td>
+        <td style="color:var(--muted);font-size:12px">${c.description || '—'}</td>
+        <td class="td-mono" style="color:var(--red)">${fmt(c.amount)}</td>
+        <td><button class="btn btn-danger btn-sm" onclick="deleteCost('${c.id}')">✕</button></td>
+      </tr>`).join('');
+    });
+    tbody.innerHTML = html;
   } catch(e) {
     document.getElementById('plTableBody').innerHTML = `<tr><td colspan="6"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Tables not set up. Go to Setup tab.</div></div></td></tr>`;
   }
@@ -5257,7 +5393,10 @@ async function loadPL() {
 
 async function openCostEntryModal() {
   await loadCostCategories();
+  await loadCreditCards();
   document.getElementById('ceCategory').innerHTML = categoryOptionsHTML('ad_spend');
+  document.getElementById('ceCard').innerHTML = `<option value="">— Not linked to a card —</option>`
+    + ccCards.map(c => `<option value="${c.id}">${c.card_name}</option>`).join('');
   openModal('modalCostEntry');
 }
 
@@ -5282,6 +5421,7 @@ async function saveCostEntry() {
     category: document.getElementById('ceCategory').value,
     description: document.getElementById('ceDesc').value,
     amount: parseFloat(document.getElementById('ceAmount').value),
+    credit_card_id: document.getElementById('ceCard').value || null,
   };
   if (!body.amount) return showToast('Enter amount', 'error');
   try {
@@ -5312,6 +5452,26 @@ const CC_CHANNELS = ['DM','TM','XHS','OTHER','SHARED'];
 // ──────────────────────────────────────────────────────────────
 let costCategories = []; // [{slug, label}]
 let costCategoriesLoaded = false;
+
+// ──────────────────────────────────────────────────────────────
+// Credit cards — master list used by both the P&L cost table
+// (grouping "card by card" instead of one flat list) and the CC
+// Tracker page (statement/due date tracking + payment reminders).
+// ──────────────────────────────────────────────────────────────
+let ccCards = []; // [{id, card_name, bank, statement_day, due_day, active}]
+let ccCardsLoaded = false;
+
+async function loadCreditCards(force = false) {
+  if (ccCardsLoaded && !force) return;
+  try {
+    ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true&order=card_name.asc' });
+    ccCardsLoaded = true;
+  } catch(e) { ccCards = []; } // table not set up yet — features degrade gracefully
+}
+
+function cardName(id) {
+  return ccCards.find(c => c.id === id)?.card_name || null;
+}
 const ADD_CATEGORY_SENTINEL = '__add_new__';
 
 async function loadCostCategories(force = false) {
@@ -5381,6 +5541,9 @@ async function openCCStatementModal() {
   document.getElementById('ccSaveAllBtn').classList.add('hidden');
   document.getElementById('ccUploadZone').classList.remove('hidden');
   await loadCostCategories();
+  await loadCreditCards();
+  document.getElementById('ccStatementCard').innerHTML = `<option value="">— Not linked to a specific card —</option>`
+    + ccCards.map(c => `<option value="${c.id}">${c.card_name}</option>`).join('');
   // Populate bulk-set dropdowns once
   const yearSel = document.getElementById('ccBulkYear');
   const monthSel = document.getElementById('ccBulkMonth');
@@ -5550,6 +5713,7 @@ function applyCCBulk(field, value) {
 async function saveAllCCTransactions() {
   if (!ccTransactions.length) return;
   const btn = document.getElementById('ccSaveAllBtn');
+  const cardId = document.getElementById('ccStatementCard').value || null;
   btn.disabled = true;
   btn.textContent = 'Saving…';
   let saved = 0;
@@ -5561,12 +5725,27 @@ async function saveAllCCTransactions() {
           year: t.year, month: t.month,
           channel: t.channel, company_team: t.company_team,
           category: t.category, description: t.description,
-          amount: t.amount
+          amount: t.amount, credit_card_id: cardId
         }
       });
       saved++;
     }
-    await logAudit('CREATE', 'nec_pl_costs', `Bulk-imported ${saved} transactions from credit card statement, total RM${ccTransactions.reduce((s,t)=>s+t.amount,0).toFixed(2)}`);
+    const grandTotal = r2(ccTransactions.reduce((s,t)=>s+t.amount,0));
+    await logAudit('CREATE', 'nec_pl_costs', `Bulk-imported ${saved} transactions from credit card statement${cardId ? ` (${cardName(cardId)})` : ''}, total RM${grandTotal.toFixed(2)}`);
+
+    // If a card was linked, push this statement's total into the CC Tracker
+    // so the "how much do I owe on this card" view is up to date immediately
+    // — the user enters the actual amount paid + dates separately there.
+    if (cardId) {
+      // Statements are normally one calendar period — use whichever
+      // year/month appears most often across the transactions.
+      const counts = {};
+      ccTransactions.forEach(t => { const k = `${t.year}-${t.month}`; counts[k] = (counts[k]||0)+1; });
+      const topKey = Object.keys(counts).sort((a,b) => counts[b]-counts[a])[0];
+      const [sYear, sMonth] = topKey.split('-').map(Number);
+      await upsertCCStatement(cardId, sYear, sMonth, { statement_amount: grandTotal });
+    }
+
     showToast(`Saved ${saved} cost entries ✓`);
     closeModal('modalCCStatement');
     loadPL();
@@ -5583,6 +5762,203 @@ async function deleteCost(id) {
   await sbDelete('nec_pl_costs', `id=eq.${id}`);
   showToast('Deleted');
   loadPL();
+}
+
+// ============ CREDIT CARD TRACKER ============
+// One row per active card per month: statement amount, payment amount,
+// statement/due/payment dates, and paid status — mirrors the manual
+// tracking spreadsheet the owner was keeping, but with auto-fill from
+// each card's default statement/due day and a due-date reminder popup.
+
+let ccStatements = []; // current month's nec_cc_statements rows
+
+async function loadCCTracker() {
+  const monthSel = document.getElementById('cctMonth');
+  if (!monthSel.dataset.init) {
+    monthSel.value = String(new Date().getMonth() + 1);
+    monthSel.dataset.init = '1';
+  }
+  const year = parseInt(document.getElementById('cctYear').value);
+  const month = parseInt(monthSel.value);
+  await loadCreditCards(true); // always fresh on this page — card list rarely changes but should reflect adds immediately
+  try {
+    ccStatements = await sb('nec_cc_statements', { filter: `year=eq.${year}&month=eq.${month}` });
+    renderCCTracker();
+  } catch(e) {
+    document.getElementById('cctTableBody').innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Tables not set up. Go to Setup tab.</div></div></td></tr>`;
+  }
+}
+
+// Computes a YYYY-MM-DD date string for "day X of the given year/month",
+// clamping to the last actual day of that month (e.g. day 31 in February
+// becomes the 28th/29th) so auto-filled defaults never produce an invalid
+// date.
+function dayToDateStr(year, month, day) {
+  if (!day) return '';
+  const lastDay = new Date(year, month, 0).getDate();
+  const d = Math.min(day, lastDay);
+  return `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
+
+function renderCCTracker() {
+  const year = parseInt(document.getElementById('cctYear').value);
+  const month = parseInt(document.getElementById('cctMonth').value);
+  const tbody = document.getElementById('cctTableBody');
+  if (!ccCards.length) {
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-icon">💳</div><div class="empty-text">No cards yet. Click "+ Add Card" above.</div></div></td></tr>`;
+    document.getElementById('cctTableFoot').innerHTML = '';
+    return;
+  }
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  let totalStatement = 0, totalPayment = 0, totalBalance = 0;
+
+  tbody.innerHTML = ccCards.map(card => {
+    const s = ccStatements.find(x => x.card_id === card.id) || {};
+    const statementAmt = parseFloat(s.statement_amount || 0);
+    const paymentAmt = parseFloat(s.payment_amount || 0);
+    const balance = r2(statementAmt - paymentAmt);
+    totalStatement += statementAmt; totalPayment += paymentAmt; totalBalance += balance;
+
+    const statementDate = s.statement_date || dayToDateStr(year, month, card.statement_day);
+    // Due date normally falls in the month AFTER the statement period
+    const dueMonth = month === 12 ? 1 : month + 1;
+    const dueYear = month === 12 ? year + 1 : year;
+    const dueDate = s.due_date || dayToDateStr(dueYear, dueMonth, card.due_day);
+
+    const isPaid = !!s.is_paid;
+    let dueBadge = '';
+    if (!isPaid && dueDate) {
+      const d = new Date(dueDate); d.setHours(0,0,0,0);
+      const daysLeft = Math.round((d - today) / 86400000);
+      if (daysLeft < 0) dueBadge = `<span style="color:var(--red);font-size:10px;font-weight:700">OVERDUE ${Math.abs(daysLeft)}d</span>`;
+      else if (daysLeft <= 3) dueBadge = `<span style="color:var(--yellow);font-size:10px;font-weight:700">${daysLeft===0?'DUE TODAY':`${daysLeft}d left`}</span>`;
+    }
+
+    return `<tr>
+      <td class="td-name">${card.card_name}${card.bank ? `<div class="td-muted" style="font-size:10px">${card.bank}</div>` : ''}</td>
+      <td><input type="number" step="0.01" value="${statementAmt || ''}" placeholder="0.00" style="width:110px;font-family:var(--mono)" onchange="upsertCCStatement('${card.id}',${year},${month},{statement_amount:parseFloat(this.value)||0})"></td>
+      <td><input type="number" step="0.01" value="${paymentAmt || ''}" placeholder="0.00" style="width:110px;font-family:var(--mono)" onchange="upsertCCStatement('${card.id}',${year},${month},{payment_amount:parseFloat(this.value)||0})"></td>
+      <td class="td-mono" style="color:${balance>0?'var(--red)':'var(--green)'}">${fmtNum(balance)}</td>
+      <td><input type="date" value="${statementDate}" style="width:140px" onchange="upsertCCStatement('${card.id}',${year},${month},{statement_date:this.value})"></td>
+      <td><input type="date" value="${dueDate}" style="width:140px" onchange="upsertCCStatement('${card.id}',${year},${month},{due_date:this.value})">${dueBadge ? `<div style="margin-top:2px">${dueBadge}</div>` : ''}</td>
+      <td>${isPaid ? `<span class="badge badge-paid">✓ Paid${s.payment_date ? ' '+s.payment_date : ''}</span>` : `<span class="badge" style="background:rgba(239,68,68,0.15);color:var(--red)">Unpaid</span>`}</td>
+      <td>
+        <button class="btn btn-ghost btn-sm" onclick="toggleCCPaid('${card.id}',${year},${month},${isPaid})">${isPaid ? 'Unmark' : 'Mark Paid'}</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('cctTableFoot').innerHTML = `<tr style="font-weight:700;border-top:2px solid var(--border)">
+    <td>Total</td>
+    <td class="td-mono">${fmtNum(totalStatement)}</td>
+    <td class="td-mono">${fmtNum(totalPayment)}</td>
+    <td class="td-mono" style="color:${totalBalance>0?'var(--red)':'var(--green)'}">${fmtNum(totalBalance)}</td>
+    <td colspan="4"></td>
+  </tr>`;
+}
+
+// Creates or updates this card's statement row for the given year/month.
+// Used by every inline-editable field (amounts, dates) on the tracker —
+// each field saves independently on change/blur.
+async function upsertCCStatement(cardId, year, month, patch) {
+  try {
+    const existing = ccStatements.find(s => s.card_id === cardId && s.year === year && s.month === month);
+    if (existing) {
+      const [updated] = await sb('nec_cc_statements', { method: 'PATCH', filter: `id=eq.${existing.id}`, body: patch });
+      Object.assign(existing, updated || patch);
+    } else {
+      const [created] = await sb('nec_cc_statements', { method: 'POST', body: { card_id: cardId, year, month, ...patch } });
+      if (created) ccStatements.push(created);
+    }
+    // Only re-render if the CC Tracker page is the one currently visible —
+    // avoids redundant DOM work when this is called from the CC Statement
+    // Upload save flow while that modal (not this page) is open.
+    if (!document.getElementById('page-cctracker').classList.contains('hidden')) renderCCTracker();
+  } catch(e) { showToast('Error saving: ' + e.message, 'error'); }
+}
+
+async function toggleCCPaid(cardId, year, month, currentlyPaid) {
+  const patch = currentlyPaid
+    ? { is_paid: false }
+    : { is_paid: true, payment_date: new Date().toISOString().slice(0,10) };
+  await upsertCCStatement(cardId, year, month, patch);
+  await logAudit('UPDATE', 'nec_cc_statements', `${cardName(cardId)} ${MONTHS[month]} ${year} marked as ${currentlyPaid ? 'unpaid' : 'paid'}`);
+  showToast(currentlyPaid ? 'Marked as unpaid' : 'Marked as paid ✓');
+}
+
+function openAddCardModal() {
+  document.getElementById('acCardName').value = '';
+  document.getElementById('acBank').value = '';
+  document.getElementById('acStatementDay').value = '';
+  document.getElementById('acDueDay').value = '';
+  openModal('modalAddCard');
+}
+
+async function saveNewCard() {
+  const card_name = document.getElementById('acCardName').value.trim();
+  if (!card_name) return showToast('Enter a card name', 'error');
+  const body = {
+    card_name,
+    bank: document.getElementById('acBank').value.trim() || null,
+    statement_day: parseInt(document.getElementById('acStatementDay').value) || null,
+    due_day: parseInt(document.getElementById('acDueDay').value) || null
+  };
+  try {
+    await sb('nec_credit_cards', { method: 'POST', body });
+    await logAudit('CREATE', 'nec_credit_cards', `Added card: ${card_name}`);
+    showToast(`Card "${card_name}" added ✓`);
+    closeModal('modalAddCard');
+    await loadCreditCards(true);
+    loadCCTracker();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ── Payment-due reminder ─────────────────────────────────────
+// Checked once after login (and on every page load where a session is
+// already active) — shows a popup for any unpaid card whose due date is
+// today, overdue, or within the next 3 days. Reappears every time the
+// site is opened until the card is marked as paid (or its balance hits
+// zero), per the "remind me every time I open the site" requirement.
+async function checkCCReminders() {
+  try {
+    await loadCreditCards();
+    if (!ccCards.length) return;
+    const today = new Date(); today.setHours(0,0,0,0);
+    const cutoff = new Date(today); cutoff.setDate(cutoff.getDate() + 3);
+
+    const statements = await sb('nec_cc_statements', { filter: 'is_paid=eq.false' });
+    const due = statements
+      .map(s => ({ ...s, balance: r2(parseFloat(s.statement_amount||0) - parseFloat(s.payment_amount||0)) }))
+      .filter(s => s.due_date && s.balance > 0 && new Date(s.due_date) <= cutoff)
+      .map(s => {
+        const d = new Date(s.due_date); d.setHours(0,0,0,0);
+        const daysLeft = Math.round((d - today) / 86400000);
+        return { ...s, card_name: cardName(s.card_id) || 'Unknown card', daysLeft };
+      })
+      .sort((a,b) => a.daysLeft - b.daysLeft);
+
+    if (due.length) showCCReminderModal(due);
+  } catch(e) { /* table not set up yet on this deployment — fail silently */ }
+}
+
+function showCCReminderModal(due) {
+  document.getElementById('ccReminderList').innerHTML = due.map(s => {
+    const statusLabel = s.daysLeft < 0 ? `<span style="color:var(--red);font-weight:700">OVERDUE by ${Math.abs(s.daysLeft)} day${Math.abs(s.daysLeft)===1?'':'s'}</span>`
+      : s.daysLeft === 0 ? `<span style="color:var(--yellow);font-weight:700">Due TODAY</span>`
+      : `<span style="color:var(--yellow);font-weight:700">Due in ${s.daysLeft} day${s.daysLeft===1?'':'s'}</span>`;
+    return `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-weight:600">${s.card_name} — ${MONTHS[s.month]} ${s.year}</div>
+        <div style="font-size:12px;margin-top:2px">${statusLabel} · Due ${s.due_date}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-family:var(--mono);font-weight:700;color:var(--red)">RM ${fmtNum(s.balance)}</div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:4px" onclick="toggleCCPaid('${s.card_id}',${s.year},${s.month},false);this.closest('.modal-bg').classList.add('hidden')">Mark Paid</button>
+      </div>
+    </div>`;
+  }).join('');
+  openModal('modalCCReminder');
 }
 
 // ============ EXPORT ============
@@ -5917,6 +6293,49 @@ INSERT INTO nec_cost_categories (slug, label) VALUES
   ('cleaning','Cleaning Service'), ('other','Other')
 ON CONFLICT (slug) DO NOTHING;
 
+-- Credit Card Tracker — master list of company credit cards plus one
+-- statement record per card per month (statement amount, payment amount,
+-- statement/due/payment dates, paid status). Powers the CC Tracker page
+-- and the "pay before due date" reminder popup.
+CREATE TABLE IF NOT EXISTS nec_credit_cards (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  card_name text UNIQUE NOT NULL,
+  bank text,
+  statement_day int,
+  due_day int,
+  active boolean DEFAULT true,
+  created_at timestamptz DEFAULT now()
+);
+INSERT INTO nec_credit_cards (card_name, bank, statement_day, due_day) VALUES
+  ('KY CIMB', 'CIMB', 28, 17),
+  ('KY Alliance', 'Alliance', 24, 13),
+  ('Jenny UOB', 'UOB', 28, 17),
+  ('Chloe CIMB', 'CIMB', 27, 16),
+  ('Carine CIMB', 'CIMB', 26, 15),
+  ('Jess HLB', 'HLB', 30, 19)
+ON CONFLICT (card_name) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS nec_cc_statements (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  card_id uuid REFERENCES nec_credit_cards(id),
+  year int NOT NULL,
+  month int NOT NULL,
+  statement_amount numeric(10,2) DEFAULT 0,
+  payment_amount numeric(10,2) DEFAULT 0,
+  payment_date date,
+  statement_date date,
+  due_date date,
+  is_paid boolean DEFAULT false,
+  notes text,
+  created_at timestamptz DEFAULT now(),
+  UNIQUE(card_id, year, month)
+);
+
+-- Links each P&L cost entry to the credit card it was charged on (set
+-- automatically when importing via Upload Credit Card Statement) so the
+-- P&L Costs table can be grouped card-by-card instead of one flat list.
+ALTER TABLE nec_pl_costs ADD COLUMN IF NOT EXISTS credit_card_id uuid REFERENCES nec_credit_cards(id);
+
 CREATE TABLE IF NOT EXISTS nec_audit_log (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   username text NOT NULL,
@@ -6044,7 +6463,7 @@ async function saveManagers() {
 async function testConnection() {
   const result = document.getElementById('connTestResult');
   result.textContent = 'Testing...';
-  const tables = ['proxy_accounts','proxy_invoices','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_manager_payslips','nec_manager_adjustments','nec_pl_costs','nec_cost_categories','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads','nec_order_assignments','monthly_config'];
+  const tables = ['proxy_accounts','proxy_invoices','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_manager_payslips','nec_manager_adjustments','nec_pl_costs','nec_cost_categories','nec_credit_cards','nec_cc_statements','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads','nec_order_assignments','monthly_config'];
   const results = [];
   for (const t of tables) {
     try {
