@@ -1821,18 +1821,7 @@
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Category</label>
-          <select id="ceCategory" class="form-input">
-            <option value="ad_spend">Ad Spend</option>
-            <option value="ai_tools">AI Tools</option>
-            <option value="gift">Gift</option>
-            <option value="staff_pay">Staff Pay</option>
-            <option value="rental">Office Rental</option>
-            <option value="admin">Admin</option>
-            <option value="wifi">Wifi</option>
-            <option value="utilities">Water & Electric</option>
-            <option value="team_building">Team Building</option>
-            <option value="cleaning">Cleaning Service</option>
-            <option value="other">Other</option>
+          <select id="ceCategory" class="form-input" onchange="handleCECategoryChange(this)">
           </select>
         </div>
         <div class="form-group">
@@ -1895,7 +1884,7 @@
           <span style="font-size:11px;color:var(--muted)">Set all:</span>
           <select id="ccBulkYear" style="font-size:11px;padding:3px 6px"></select>
           <select id="ccBulkMonth" style="font-size:11px;padding:3px 6px"></select>
-          <select id="ccBulkCategory" style="font-size:11px;padding:3px 6px" onchange="applyCCBulk('category', this.value)"></select>
+          <select id="ccBulkCategory" style="font-size:11px;padding:3px 6px" onchange="handleCCBulkCategoryChange(this)"></select>
           <select id="ccBulkTeam" style="font-size:11px;padding:3px 6px" onchange="applyCCBulk('company_team', this.value)"></select>
         </div>
       </div>
@@ -2040,6 +2029,7 @@ async function loadAuditLog() {
         proxy_accounts:'Proxy Accounts', proxy_invoices:'Proxy Invoices',
         nec_staff:'Staff', nec_payroll:'Payroll',
         nec_manager_sharing:'Mgr Sharing', nec_pl_costs:'P&L Costs',
+        nec_cost_categories:'Cost Categories',
         nec_managers:'Managers'
       }[l.table_name] || l.table_name;
       return `<tr>
@@ -5122,6 +5112,7 @@ async function deleteManagerRecord(id) {
 async function loadPL() {
   const year = document.getElementById('plYear').value;
   const month = document.getElementById('plMonth').value;
+  await loadCostCategories();
 
   try {
     let invFilter = `year=eq.${year}`;
@@ -5251,11 +5242,10 @@ async function loadPL() {
       tbody.innerHTML = `<tr><td colspan="6"><div class="empty"><div class="empty-icon">📊</div><div class="empty-text">No cost entries. Click "Add Cost Entry" to start.</div></div></td></tr>`;
       return;
     }
-    const categoryLabels = { ad_spend:'Ad Spend', staff_pay:'Staff Pay', rental:'Rental', admin:'Admin', wifi:'Wifi', utilities:'Utilities', team_building:'Team Building', cleaning:'Cleaning', other:'Other' };
     tbody.innerHTML = costs.map(c => `<tr>
       <td class="td-mono">${MONTHS[c.month]} ${c.year}</td>
       <td><span class="badge badge-${(c.channel||'other').toLowerCase()}">${c.channel}</span></td>
-      <td>${categoryLabels[c.category] || c.category}</td>
+      <td>${categoryLabel(c.category)}</td>
       <td style="color:var(--muted);font-size:12px">${c.description || '—'}</td>
       <td class="td-mono" style="color:var(--red)">${fmt(c.amount)}</td>
       <td><button class="btn btn-danger btn-sm" onclick="deleteCost('${c.id}')">✕</button></td>
@@ -5265,7 +5255,23 @@ async function loadPL() {
   }
 }
 
-function openCostEntryModal() { openModal('modalCostEntry'); }
+async function openCostEntryModal() {
+  await loadCostCategories();
+  document.getElementById('ceCategory').innerHTML = categoryOptionsHTML('ad_spend');
+  openModal('modalCostEntry');
+}
+
+// Handles the Add Cost Entry modal's category dropdown — selecting the
+// trailing "+ Add New Category…" option prompts for a name, saves it,
+// then re-renders the dropdown with the new category selected (or
+// reverts to the previous selection if the user cancelled the prompt).
+async function handleCECategoryChange(selectEl) {
+  if (selectEl.value !== ADD_CATEGORY_SENTINEL) { selectEl.dataset.prev = selectEl.value; return; }
+  const prevValue = selectEl.dataset.prev || 'ad_spend';
+  const slug = await promptAddCategory();
+  selectEl.innerHTML = categoryOptionsHTML(slug || prevValue);
+  selectEl.dataset.prev = slug || prevValue;
+}
 
 async function saveCostEntry() {
   const body = {
@@ -5295,17 +5301,86 @@ async function saveCostEntry() {
 // bulk-applies via the "Set all" controls) and explicitly confirms.
 // ──────────────────────────────────────────────────────────────
 let ccTransactions = []; // [{date, description, amount, category, channel, company_team}]
-const CC_CATEGORIES = ['ad_spend','ai_tools','gift','staff_pay','rental','admin','wifi','utilities','team_building','cleaning','other'];
-const CC_CATEGORY_LABELS = { ad_spend:'Ad Spend', ai_tools:'AI Tools', gift:'Gift', staff_pay:'Staff Pay', rental:'Office Rental', admin:'Admin', wifi:'Wifi', utilities:'Water & Electric', team_building:'Team Building', cleaning:'Cleaning Service', other:'Other' };
 const CC_CHANNELS = ['DM','TM','XHS','OTHER','SHARED'];
 
-function openCCStatementModal() {
+// ──────────────────────────────────────────────────────────────
+// Cost categories are user-managed (stored in nec_cost_categories)
+// instead of a hardcoded list — lets the owner add new categories
+// on the fly (e.g. "ManyChat") from any category dropdown in the
+// Add Cost Entry or Credit Card Statement screens, rather than
+// needing a code change every time a new kind of expense shows up.
+// ──────────────────────────────────────────────────────────────
+let costCategories = []; // [{slug, label}]
+let costCategoriesLoaded = false;
+const ADD_CATEGORY_SENTINEL = '__add_new__';
+
+async function loadCostCategories(force = false) {
+  if (costCategoriesLoaded && !force) return;
+  try {
+    const rows = await sb('nec_cost_categories', { select: 'slug,label', filter: 'order=label.asc' });
+    if (rows.length) {
+      costCategories = rows;
+      costCategoriesLoaded = true;
+      return;
+    }
+  } catch(e) { /* table not set up yet — fall through to defaults below */ }
+  // Fallback defaults if the table is empty or not yet created (e.g. Setup
+  // tab hasn't been run on this deployment) — keeps the dropdowns usable.
+  costCategories = [
+    { slug:'ad_spend', label:'Ad Spend' }, { slug:'ai_tools', label:'AI Tools' },
+    { slug:'gift', label:'Gift' }, { slug:'staff_pay', label:'Staff Pay' },
+    { slug:'rental', label:'Office Rental' }, { slug:'admin', label:'Admin' },
+    { slug:'wifi', label:'Wifi' }, { slug:'utilities', label:'Water & Electric' },
+    { slug:'team_building', label:'Team Building' }, { slug:'cleaning', label:'Cleaning Service' },
+    { slug:'other', label:'Other' }
+  ];
+  costCategoriesLoaded = true;
+}
+
+function categoryLabel(slug) {
+  return costCategories.find(c => c.slug === slug)?.label || slug;
+}
+
+// Builds <option> tags for every known category plus a trailing
+// "+ Add New Category…" sentinel option used by every category dropdown
+// in the app (Add Cost Entry, Credit Card Statement review + bulk-set).
+function categoryOptionsHTML(selectedSlug) {
+  return costCategories.map(c => `<option value="${c.slug}"${selectedSlug===c.slug?' selected':''}>${c.label}</option>`).join('')
+    + `<option value="${ADD_CATEGORY_SENTINEL}">+ Add New Category…</option>`;
+}
+
+// Prompts for a new category name, slugifies it (de-duping against
+// existing slugs), saves it to nec_cost_categories, and updates the
+// local cache. Returns the new slug, or null if the user cancelled.
+async function promptAddCategory() {
+  const label = prompt('New category name:');
+  if (!label || !label.trim()) return null;
+  const trimmed = label.trim();
+  let base = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'category';
+  let slug = base, n = 2;
+  while (costCategories.some(c => c.slug === slug)) slug = `${base}_${n++}`;
+  try {
+    await sb('nec_cost_categories', { method: 'POST', body: { slug, label: trimmed } });
+    costCategories.push({ slug, label: trimmed });
+    costCategories.sort((a,b) => a.label.localeCompare(b.label));
+    await logAudit('CREATE', 'nec_cost_categories', `Added category: ${trimmed}`);
+    showToast(`Category "${trimmed}" added ✓`);
+    return slug;
+  } catch(e) {
+    showToast('Error adding category: ' + e.message, 'error');
+    return null;
+  }
+}
+
+
+async function openCCStatementModal() {
   ccTransactions = [];
   document.getElementById('ccFileInput').value = '';
   document.getElementById('ccProgress').classList.add('hidden');
   document.getElementById('ccReviewWrap').classList.add('hidden');
   document.getElementById('ccSaveAllBtn').classList.add('hidden');
   document.getElementById('ccUploadZone').classList.remove('hidden');
+  await loadCostCategories();
   // Populate bulk-set dropdowns once
   const yearSel = document.getElementById('ccBulkYear');
   const monthSel = document.getElementById('ccBulkMonth');
@@ -5314,9 +5389,9 @@ function openCCStatementModal() {
     monthSel.innerHTML = MONTHS.map((m,i) => i>0 ? `<option value="${i}"${i===new Date().getMonth()+1?' selected':''}>${m}</option>` : '').join('');
     yearSel.onchange = () => applyCCBulk('year', yearSel.value);
     monthSel.onchange = () => applyCCBulk('month', monthSel.value);
-    document.getElementById('ccBulkCategory').innerHTML = `<option value="">Category…</option>` + CC_CATEGORIES.map(c => `<option value="${c}">${CC_CATEGORY_LABELS[c]}</option>`).join('');
     document.getElementById('ccBulkTeam').innerHTML = `<option value="">Team…</option><option value="New Era">New Era</option><option value="Alpha C">Alpha C</option><option value="">Shared</option>`;
   }
+  document.getElementById('ccBulkCategory').innerHTML = `<option value="">Category…</option>` + categoryOptionsHTML('');
   openModal('modalCCStatement');
 }
 
@@ -5352,7 +5427,7 @@ async function processCCFile(file) {
     const response = await fetch('/api/parse-cc-statement', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ base64 })
+      body: JSON.stringify({ base64, categories: costCategories })
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Failed to parse statement');
@@ -5387,8 +5462,8 @@ function renderCCTransactions() {
       <td style="font-size:12px">${t.description}</td>
       <td class="td-mono">${fmtNum(t.amount)}</td>
       <td>
-        <select onchange="ccTransactions[${i}].category=this.value;updateCCSummary()" style="font-size:11px;padding:3px 6px">
-          ${CC_CATEGORIES.map(c => `<option value="${c}"${t.category===c?' selected':''}>${CC_CATEGORY_LABELS[c]}</option>`).join('')}
+        <select onchange="handleCCCategoryChange(${i}, this)" style="font-size:11px;padding:3px 6px">
+          ${categoryOptionsHTML(t.category)}
         </select>
       </td>
       <td>
@@ -5407,6 +5482,33 @@ function renderCCTransactions() {
     </tr>`).join('');
 }
 
+// Handles a single row's category dropdown. Picking the trailing "+ Add
+// New Category…" option prompts for a name, saves it, then re-renders the
+// whole table so every row's dropdown (not just this one) now offers it.
+async function handleCCCategoryChange(i, selectEl) {
+  if (selectEl.value === ADD_CATEGORY_SENTINEL) {
+    const slug = await promptAddCategory();
+    if (slug) ccTransactions[i].category = slug;
+    renderCCTransactions(); // rebuilds every dropdown with the new option either way
+    return;
+  }
+  ccTransactions[i].category = selectEl.value;
+  updateCCSummary();
+}
+
+// Handles the "Set all" bulk category dropdown — same Add-New sentinel
+// handling, but applies the result to every transaction immediately
+// (matching the existing bulk-apply behavior for year/month/team).
+async function handleCCBulkCategoryChange(selectEl) {
+  if (selectEl.value === ADD_CATEGORY_SENTINEL) {
+    const slug = await promptAddCategory();
+    selectEl.innerHTML = `<option value="">Category…</option>` + categoryOptionsHTML('');
+    if (slug) applyCCBulk('category', slug);
+    return;
+  }
+  applyCCBulk('category', selectEl.value);
+}
+
 // Recomputes the overall total and the per-category subtotal chips shown
 // above the table — called on initial render and whenever any row's
 // category dropdown changes, so the breakdown always reflects the current
@@ -5418,10 +5520,10 @@ function updateCCSummary() {
 
   const byCategory = {};
   ccTransactions.forEach(t => { byCategory[t.category] = (byCategory[t.category] || 0) + t.amount; });
-  const order = CC_CATEGORIES.filter(c => byCategory[c] > 0);
+  const order = Object.keys(byCategory).filter(c => byCategory[c] > 0);
   document.getElementById('ccCategorySummary').innerHTML = order.map(c => `
     <div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:11px">
-      <span style="color:var(--muted)">${CC_CATEGORY_LABELS[c]}</span>
+      <span style="color:var(--muted)">${categoryLabel(c)}</span>
       <span style="font-family:var(--mono);font-weight:700;color:var(--text);margin-left:6px">RM ${fmtNum(byCategory[c])}</span>
     </div>`).join('');
 }
@@ -5799,6 +5901,22 @@ CREATE TABLE IF NOT EXISTS nec_pl_costs (
   created_at timestamptz DEFAULT now()
 );
 
+-- User-managed cost categories — lets the owner add new categories
+-- on the fly (e.g. "ManyChat", "AI Tools") from the Add Cost Entry /
+-- Credit Card Statement screens instead of being stuck with a fixed list.
+CREATE TABLE IF NOT EXISTS nec_cost_categories (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  slug text UNIQUE NOT NULL,
+  label text NOT NULL,
+  created_at timestamptz DEFAULT now()
+);
+INSERT INTO nec_cost_categories (slug, label) VALUES
+  ('ad_spend','Ad Spend'), ('ai_tools','AI Tools'), ('gift','Gift'),
+  ('staff_pay','Staff Pay'), ('rental','Office Rental'), ('admin','Admin'),
+  ('wifi','Wifi'), ('utilities','Water & Electric'), ('team_building','Team Building'),
+  ('cleaning','Cleaning Service'), ('other','Other')
+ON CONFLICT (slug) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS nec_audit_log (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   username text NOT NULL,
@@ -5926,7 +6044,7 @@ async function saveManagers() {
 async function testConnection() {
   const result = document.getElementById('connTestResult');
   result.textContent = 'Testing...';
-  const tables = ['proxy_accounts','proxy_invoices','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_manager_payslips','nec_manager_adjustments','nec_pl_costs','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads','nec_order_assignments','monthly_config'];
+  const tables = ['proxy_accounts','proxy_invoices','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_manager_payslips','nec_manager_adjustments','nec_pl_costs','nec_cost_categories','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads','nec_order_assignments','monthly_config'];
   const results = [];
   for (const t of tables) {
     try {
