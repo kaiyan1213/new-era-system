@@ -31,7 +31,7 @@ const DEFAULT_CATEGORIES = [
 const CATEGORY_HINTS = {
   ad_spend: 'Facebook/Meta/Google/TikTok ads, boosted posts, marketing platforms',
   ai_tools: 'AI / SaaS software subscriptions — e.g. Anthropic, OpenAI, ChatGPT, ManyChat, Supabase, Vercel, GitHub, Notion AI, Midjourney, ElevenLabs, Claude, Make.com, Zapier, n8n, or any other AI/automation/dev-tool platform billing',
-  gift: 'gift cards, flowers, hampers, retail purchases that read like client/staff gifts',
+  gift: 'gift cards, flowers, hampers, retail purchases that read like client/staff gifts. Shopee / Shopee MY Marketplace charges should ALWAYS be classified as gift unless the description clearly indicates otherwise (e.g. explicitly says "ads" or "subscription")',
   team_building: 'restaurants, karaoke, team outings, events',
   wifi: 'internet/telco/broadband providers',
   utilities: 'electricity (TNB), water board',
