@@ -12,7 +12,36 @@ import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 // project (Project Settings → Environment Variables). Without it, this
 // endpoint returns a clear error rather than failing silently.
 
-const CATEGORIES = ['ad_spend', 'ai_tools', 'gift', 'staff_pay', 'rental', 'admin', 'wifi', 'utilities', 'team_building', 'cleaning', 'other'];
+// Default category set — used only as a fallback when the frontend
+// doesn't send its live category list (e.g. a stale cached page). The
+// frontend normally sends the user's actual categories (including any
+// custom ones they've added via "+ Add New Category…"), so Claude can
+// classify into categories that didn't exist when this file was written.
+const DEFAULT_CATEGORIES = [
+  { slug:'ad_spend', label:'Ad Spend' }, { slug:'ai_tools', label:'AI Tools' },
+  { slug:'gift', label:'Gift' }, { slug:'staff_pay', label:'Staff Pay' },
+  { slug:'rental', label:'Office Rental' }, { slug:'admin', label:'Admin' },
+  { slug:'wifi', label:'Wifi' }, { slug:'utilities', label:'Water & Electric' },
+  { slug:'team_building', label:'Team Building' }, { slug:'cleaning', label:'Cleaning Service' },
+  { slug:'other', label:'Other' }
+];
+// Specific classification hints for categories we recognize by slug —
+// applied whenever present in the user's live list, custom categories
+// just get their label as the hint instead.
+const CATEGORY_HINTS = {
+  ad_spend: 'Facebook/Meta/Google/TikTok ads, boosted posts, marketing platforms',
+  ai_tools: 'AI / SaaS software subscriptions — e.g. Anthropic, OpenAI, ChatGPT, ManyChat, Supabase, Vercel, GitHub, Notion AI, Midjourney, ElevenLabs, Claude, Make.com, Zapier, n8n, or any other AI/automation/dev-tool platform billing',
+  gift: 'gift cards, flowers, hampers, retail purchases that read like client/staff gifts',
+  team_building: 'restaurants, karaoke, team outings, events',
+  wifi: 'internet/telco/broadband providers',
+  utilities: 'electricity (TNB), water board',
+  rental: 'property/office rental payments',
+  cleaning: 'cleaning services',
+  staff_pay: 'anything reading like a salary/payroll transfer',
+  admin: 'office supplies, stationery, bank fees, NON-AI/SaaS business admin costs (do NOT put software/AI subscriptions here — use "ai_tools" instead if that category exists)',
+  other: "anything that doesn't clearly fit any other category — the fallback"
+};
+
 const CHANNELS = ['DM', 'TM', 'XHS', 'OTHER', 'SHARED'];
 const TEAMS = ['New Era', 'Alpha C', null];
 
@@ -23,8 +52,14 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { base64, debug } = req.body;
+  const { base64, debug, categories } = req.body;
   if (!base64) return res.status(400).json({ error: 'No PDF data' });
+
+  // Use the caller's live category list if provided (array of {slug,label}),
+  // otherwise fall back to the built-in defaults above.
+  const activeCategories = (Array.isArray(categories) && categories.length > 0) ? categories : DEFAULT_CATEGORIES;
+  const categorySlugs = activeCategories.map(c => c.slug);
+  const hasOther = categorySlugs.includes('other');
 
   if (!process.env.ANTHROPIC_API_KEY) {
     return res.status(500).json({
@@ -42,31 +77,26 @@ export default async function handler(req, res) {
     // this is generous headroom while keeping the request fast and cheap.
     const trimmedText = text.length > 18000 ? text.slice(0, 18000) : text;
 
+    const categoryGuidance = activeCategories
+      .map(c => `  - "${c.slug}" (${c.label}) = ${CATEGORY_HINTS[c.slug] || `transactions matching "${c.label}"`}`)
+      .join('\n');
+
     const prompt = `You are extracting transactions from a Malaysian credit card statement (raw PDF text dump below — column alignment may be lost, dates/descriptions/amounts may run together).
 
-For EVERY individual purchase/charge transaction (skip "PAYMENT RECEIVED", "TOTAL DUE", opening/closing balance lines, and statement boilerplate — but DO include interest/late fees as category "other"), extract:
+For EVERY individual purchase/charge transaction (skip "PAYMENT RECEIVED", "TOTAL DUE", opening/closing balance lines, and statement boilerplate — but DO include interest/late fees as a normal transaction), extract:
 - date: as written in the statement (e.g. "15/06" or "15 JUN")
 - description: the merchant name, cleaned up (strip card masking digits, trailing reference numbers)
 - amount: positive number, MYR, no currency symbol or commas
 
 Then classify each transaction:
-- category: pick the SINGLE best match from this exact list: ${JSON.stringify(CATEGORIES)}
-  - "ad_spend" = Facebook/Meta/Google/TikTok ads, boosted posts, marketing platforms
-  - "ai_tools" = AI / SaaS software subscriptions — e.g. Anthropic, OpenAI, ChatGPT, ManyChat, Supabase, Vercel, GitHub, Notion AI, Midjourney, ElevenLabs, Claude, Make.com, Zapier, n8n, or any other AI/automation/dev-tool platform billing
-  - "gift" = gift cards, flowers, hampers, retail purchases that read like client/staff gifts
-  - "team_building" = restaurants, karaoke, team outings, events
-  - "wifi" = internet/telco/broadband providers
-  - "utilities" = electricity (TNB), water board
-  - "rental" = property/office rental payments
-  - "cleaning" = cleaning services
-  - "staff_pay" = anything reading like a salary/payroll transfer
-  - "admin" = office supplies, stationery, bank fees, NON-AI/SaaS business admin costs (do NOT put software/AI subscriptions here — use "ai_tools" instead)
-  - "other" = anything that doesn't clearly fit above
+- category: pick the SINGLE best match slug from this exact list: ${JSON.stringify(categorySlugs)}
+${categoryGuidance}
+${hasOther ? '' : '  (if truly nothing fits, pick whichever category is the closest semantic match)'}
 - channel: pick from ${JSON.stringify(CHANNELS)} — only guess DM/TM/XHS if the merchant description clearly hints at one specific sales channel (rare); otherwise default "SHARED"
 - company_team: pick from ${JSON.stringify(TEAMS)} (use JSON null, not the string "null") — only guess "New Era" or "Alpha C" if the description clearly hints at one specific team; otherwise null (shared/unknown, the user will assign it manually)
 
 Respond with ONLY a raw JSON array, no markdown code fences, no commentary, no leading/trailing text. Format:
-[{"date":"15/06","description":"FACEBK *ADS8X7Y2Z","amount":450.00,"category":"ad_spend","channel":"SHARED","company_team":null}]
+[{"date":"15/06","description":"FACEBK *ADS8X7Y2Z","amount":450.00,"category":"${categorySlugs[0]}","channel":"SHARED","company_team":null}]
 
 Statement text:
 ${trimmedText}`;
@@ -106,14 +136,17 @@ ${trimmedText}`;
       return res.status(502).json({ error: 'Claude did not return a JSON array.' });
     }
 
-    // Sanity-clean each row — never trust external input blindly
+    // Sanity-clean each row — never trust external input blindly. Unknown/
+    // invalid category slugs fall back to "other" if it exists, otherwise
+    // the first category in the active list.
+    const fallbackCategory = hasOther ? 'other' : categorySlugs[0];
     const cleaned = transactions
       .filter(t => t && typeof t.amount === 'number' && t.amount > 0 && t.description)
       .map(t => ({
         date: String(t.date || '').slice(0, 20),
         description: String(t.description || '').slice(0, 200),
         amount: Math.round(t.amount * 100) / 100,
-        category: CATEGORIES.includes(t.category) ? t.category : 'other',
+        category: categorySlugs.includes(t.category) ? t.category : fallbackCategory,
         channel: CHANNELS.includes(t.channel) ? t.channel : 'SHARED',
         company_team: (t.company_team === 'New Era' || t.company_team === 'Alpha C') ? t.company_team : null
       }));
