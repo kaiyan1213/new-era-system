@@ -162,7 +162,26 @@ function parseCowayPayslip(text) {
     const pm = l.match(/^(\d{7,})\s*\([A-Za-z]+\)([A-Z].+?)(\d{1,2})\s*$/);
     if (pm) prefixedOrderRows.push({ order_no: pm[1], customer_name: pm[2].trim() });
   }
+  // These amount rows usually appear AFTER the header in scanLines (handled by the
+  // forward scan below), but Coway's PDF text extraction sometimes emits this
+  // table's numeric column entirely BEFORE the header and row labels — e.g.
+  // "1,110 166.50" appearing 2 lines above "Sales Commission (Rental - 100%
+  // Payout)" itself, before any row text has been seen at all. Walk backward
+  // from the header to also catch these, stopping once we've collected one
+  // amount per prefixedOrderRow (so we don't reach back far enough to pick up
+  // an unrelated earlier section's own such rows, e.g. "Sales Commission
+  // (Outright) - PV" handled separately above) or hit another section's
+  // content (any line containing "Commission" is a section header here).
   const preHeaderAmounts = [];
+  if (payout100Start >= 0) {
+    for (let k = payout100Start - 1; k >= Math.max(0, payout100Start - 30); k--) {
+      const l = lines[k];
+      if (l.includes('Commission')) break;
+      const am = l.match(/^([\d,]+)\s+([\d,]+\.\d{2})$/);
+      if (am && pn(am[1]) > 100) preHeaderAmounts.unshift(pn(am[2]));
+      if (prefixedOrderRows.length > 0 && preHeaderAmounts.length >= prefixedOrderRows.length) break;
+    }
+  }
   for (const l of scanLines) {
     const am = l.match(/^([\d,]+)\s+([\d,]+\.\d{2})$/);
     if (am && pn(am[1]) > 100) preHeaderAmounts.push(pn(am[2]));
@@ -533,7 +552,16 @@ function parseCowayPayslip(text) {
 
   // ── 4. Build new orders detail ──────────────────────────────
   const allowanceTotal = r2(allowances.reduce((s,a) => s + a.amount, 0));
-  const allowancePerOrder = bonusOrders.length > 0 ? r2(allowanceTotal / bonusOrders.length) : 0;
+  // Only certain allowance types get divided per-order — SPECIAL WS and HP NEW PI
+  // are tied to the new orders themselves, but CASH INCENTIVE (and any other
+  // allowance type) is a flat payout, not per-order, and must NOT be divided in.
+  // It's still counted in allowanceTotal above (for the payslip-level display
+  // total and the passive/TBC reconciliation), just excluded from the per-order split.
+  const DIVISIBLE_ALLOWANCE_TYPES = ['special ws', 'hp new pi'];
+  const divisibleAllowanceTotal = r2(allowances
+    .filter(a => DIVISIBLE_ALLOWANCE_TYPES.includes(a.description.trim().toLowerCase()))
+    .reduce((s,a) => s + a.amount, 0));
+  const allowancePerOrder = bonusOrders.length > 0 ? r2(divisibleAllowanceTotal / bonusOrders.length) : 0;
 
   let new_orders_total = 0;
   for (const o of bonusOrders) {
