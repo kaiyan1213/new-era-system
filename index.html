@@ -2615,6 +2615,7 @@ const MANAGER_ORDER = ['Kai Yan', 'Chloe', 'Carine', 'Jess', 'Zehao'];
 const ADJUSTMENT_CATEGORIES = ['Claim', 'Mistake', 'Gift', 'Both Company Loan Claim', 'Alpha C Claim', 'Return Back', 'Other'];
 let directoryInvoiceMap = {}; // proxy_id -> invoice row for selected year/month
 let invoicePaymentsByInvoice = {}; // invoice_id -> array of {id, amount, payment_date} bank-in records
+let staffOwnedProxyMap = {}; // proxy_id -> staff row, for proxies settled via Payroll netting instead of Directory
 
 async function loadDirectory() {
   const year = parseInt(document.getElementById('dirYear').value);
@@ -2648,6 +2649,17 @@ async function loadDirectory() {
         invoicePaymentsByInvoice[p.invoice_id].push(p);
       });
     }
+
+    // Proxies owned by a staff member (own_proxy_id) are settled through
+    // Payroll's netting instead — Coway pays that proxy directly, bypassing
+    // the company, so Payroll nets it against the staff's commission to get
+    // the true net amount owed either way. Tracking "Mark Paid" separately
+    // here on the gross proxy invoice would double-count that money on top
+    // of the netted Payroll figure, so these get a different cell instead
+    // of the normal payment button.
+    const ownerStaff = await sb('nec_staff', { filter: 'is_active=eq.true&own_proxy_id=not.is.null', select: 'id,name,own_proxy_id' });
+    staffOwnedProxyMap = {};
+    ownerStaff.forEach(s => { staffOwnedProxyMap[s.own_proxy_id] = s; });
 
     // Group proxies by manager
     const groups = {};
@@ -2694,13 +2706,16 @@ async function loadDirectory() {
         const fullyPaid = inv && totalPaid >= expectedAmt - 0.01;
         const partiallyPaid = inv && totalPaid > 0.01 && !fullyPaid;
         const paymentCountNote = paymentsForInv.length > 1 ? ` <span style="opacity:0.7">(${paymentsForInv.length}x)</span>` : '';
-        const paymentCell = fullyPaid
-          ? `<span class="badge badge-paid" style="cursor:pointer" onclick="openRecordPaymentModal('${inv.id}')">${inv.payment_date || '✓ Paid'}${paymentCountNote}</span>`
-          : partiallyPaid
-            ? `<span class="badge" style="cursor:pointer;background:rgba(245,158,11,0.15);color:var(--yellow);border:1px solid rgba(245,158,11,0.3)" onclick="openRecordPaymentModal('${inv.id}')">${fmt(totalPaid)} / ${fmt(expectedAmt)}${paymentCountNote}</span>`
-            : inv
-              ? `<button class="btn btn-green btn-sm" onclick="openRecordPaymentModal('${inv.id}')">Mark Paid</button>`
-              : `<span class="td-muted">no invoice</span>`;
+        const ownerStaff = staffOwnedProxyMap[p.id];
+        const paymentCell = ownerStaff
+          ? `<span class="badge" style="cursor:pointer;background:rgba(79,124,255,0.15);color:var(--accent);border:1px solid rgba(79,124,255,0.3)" title="${ownerStaff.name}'s own proxy — settled net via Payroll, not tracked separately here" onclick="showPage('payroll')">↗ Payroll (${ownerStaff.name})</span>`
+          : fullyPaid
+            ? `<span class="badge badge-paid" style="cursor:pointer" onclick="openRecordPaymentModal('${inv.id}')">${inv.payment_date || '✓ Paid'}${paymentCountNote}</span>`
+            : partiallyPaid
+              ? `<span class="badge" style="cursor:pointer;background:rgba(245,158,11,0.15);color:var(--yellow);border:1px solid rgba(245,158,11,0.3)" onclick="openRecordPaymentModal('${inv.id}')">${fmt(totalPaid)} / ${fmt(expectedAmt)}${paymentCountNote}</span>`
+              : inv
+                ? `<button class="btn btn-green btn-sm" onclick="openRecordPaymentModal('${inv.id}')">Mark Paid</button>`
+                : `<span class="td-muted">no invoice</span>`;
         return `
           <tr data-search="${(p.name + ' ' + (p.ic_number||'') + ' ' + (p.coway_id||'')).toLowerCase()}">
             <td><div class="td-name">${p.name}</div><div class="td-muted">${p.ic_number || '—'}</div></td>
@@ -3106,7 +3121,9 @@ function generateUnpaidList() {
 
   proxyList.forEach(p => {
     const inv = directoryInvoiceMap[p.id];
-    const isPaid = inv && inv.payment_date;
+    if (!inv) return; // no invoice this month — not relevant to "unpaid this month"
+    if (staffOwnedProxyMap[p.id]) return; // settled via Payroll netting, not tracked here
+    const isPaid = !!inv.payment_date;
     if (!isPaid) {
       const m = MANAGER_ORDER.includes(p.manager) ? p.manager : 'Unassigned';
       groups[m].push(p.name);
