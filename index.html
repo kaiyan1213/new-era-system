@@ -2262,6 +2262,10 @@ async function sbDelete(table, filter) {
 function fmt(n) { return 'RM ' + parseFloat(n || 0).toLocaleString('en-MY', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function fmtNum(n) { return parseFloat(n || 0).toLocaleString('en-MY', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function r2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
+// Shared color per team — used by every Team dropdown across the app
+// (Breakdown page, Bulk Payslip Upload review) so New Era / Alpha C /
+// Outsider are always visually distinct, never two teams sharing a color.
+function teamColorHex(t) { return t === 'Alpha C' ? '#f97316' : t === 'Outsider' ? '#f59e0b' : '#4f7cff'; }
 
 function showPage(page) {
   ['proxy','payroll','manager','pl','export','audit','upload','breakdown','setup','directory','bankdir','cctracker'].forEach(p => {
@@ -6901,6 +6905,7 @@ function setAllOrderTeams(code, team) {
   // Also update all per-order dropdowns within this card
   document.querySelectorAll(`.team-select-${CSS.escape(code)}`).forEach(sel => {
     sel.value = team;
+    sel.style.color = teamColorHex(team);
     _teamMap[`${code}|${sel.dataset.orderNo}`] = team;
   });
   // Update the "Select All" button highlights
@@ -7018,8 +7023,8 @@ function renderParseResult(result) {
       <span style="font-family:var(--mono);color:var(--yellow)">${fmtNum(o.allowance_portion)}</span>
       <span style="font-family:var(--mono);font-weight:700;color:var(--green)">${fmtNum(o.total_com)}</span>
       <select class="team-select-${code}" data-order-no="${o.order_no}"
-              onchange="setOrderTeam('${code}','${o.order_no}',this.value)"
-              style="font-size:10px;padding:2px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer">
+              onchange="setOrderTeam('${code}','${o.order_no}',this.value);this.style.color=teamColorHex(this.value)"
+              style="font-size:10px;padding:2px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:${teamColorHex(defaultTeam)};cursor:pointer">
         <option value="New Era"${defaultTeam==='New Era'?' selected':''}>New Era</option>
         <option value="Alpha C"${defaultTeam==='Alpha C'?' selected':''}>Alpha C</option>
         <option value="Outsider"${defaultTeam==='Outsider'?' selected':''}>Outsider</option>
@@ -7384,10 +7389,9 @@ async function showBreakdown(id) {
     const isFlat = rawCats.length > 0 && rawCats[0].order_no !== undefined;
     const teamOpts = (current) => ['New Era','Alpha C','Outsider'].map(t =>
       `<option value="${t}"${current===t?' selected':''}>${t}</option>`).join('');
-    const teamStyle = (t) => t==='Outsider' ? 'color:#f97316' : t==='Alpha C' ? 'color:#f97316' : 'color:#4f7cff';
     const orderTeamSelect = (o, bdId) => `
-      <select onchange="updateOrderTeam('${bdId}','${o.order_no}',this.value)"
-              style="font-size:10px;padding:2px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;${teamStyle(o.team)};cursor:pointer">
+      <select onchange="this.style.color=teamColorHex(this.value);updateOrderTeam('${bdId}','${o.order_no}',this.value)"
+              style="font-size:10px;padding:2px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:${teamColorHex(o.team || 'New Era')};cursor:pointer">
         ${teamOpts(o.team || 'New Era')}
       </select>`;
 
