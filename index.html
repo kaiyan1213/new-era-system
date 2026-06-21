@@ -2620,6 +2620,12 @@ async function loadDirectory() {
   const year = parseInt(document.getElementById('dirYear').value);
   const month = parseInt(document.getElementById('dirMonth').value);
   const container = document.getElementById('directoryContainer');
+  // Replacing the container's content (especially the brief "Loading..."
+  // placeholder, which is much shorter than the real table) shrinks the
+  // page and the browser snaps scroll back to top. Capture the scroll
+  // position now and restore it once the real content is back in, so
+  // saving one row doesn't kick you back up to the top of a long list.
+  const scrollY = window.scrollY;
   container.innerHTML = `<div class="empty"><div class="empty-text">Loading...</div></div>`;
 
   try {
@@ -2744,6 +2750,7 @@ async function loadDirectory() {
     console.error(e);
     container.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading directory: ${e.message}</div></div>`;
   }
+  window.scrollTo(0, scrollY);
 }
 
 const BANK_TEAM_ORDER = ['Manager', 'NEW ERA ADMIN', 'NEW ERA EDITOR TEAM', 'Digital Marketing Team', 'Telemarketing Team', 'Others'];
