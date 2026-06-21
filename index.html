@@ -563,6 +563,10 @@
 
     <!-- AUTO COMMISSION MATCHING TAB -->
     <div id="payrollPane-automatch" class="hidden">
+      <!-- autoCommPanelRoot's home is here — it gets physically relocated
+           (not duplicated) into the Upload page right after a bulk save,
+           then snapped back here whenever this tab is opened normally. -->
+      <div id="autoCommPanelRoot">
       <div class="table-wrap" style="margin-bottom:20px">
         <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
           <span>Auto Commission — from 收单追踪 (Installed orders)</span>
@@ -605,6 +609,7 @@
         <div id="autoCommContainer">
           <div class="empty"><div class="empty-text">Set each staff's 收单追踪 name on the Payroll tab, then click "🔄 Preview".</div></div>
         </div>
+      </div>
       </div>
     </div>
   </div>
@@ -1110,6 +1115,10 @@
         <button class="btn btn-primary" id="bulkSaveBtn" onclick="confirmBulkSave()">✓ Save All Invoices</button>
       </div>
     </div>
+    <!-- Auto Commission Matching panel lands here (physically relocated,
+         not duplicated) right after a bulk save, so the admin can assign
+         every order to staff without leaving this page. -->
+    <div id="uploadAutoCommSlot" style="margin-top:20px"></div>
   </div>
 
   <!-- ========== BREAKDOWN PAGE ========== -->
@@ -5444,6 +5453,14 @@ function switchPayrollTab(tab) {
   // the Payroll tab, Add Staff on the Staff List tab.
   document.getElementById('btnRecordPayrollHeader').style.display = tab === 'records' ? '' : 'none';
   document.getElementById('btnAddStaffHeader').style.display = tab === 'stafflist' ? '' : 'none';
+  // The Auto Commission Matching panel may currently be sitting on the
+  // Upload page (relocated there after a bulk save) — snap it back to its
+  // home here so opening this tab directly always shows a working copy.
+  if (tab === 'automatch') {
+    const home = document.getElementById('payrollPane-automatch');
+    const panel = document.getElementById('autoCommPanelRoot');
+    if (panel && panel.parentElement !== home) home.appendChild(panel);
+  }
 }
 
 // Refreshes everything on the Manager Sharing page — called on page load
@@ -7202,15 +7219,20 @@ async function confirmBulkSave() {
   if (updated) parts.push(`${updated} updated (overwritten)`);
   showToast(`Saved: ${parts.join(', ')} ✓ — now match orders to staff below`);
   clearUpload();
-  // Jump straight into Auto Commission Matching for the same period instead
-  // of just landing back on the Inv list — saves the admin from manually
-  // navigating to Payroll, switching tabs, re-picking the year/month, and
-  // clicking Preview every time right after an upload.
-  showPage('payroll');
-  switchPayrollTab('automatch');
+  // Physically relocate the Auto Commission Matching panel (Bulk Manual
+  // Match, results, unmatched-orders list — the same real elements used on
+  // the Payroll tab, not a duplicate) into this page, right where the
+  // upload happened, so the admin can assign every order to staff without
+  // leaving Inv. It snaps back to its home on the Payroll tab automatically
+  // if opened from there later (see switchPayrollTab).
+  const slot = document.getElementById('uploadAutoCommSlot');
+  const panel = document.getElementById('autoCommPanelRoot');
+  if (slot && panel) slot.appendChild(panel);
   document.getElementById('acYear').value = String(year);
   document.getElementById('acMonth').value = String(month);
   await previewAutoCommission();
+  populateBulkMatchStaffSelect(); // loadPayroll() normally does this — this path skips it
+  slot?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   } finally {
     if (btn) {
