@@ -2992,7 +2992,7 @@ async function openRecordPaymentModal(invoiceId) {
 // numbers are always live.
 async function renderPaymentModal(invoiceId) {
   const inv = Object.values(directoryInvoiceMap).find(i => i.id === invoiceId);
-  if (!inv) return;
+  if (!inv) return { fullyPaid: false };
   const proxy = proxyList.find(p => p.id === inv.proxy_id);
   document.getElementById('rpProxyName').textContent = proxy ? proxy.name : 'Proxy';
 
@@ -3024,8 +3024,14 @@ async function renderPaymentModal(invoiceId) {
         <button class="btn btn-danger btn-sm" onclick="deleteInvoicePayment('${p.id}','${invoiceId}')">✕</button>
       </div>`).join('')
     : `<div style="font-size:12px;color:var(--muted)">No payments recorded yet</div>`;
+
+  return { fullyPaid: remaining <= 0.01 && payments.length > 0 };
 }
 
+// Adding a payment that fully settles the invoice closes the modal
+// automatically — no need for a separate "Done" click once there's
+// nothing left to record. Still-partial payments keep the modal open
+// since there's more to add.
 async function addInvoicePayment() {
   const invoiceId = rpCurrentInvoiceId;
   if (!invoiceId) return;
@@ -3037,8 +3043,12 @@ async function addInvoicePayment() {
     await sb('proxy_invoice_payments', { method: 'POST', body: { invoice_id: invoiceId, amount, payment_date: date } });
     await logAudit('CREATE', 'proxy_invoice_payments', `Recorded payment RM${amount.toFixed(2)} on ${date} for invoice ${invoiceId}`);
     await syncInvoicePaymentStatus(invoiceId);
-    await renderPaymentModal(invoiceId);
+    const { fullyPaid } = await renderPaymentModal(invoiceId);
     showToast('Payment recorded');
+    if (fullyPaid) {
+      closeModal('modalRecordPayment');
+      loadDirectory();
+    }
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
