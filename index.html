@@ -2049,11 +2049,12 @@
   <div class="modal" style="max-width:520px">
     <div class="modal-title">Record Payment</div>
     <div id="rpProxyName" style="font-size:14px;font-weight:600;margin-bottom:4px"></div>
-    <div style="display:flex;gap:20px;margin-bottom:16px;font-size:12px">
+    <div style="display:flex;gap:20px;margin-bottom:4px;font-size:12px">
       <div><span style="color:var(--muted)">Invoiced</span> <span id="rpInvoiceAmt" class="td-mono" style="font-weight:600"></span></div>
       <div><span style="color:var(--muted)">Paid so far</span> <span id="rpPaidAmt" class="td-mono" style="font-weight:600;color:var(--green)"></span></div>
       <div><span style="color:var(--muted)">Remaining</span> <span id="rpRemainingAmt" class="td-mono" style="font-weight:600;color:var(--red)"></span></div>
     </div>
+    <div id="rpCapNote" style="font-size:11px;color:var(--yellow);margin-bottom:12px"></div>
 
     <div id="rpPaymentList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px"></div>
 
@@ -2680,12 +2681,16 @@ async function loadDirectory() {
         const paymentsForInv = inv ? (invoicePaymentsByInvoice[inv.id] || []) : [];
         const totalPaid = r2(paymentsForInv.reduce((s,pmt) => s + parseFloat(pmt.amount||0), 0));
         const invAmt = inv ? parseFloat(inv.invoice_amount||0) : 0;
-        const fullyPaid = inv && totalPaid >= invAmt - 0.01;
+        // A proxy only ever has what Coway actually paid them — if the
+        // invoice was set higher than that, the realistic amount we'll
+        // ever collect from them is capped at the Coway payslip amount.
+        const expectedAmt = inv ? Math.min(invAmt, parseFloat(inv.coway_payslip_amount||0)) : 0;
+        const fullyPaid = inv && totalPaid >= expectedAmt - 0.01;
         const partiallyPaid = inv && totalPaid > 0.01 && !fullyPaid;
         const paymentCell = fullyPaid
           ? `<span class="badge badge-paid" style="cursor:pointer" onclick="openRecordPaymentModal('${inv.id}')">${inv.payment_date || '✓ Paid'}</span>`
           : partiallyPaid
-            ? `<span class="badge" style="cursor:pointer;background:rgba(245,158,11,0.15);color:var(--yellow);border:1px solid rgba(245,158,11,0.3)" onclick="openRecordPaymentModal('${inv.id}')">${fmt(totalPaid)} / ${fmt(invAmt)}</span>`
+            ? `<span class="badge" style="cursor:pointer;background:rgba(245,158,11,0.15);color:var(--yellow);border:1px solid rgba(245,158,11,0.3)" onclick="openRecordPaymentModal('${inv.id}')">${fmt(totalPaid)} / ${fmt(expectedAmt)}</span>`
             : inv
               ? `<button class="btn btn-green btn-sm" onclick="openRecordPaymentModal('${inv.id}')">Mark Paid</button>`
               : `<span class="td-muted">no invoice</span>`;
@@ -2993,12 +2998,20 @@ async function renderPaymentModal(invoiceId) {
   const payments = await sb('proxy_invoice_payments', { filter: `invoice_id=eq.${invoiceId}`, select: '*' });
   invoicePaymentsByInvoice[invoiceId] = payments;
   const invAmt = parseFloat(inv.invoice_amount || 0);
+  const payslipAmt = parseFloat(inv.coway_payslip_amount || 0);
+  // A proxy only ever has what Coway actually paid them — if the invoice
+  // was set higher than that, cap what we expect to collect at the Coway
+  // payslip amount instead of the (unrealistic) full invoice figure.
+  const expectedAmt = Math.min(invAmt, payslipAmt);
   const totalPaid = r2(payments.reduce((s,p) => s + parseFloat(p.amount||0), 0));
-  const remaining = r2(invAmt - totalPaid);
+  const remaining = r2(expectedAmt - totalPaid);
 
   document.getElementById('rpInvoiceAmt').textContent = fmt(invAmt);
   document.getElementById('rpPaidAmt').textContent = fmt(totalPaid);
   document.getElementById('rpRemainingAmt').textContent = fmt(Math.max(0, remaining));
+  document.getElementById('rpCapNote').textContent = expectedAmt < invAmt
+    ? `⚠ Invoice exceeds Coway payslip (${fmt(payslipAmt)}) — capped at that amount, since the proxy never receives more than what Coway actually pays them.`
+    : '';
   document.getElementById('rpNewAmount').value = remaining > 0 ? remaining.toFixed(2) : '';
 
   const listEl = document.getElementById('rpPaymentList');
@@ -3042,17 +3055,22 @@ async function deleteInvoicePayment(paymentId, invoiceId) {
 // Recomputes the invoice's aggregate paid status from its individual
 // payment rows. Only flips proxy_invoices to status='paid' (with
 // payment_date = the latest bank-in) once the sum fully covers the
-// invoice — everywhere else in the app that checks payment_date truthiness
-// to mean "fully paid" keeps working unchanged. Partially-covered invoices
-// get status='partial' with payment_date left null.
+// expected amount — capped at the Coway payslip amount if the invoice was
+// set higher than that, since the proxy never has more than what Coway
+// actually paid them to send to the company. Everywhere else in the app
+// that checks payment_date truthiness to mean "fully paid" keeps working
+// unchanged. Partially-covered invoices get status='partial' with
+// payment_date left null.
 async function syncInvoicePaymentStatus(invoiceId) {
   const inv = Object.values(directoryInvoiceMap).find(i => i.id === invoiceId);
   if (!inv) return;
   const payments = await sb('proxy_invoice_payments', { filter: `invoice_id=eq.${invoiceId}`, select: 'amount,payment_date' });
   const invAmt = parseFloat(inv.invoice_amount || 0);
+  const payslipAmt = parseFloat(inv.coway_payslip_amount || 0);
+  const expectedAmt = Math.min(invAmt, payslipAmt);
   const totalPaid = r2(payments.reduce((s,p) => s + parseFloat(p.amount||0), 0));
   let body;
-  if (totalPaid >= invAmt - 0.01 && payments.length) {
+  if (totalPaid >= expectedAmt - 0.01 && payments.length) {
     const latestDate = payments.map(p => p.payment_date).sort().slice(-1)[0];
     body = { status: 'paid', payment_date: latestDate };
   } else if (totalPaid > 0.01) {
