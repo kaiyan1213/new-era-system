@@ -1484,6 +1484,15 @@
             <option value="TM">TM (50/70/90% split of payslip commission)</option>
           </select>
         </div>
+        <div class="form-group" id="positionField">
+          <label class="form-label">Position</label>
+          <select id="staffPosition" class="form-input">
+            <option value="admin">Admin</option>
+            <option value="outsider">Outsider</option>
+            <option value="editor">Editor</option>
+            <option value="content_creator">Content Creator</option>
+          </select>
+        </div>
       </div>
       <div class="form-row">
         <div class="form-group" id="commField">
@@ -1545,6 +1554,15 @@
           <select id="editStaffChannel" class="form-input">
             <option value="DM">DM (RM50/order tiered + milestone bonuses)</option>
             <option value="TM">TM (50/70/90% split of payslip commission)</option>
+          </select>
+        </div>
+        <div class="form-group" id="editPositionField">
+          <label class="form-label">Position</label>
+          <select id="editStaffPosition" class="form-input">
+            <option value="admin">Admin</option>
+            <option value="outsider">Outsider</option>
+            <option value="editor">Editor</option>
+            <option value="content_creator">Content Creator</option>
           </select>
         </div>
       </div>
@@ -3213,6 +3231,52 @@ async function loadStaff() {
   } catch(e) { return []; }
 }
 
+// Auto-creates this month's payroll record for every active fixed-salary
+// staff member (Admin/Outsider/Editor/Content Creator — anyone with
+// staff_type='admin' and a base_salary set) who doesn't already have one
+// for the period — so salaried staff just show up in Payroll every month
+// instead of needing "Record Payroll" clicked manually for them each time.
+// Managers are excluded — their pay comes through the separate Manager
+// Sharing settlement flow, not a base salary record here. Idempotent: only
+// fills in what's missing, never touches existing records.
+async function autoGenerateAdminPayroll(year, month) {
+  if (!month) return; // only makes sense for a specific month, not "All Months"
+  try {
+    const managerStaffIds = new Set(managerList.map(m => m.staff_id).filter(Boolean));
+    const existing = await sb('nec_payroll', { filter: `year=eq.${year}&month=eq.${month}`, select: 'staff_id' });
+    const existingIds = new Set(existing.map(r => r.staff_id));
+    const candidates = staffList.filter(s =>
+      s.staff_type === 'admin' &&
+      parseFloat(s.base_salary || 0) > 0 &&
+      !managerStaffIds.has(s.id) &&
+      !existingIds.has(s.id)
+    );
+    for (const s of candidates) {
+      const salary = parseFloat(s.base_salary || 0);
+      let epfEmployee = 0, epfEmployer = 0;
+      if (s.epf_applicable) {
+        const epf = calcEpf(salary);
+        epfEmployee = epf.employee; epfEmployer = epf.employer;
+      }
+      const ownProxyOffset = await getOwnProxyPayslipAmount(s.own_proxy_id, year, month);
+      const netPay = r2(salary - epfEmployee - ownProxyOffset);
+      const body = {
+        staff_id: s.id, year: parseInt(year), month: parseInt(month),
+        orders_count: 0, commission_earned: 0, commission_type: null,
+        base_salary: salary, bonus: 0, deductions: 0,
+        epf_employee: epfEmployee, epf_employer: epfEmployer,
+        own_proxy_offset: ownProxyOffset,
+        settlement_type: ownProxyOffset > 0 ? (netPay >= 0 ? 'payslip' : 'invoice') : null,
+        record_type: 'staff',
+      };
+      try {
+        await sb('nec_payroll', { method: 'POST', body });
+        await logAudit('CREATE', 'nec_payroll', `Auto-generated base salary payroll for ${s.name} — ${MONTHS[parseInt(month)]} ${year} — RM${salary.toFixed(2)}`);
+      } catch(e) { /* skip this one, don't block the rest of the page load */ }
+    }
+  } catch(e) { /* fail silently — manual "Record Payroll" still works as a fallback */ }
+}
+
 async function loadPayroll() {
   const year = document.getElementById('payrollYear').value;
   const month = document.getElementById('payrollMonth').value;
@@ -3220,6 +3284,12 @@ async function loadPayroll() {
 
   try {
     await loadStaff();
+    // managerList must be loaded before rendering, otherwise the Manager
+    // badge in Staff List silently falls back to "Admin" for every
+    // manager whenever this page is opened before the Manager tab has
+    // been visited in the session (managerList stays empty until then).
+    if (!managerList.length) await loadManagers();
+    if (month) await autoGenerateAdminPayroll(year, month);
     renderStaffList();
     populateBulkMatchStaffSelect();
     let filter = `year=eq.${year}`;
@@ -3295,7 +3365,7 @@ async function loadPayroll() {
   }
 }
 
-async function openAddStaffModal() { openModal('modalAddStaff'); }
+async function openAddStaffModal() { openModal('modalAddStaff'); toggleStaffFields(); }
 
 function toggleStaffFields() {
   const type = document.getElementById('staffType').value;
@@ -3303,20 +3373,26 @@ function toggleStaffFields() {
   document.getElementById('salaryField').style.opacity = type === 'admin' ? '1' : '0.3';
   const channelField = document.getElementById('channelField');
   if (channelField) channelField.style.display = type === 'sales' ? '' : 'none';
+  const positionField = document.getElementById('positionField');
+  if (positionField) positionField.style.display = type === 'admin' ? '' : 'none';
 }
 
 function toggleEditStaffFields() {
   const type = document.getElementById('editStaffType').value;
   const channelField = document.getElementById('editChannelField');
   if (channelField) channelField.style.display = type === 'sales' ? '' : 'none';
+  const positionField = document.getElementById('editPositionField');
+  if (positionField) positionField.style.display = type === 'admin' ? '' : 'none';
 }
 
 async function saveStaff() {
+  const type = document.getElementById('staffType').value;
   const body = {
     name: document.getElementById('staffName').value,
     role: document.getElementById('staffRole').value,
-    staff_type: document.getElementById('staffType').value,
-    channel: document.getElementById('staffChannel').value,
+    staff_type: type,
+    channel: type === 'sales' ? document.getElementById('staffChannel').value : null,
+    position: type === 'admin' ? document.getElementById('staffPosition').value : null,
     commission_per_order: parseFloat(document.getElementById('staffComm').value) || 0,
     base_salary: parseFloat(document.getElementById('staffSalary').value) || 0,
     lead_staff_name: document.getElementById('staffLeadName').value.trim() || null,
@@ -3327,7 +3403,7 @@ async function saveStaff() {
     await sb('nec_staff', { method: 'POST', body });
     closeModal('modalAddStaff');
     showToast(`${body.name} added`);
-    await logAudit('CREATE', 'nec_staff', `Added staff: ${body.name} (${body.staff_type}, ${body.channel})`);
+    await logAudit('CREATE', 'nec_staff', `Added staff: ${body.name} (${body.staff_type}, ${body.channel || body.position})`);
     loadPayroll();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
@@ -3339,12 +3415,23 @@ function renderStaffList() {
     tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-text">No staff yet. Click "+ Add Staff" above.</div></div></td></tr>`;
     return;
   }
-  // Derive TYPE badge from staff_type + channel — consolidated into 5 types
-  // matching what the business uses: DM | TM | Admin | Manager | Outsider
+  // Derive TYPE badge from staff_type + channel + position — consolidated
+  // into 7 types: DM | TM | Admin | Manager | Outsider | Editor | Content
+  // Creator. Manager is always auto-derived from the nec_managers.staff_id
+  // link (never manually set) so it can't drift out of sync; Outsider/
+  // Editor/Content Creator come from the curated `position` field for
+  // admin-type staff, falling back to plain "Admin" for older records that
+  // don't have position set yet.
   const managerStaffIds = new Set(managerList.map(m => m.staff_id).filter(Boolean));
+  const POSITION_LABELS = {
+    admin: { label: 'Admin', color: 'var(--muted)' },
+    outsider: { label: 'Outsider', color: 'var(--yellow)' },
+    editor: { label: 'Editor', color: '#06b6d4' },
+    content_creator: { label: 'Content Creator', color: '#ec4899' },
+  };
   const getStaffType = (s) => {
     if (managerStaffIds.has(s.id)) return { label: 'Manager', color: 'var(--accent)' };
-    if (s.staff_type === 'admin') return { label: 'Admin', color: 'var(--muted)' };
+    if (s.staff_type === 'admin') return POSITION_LABELS[s.position] || POSITION_LABELS.admin;
     if (s.channel === 'TM') return { label: 'TM', color: '#f97316' };
     if (s.channel === 'DM') return { label: 'DM', color: '#22c55e' };
     return { label: 'Outsider', color: 'var(--yellow)' };
@@ -3360,9 +3447,26 @@ function renderStaffList() {
       <td class="td-mono">${fmt(s.commission_per_order)}</td>
       <td class="td-mono">${fmt(s.base_salary)}</td>
       <td class="td-mono">${s.lead_staff_name || '<span class="td-muted">— not mapped —</span>'}</td>
-      <td><button class="btn btn-ghost btn-sm" onclick="openEditStaffModal('${s.id}')">Edit</button></td>
+      <td style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="openEditStaffModal('${s.id}')">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteStaff('${s.id}','${s.name.replace(/'/g,"\\'")}')">✕</button>
+      </td>
     </tr>`;
   }).join('');
+}
+
+// Deactivates a staff record (soft-delete, matching the rest of the app's
+// pattern) — mainly used to clean up duplicate entries. Doesn't touch any
+// existing nec_payroll history for that staff_id, so past payroll records
+// remain intact even after the staff is removed from the active list.
+async function deleteStaff(id, name) {
+  if (!confirm(`Remove "${name}" from the active staff list? This won't delete their past payroll history.`)) return;
+  try {
+    await sb('nec_staff', { method: 'PATCH', filter: `id=eq.${id}`, body: { is_active: false } });
+    await logAudit('DELETE', 'nec_staff', `Removed staff: ${name}`);
+    showToast(`${name} removed`);
+    loadPayroll();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
 async function openEditStaffModal(id) {
@@ -3373,6 +3477,7 @@ async function openEditStaffModal(id) {
   document.getElementById('editStaffRole').value = s.role || '';
   document.getElementById('editStaffType').value = s.staff_type || 'sales';
   document.getElementById('editStaffChannel').value = s.channel || 'DM';
+  document.getElementById('editStaffPosition').value = s.position || 'admin';
   document.getElementById('editStaffTeam').value = s.company_team || 'New Era';
   document.getElementById('editStaffComm').value = s.commission_per_order || 0;
   document.getElementById('editStaffSalary').value = s.base_salary || 0;
@@ -3390,11 +3495,13 @@ async function openEditStaffModal(id) {
 
 async function saveEditStaff() {
   const id = document.getElementById('editStaffId').value;
+  const type = document.getElementById('editStaffType').value;
   const body = {
     name: document.getElementById('editStaffName').value,
     role: document.getElementById('editStaffRole').value,
-    staff_type: document.getElementById('editStaffType').value,
-    channel: document.getElementById('editStaffChannel').value,
+    staff_type: type,
+    channel: type === 'sales' ? document.getElementById('editStaffChannel').value : null,
+    position: type === 'admin' ? document.getElementById('editStaffPosition').value : null,
     company_team: document.getElementById('editStaffTeam').value,
     commission_per_order: parseFloat(document.getElementById('editStaffComm').value) || 0,
     base_salary: parseFloat(document.getElementById('editStaffSalary').value) || 0,
@@ -6206,6 +6313,13 @@ CREATE TABLE IF NOT EXISTS nec_staff (
 ALTER TABLE nec_staff ADD COLUMN IF NOT EXISTS lead_staff_name text;
 ALTER TABLE nec_staff ADD COLUMN IF NOT EXISTS epf_applicable boolean DEFAULT false;
 ALTER TABLE nec_staff ADD COLUMN IF NOT EXISTS company_team text DEFAULT 'New Era';
+
+-- Curated sub-category for non-sales (staff_type='admin') staff, shown as
+-- the Type badge in Staff List instead of always defaulting to "Admin".
+-- Manager is intentionally NOT a valid value here — that badge is always
+-- derived automatically from the nec_managers.staff_id link, never set
+-- manually, so it can't drift out of sync with the real profit-sharing link.
+ALTER TABLE nec_staff ADD COLUMN IF NOT EXISTS position text;
 -- NOTE: Channel (DM/TM) on a sales staff IS the commission algorithm —
 -- there is intentionally no separate "default commission algorithm"
 -- field. A staff's Channel determines which formula applies by default
