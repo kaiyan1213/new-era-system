@@ -6888,6 +6888,9 @@ let parsedPayslips = []; // holds parsed results before saving
 // { [distributor_code]: 'New Era' | 'Alpha C' }
 // Per-order overrides: { [distributor_code + '|' + order_no]: team }
 const _teamMap = {};
+// Per-order channel: { [distributor_code + '|' + order_no]: 'DM'|'TM'|'XHS'|null }
+// null = Outsider (channel not applicable)
+const _channelMap = {};
 
 function getOrderTeam(code, orderNo) {
   const perOrder = _teamMap[`${code}|${orderNo}`];
@@ -6899,6 +6902,29 @@ function setOrderTeam(code, orderNo, team) {
   _teamMap[`${code}|${orderNo}`] = team;
 }
 
+function getOrderChannel(code, orderNo) {
+  return _channelMap[`${code}|${orderNo}`] ?? 'DM';
+}
+
+function setOrderChannel(code, orderNo, channel) {
+  _channelMap[`${code}|${orderNo}`] = channel;
+}
+
+// When team changes on a per-order dropdown, sync the adjacent channel select
+function syncChannelOnTeamChange(code, orderNo, team) {
+  const chSel = document.querySelector(`.channel-select-${CSS.escape(code)}[data-order-no="${orderNo}"]`);
+  if (!chSel) return;
+  if (team === 'Outsider') {
+    chSel.disabled = true;
+    chSel.innerHTML = '<option value="">—</option>';
+    _channelMap[`${code}|${orderNo}`] = null;
+  } else {
+    chSel.disabled = false;
+    const curr = _channelMap[`${code}|${orderNo}`] || 'DM';
+    chSel.innerHTML = `<option value="DM"${curr==='DM'?' selected':''}>DM</option><option value="TM"${curr==='TM'?' selected':''}>TM</option><option value="XHS"${curr==='XHS'?' selected':''}>XHS</option>`;
+  }
+}
+
 function setAllOrderTeams(code, team) {
   // Set the proxy-level default
   _teamMap[code] = team;
@@ -6907,12 +6933,27 @@ function setAllOrderTeams(code, team) {
     sel.value = team;
     sel.style.color = teamColorHex(team);
     _teamMap[`${code}|${sel.dataset.orderNo}`] = team;
+    syncChannelOnTeamChange(code, sel.dataset.orderNo, team);
   });
   // Update the "Select All" button highlights
   ['New Era','Alpha C','Outsider'].forEach(t => {
     const key = t.replace(/ /g,'_');
     const btn = document.getElementById(`teamBtn_${CSS.escape(code)}_${key}`);
     if (btn) btn.style.fontWeight = t === team ? '700' : '400';
+  });
+}
+
+// Set all orders in this card to the same channel (skip Outsider orders)
+function setAllOrderChannels(code, channel) {
+  document.querySelectorAll(`.channel-select-${CSS.escape(code)}`).forEach(sel => {
+    if (!sel.disabled) {
+      sel.value = channel;
+      _channelMap[`${code}|${sel.dataset.orderNo}`] = channel;
+    }
+  });
+  ['DM','TM','XHS'].forEach(ch => {
+    const btn = document.getElementById(`chBtn_${CSS.escape(code)}_${ch}`);
+    if (btn) btn.style.fontWeight = ch === channel ? '700' : '400';
   });
 }
 
@@ -7018,11 +7059,18 @@ function buildParseResultHTML(result) {
 
   // Default to proxy's saved team if available, otherwise New Era
   const defaultTeam = result.proxy?.company_team || 'New Era';
+  // Default channel: use proxy's channel field (DM/TM/XHS) if set, else DM
+  const defaultChannel = (['DM','TM','XHS'].includes(result.proxy?.channel)) ? result.proxy.channel : 'DM';
   _teamMap[code] = defaultTeam;
 
   const orderRows = (result.new_orders || []).map(o => {
     const oKey = `${code}|${o.order_no}`;
     _teamMap[oKey] = defaultTeam;
+    _channelMap[oKey] = defaultTeam === 'Outsider' ? null : defaultChannel;
+    const isOutsider = defaultTeam === 'Outsider';
+    const chOpts = isOutsider
+      ? '<option value="">—</option>'
+      : `<option value="DM"${defaultChannel==='DM'?' selected':''}>DM</option><option value="TM"${defaultChannel==='TM'?' selected':''}>TM</option><option value="XHS"${defaultChannel==='XHS'?' selected':''}>XHS</option>`;
     return `<div class="order-row">
       <span style="color:var(--muted);font-family:var(--mono);font-size:10px">${o.order_no}</span>
       <span>${o.customer_name}</span>
@@ -7030,11 +7078,17 @@ function buildParseResultHTML(result) {
       <span style="font-family:var(--mono);color:var(--yellow)">${fmtNum(o.allowance_portion)}</span>
       <span style="font-family:var(--mono);font-weight:700;color:var(--green)">${fmtNum(o.total_com)}</span>
       <select class="team-select-${code}" data-order-no="${o.order_no}"
-              onchange="setOrderTeam('${code}','${o.order_no}',this.value);this.style.color=teamColorHex(this.value)"
+              onchange="setOrderTeam('${code}','${o.order_no}',this.value);this.style.color=teamColorHex(this.value);syncChannelOnTeamChange('${code}','${o.order_no}',this.value)"
               style="font-size:10px;padding:2px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:${teamColorHex(defaultTeam)};cursor:pointer">
         <option value="New Era"${defaultTeam==='New Era'?' selected':''}>New Era</option>
         <option value="Alpha C"${defaultTeam==='Alpha C'?' selected':''}>Alpha C</option>
         <option value="Outsider"${defaultTeam==='Outsider'?' selected':''}>Outsider</option>
+      </select>
+      <select class="channel-select-${code}" data-order-no="${o.order_no}"
+              onchange="setOrderChannel('${code}','${o.order_no}',this.value)"
+              ${isOutsider ? 'disabled' : ''}
+              style="font-size:10px;padding:2px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--muted);cursor:pointer">
+        ${chOpts}
       </select>
     </div>`;
   }).join('');
@@ -7047,20 +7101,37 @@ function buildParseResultHTML(result) {
           <div style="font-size:11px;color:var(--muted);margin-top:2px">Code: ${result.distributor_code || '—'} | ${result.member_level || '—'} | ${result.period_date || '—'}</div>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
-          <div style="display:flex;align-items:center;gap:6px">
-            <span style="font-size:11px;color:var(--muted)">Set all:</span>
-            <button id="teamBtn_${code}_New_Era" onclick="setAllOrderTeams('${code}','New Era')"
-              style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid #4f7cff;background:var(--surface2);color:#4f7cff;cursor:pointer;font-weight:${defaultTeam==='New Era'?'700':'400'}">
-              New Era
-            </button>
-            <button id="teamBtn_${code}_Alpha_C" onclick="setAllOrderTeams('${code}','Alpha C')"
-              style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid #f97316;background:var(--surface2);color:#f97316;cursor:pointer;font-weight:${defaultTeam==='Alpha C'?'700':'400'}">
-              Alpha C
-            </button>
-            <button id="teamBtn_${code}_Outsider" onclick="setAllOrderTeams('${code}','Outsider')"
-              style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid var(--muted);background:var(--surface2);color:var(--muted);cursor:pointer;font-weight:${defaultTeam==='Outsider'?'700':'400'}">
-              Outsider
-            </button>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-size:11px;color:var(--muted);min-width:52px">Team:</span>
+              <button id="teamBtn_${code}_New_Era" onclick="setAllOrderTeams('${code}','New Era')"
+                style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid #4f7cff;background:var(--surface2);color:#4f7cff;cursor:pointer;font-weight:${defaultTeam==='New Era'?'700':'400'}">
+                New Era
+              </button>
+              <button id="teamBtn_${code}_Alpha_C" onclick="setAllOrderTeams('${code}','Alpha C')"
+                style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid #f97316;background:var(--surface2);color:#f97316;cursor:pointer;font-weight:${defaultTeam==='Alpha C'?'700':'400'}">
+                Alpha C
+              </button>
+              <button id="teamBtn_${code}_Outsider" onclick="setAllOrderTeams('${code}','Outsider')"
+                style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid var(--muted);background:var(--surface2);color:var(--muted);cursor:pointer;font-weight:${defaultTeam==='Outsider'?'700':'400'}">
+                Outsider
+              </button>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-size:11px;color:var(--muted);min-width:52px">Channel:</span>
+              <button id="chBtn_${code}_DM" onclick="setAllOrderChannels('${code}','DM')"
+                style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid #22c55e;background:var(--surface2);color:#22c55e;cursor:pointer;font-weight:${defaultChannel==='DM'?'700':'400'}">
+                DM
+              </button>
+              <button id="chBtn_${code}_TM" onclick="setAllOrderChannels('${code}','TM')"
+                style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid #a78bfa;background:var(--surface2);color:#a78bfa;cursor:pointer;font-weight:${defaultChannel==='TM'?'700':'400'}">
+                TM
+              </button>
+              <button id="chBtn_${code}_XHS" onclick="setAllOrderChannels('${code}','XHS')"
+                style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid var(--red);background:var(--surface2);color:var(--red);cursor:pointer;font-weight:${defaultChannel==='XHS'?'700':'400'}">
+                XHS
+              </button>
+            </div>
           </div>
           <span class="parse-status ${statusCls}">${statusText}</span>
           <div class="parse-result-amount">RM ${fmtNum(result.total_net_payable)}</div>
@@ -7086,7 +7157,7 @@ function buildParseResultHTML(result) {
         <span style="color:${matchColor};margin-left:6px">${matchIcon}</span>
       </div>
       ${orderRows.length > 0 ? `
-        <div class="order-row header" style="font-size:10px"><span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team</span></div>
+        <div class="order-row header" style="font-size:10px"><span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team</span><span>Channel</span></div>
         ${orderRows}` : ''}
       ${result.allowances && result.allowances.length > 0 ? `<div style="font-size:10px;color:var(--muted);margin-top:6px">Allowance items: ${result.allowances.map(a => `${a.description} RM${fmtNum(a.amount)}`).join(', ')}</div>` : (result.allowance_total > 0 ? '' : `<div style="font-size:10px;color:var(--muted);margin-top:4px">No Allowance section found in PDF</div>`)}
       ${!result.matched ? `<div style="margin-top:10px;font-size:12px;color:var(--red)">⚠ Add "${result.distributor_name}" as proxy first, then re-upload.</div>` : ''}
@@ -7217,7 +7288,8 @@ async function confirmBulkSave() {
       const proxyTeam = _teamMap[code] || 'New Era';
       const ordersWithTeam = (p.new_orders || []).map(o => ({
         ...o,
-        team: _teamMap[`${code}|${o.order_no}`] || proxyTeam
+        team: _teamMap[`${code}|${o.order_no}`] || proxyTeam,
+        channel: _channelMap[`${code}|${o.order_no}`] ?? null
       }));
       const invoiceAmount = Math.round(p.total_net_payable * (1 + deductPct/100) * 100) / 100;
       // deductPct < 0 => deduct (invoice < payslip amount); deductPct > 0 => add on top
@@ -7403,7 +7475,9 @@ async function updateOrderTeam(breakdownId, orderNo, team) {
     const [rec] = await sb('nec_payslip_breakdown', { filter: `id=eq.${breakdownId}`, select: 'id,categories_json' });
     if (!rec) return showToast('Breakdown record not found', 'error');
     const orders = JSON.parse(rec.categories_json || '[]');
-    const updated = orders.map(o => o.order_no === orderNo ? { ...o, team } : o);
+    const updated = orders.map(o => o.order_no === orderNo
+      ? { ...o, team, channel: team === 'Outsider' ? null : (o.channel || 'DM') }
+      : o);
     await fetch(`${SUPABASE_URL}/rest/v1/nec_payslip_breakdown?id=eq.${breakdownId}`, {
       method: 'PATCH',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
@@ -7411,6 +7485,53 @@ async function updateOrderTeam(breakdownId, orderNo, team) {
     });
     await logAudit('UPDATE', 'nec_payslip_breakdown', `Order ${orderNo} team → ${team}`);
     showToast(`${orderNo} → ${team} ✓`);
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// Sync the channel dropdown when team changes in breakdown (without DB call)
+function syncBdChannel(breakdownId, orderNo, team) {
+  const sel = document.getElementById(`bdCh_${breakdownId}_${orderNo.replace(/[^a-z0-9]/gi,'_')}`);
+  if (!sel) return;
+  if (team === 'Outsider') {
+    sel.disabled = true;
+    sel.innerHTML = '<option value="">—</option>';
+  } else {
+    sel.disabled = false;
+    if (!sel.querySelector('option[value="DM"]')) {
+      sel.innerHTML = '<option value="DM" selected>DM</option><option value="TM">TM</option><option value="XHS">XHS</option>';
+    }
+  }
+}
+
+async function updateOrderChannel(breakdownId, orderNo, channel) {
+  try {
+    const [rec] = await sb('nec_payslip_breakdown', { filter: `id=eq.${breakdownId}`, select: 'id,categories_json' });
+    if (!rec) return showToast('Breakdown record not found', 'error');
+    const orders = JSON.parse(rec.categories_json || '[]');
+    const updated = orders.map(o => o.order_no === orderNo ? { ...o, channel } : o);
+    await fetch(`${SUPABASE_URL}/rest/v1/nec_payslip_breakdown?id=eq.${breakdownId}`, {
+      method: 'PATCH',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ categories_json: JSON.stringify(updated) })
+    });
+    showToast(`${orderNo} → ${channel} ✓`);
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function setAllBreakdownChannels(breakdownId, channel) {
+  try {
+    const [rec] = await sb('nec_payslip_breakdown', { filter: `id=eq.${breakdownId}`, select: 'id,categories_json' });
+    if (!rec) return showToast('Record not found', 'error');
+    const orders = JSON.parse(rec.categories_json || '[]');
+    const updated = orders.map(o => o.team === 'Outsider' ? o : { ...o, channel });
+    await fetch(`${SUPABASE_URL}/rest/v1/nec_payslip_breakdown?id=eq.${breakdownId}`, {
+      method: 'PATCH',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ categories_json: JSON.stringify(updated) })
+    });
+    await logAudit('UPDATE', 'nec_payslip_breakdown', `All orders in breakdown ${breakdownId} channel → ${channel}`);
+    showToast(`All orders → ${channel} ✓`);
+    showBreakdown(breakdownId);
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
@@ -7431,11 +7552,24 @@ async function showBreakdown(id) {
     const isFlat = rawCats.length > 0 && rawCats[0].order_no !== undefined;
     const teamOpts = (current) => ['New Era','Alpha C','Outsider'].map(t =>
       `<option value="${t}"${current===t?' selected':''}>${t}</option>`).join('');
-    const orderTeamSelect = (o, bdId) => `
-      <select onchange="this.style.color=teamColorHex(this.value);updateOrderTeam('${bdId}','${o.order_no}',this.value)"
-              style="font-size:10px;padding:2px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:${teamColorHex(o.team || 'New Era')};cursor:pointer">
-        ${teamOpts(o.team || 'New Era')}
-      </select>`;
+    const chOpts = (current) => ['DM','TM','XHS'].map(ch =>
+      `<option value="${ch}"${current===ch?' selected':''}>${ch}</option>`).join('');
+    const orderTeamSelect = (o, bdId) => {
+      const isOutsider = (o.team || 'New Era') === 'Outsider';
+      const ch = o.channel || 'DM';
+      return `<span style="display:flex;flex-direction:column;gap:2px">
+        <select onchange="this.style.color=teamColorHex(this.value);updateOrderTeam('${bdId}','${o.order_no}',this.value);syncBdChannel('${bdId}','${o.order_no}',this.value)"
+                style="font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:${teamColorHex(o.team||'New Era')};cursor:pointer">
+          ${teamOpts(o.team || 'New Era')}
+        </select>
+        <select id="bdCh_${bdId}_${o.order_no.replace(/[^a-z0-9]/gi,'_')}"
+                onchange="updateOrderChannel('${bdId}','${o.order_no}',this.value)"
+                ${isOutsider ? 'disabled' : ''}
+                style="font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--muted);cursor:pointer">
+          ${isOutsider ? '<option value="">—</option>' : chOpts(ch)}
+        </select>
+      </span>`;
+    };
 
     let catHTML = '';
     if (isFlat) {
@@ -7460,11 +7594,19 @@ async function showBreakdown(id) {
         acTotal > 0 ? `<span style="color:#f97316">AC RM${fmtNum(acTotal)}</span>` : '',
         osTotal > 0 ? `<span style="color:var(--muted)">OS RM${fmtNum(osTotal)} (not billed)</span>` : '',
       ].filter(Boolean).join(' · ');
-      const setAllBtns = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <span style="font-size:11px;color:var(--muted)">Set all orders:</span>
-        <button onclick="setAllBreakdownTeams('${bdId}','New Era')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #4f7cff;color:#4f7cff;background:transparent;cursor:pointer">New Era</button>
-        <button onclick="setAllBreakdownTeams('${bdId}','Alpha C')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #f97316;color:#f97316;background:transparent;cursor:pointer">Alpha C</button>
-        <button onclick="setAllBreakdownTeams('${bdId}','Outsider')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid var(--muted);color:var(--muted);background:transparent;cursor:pointer">Outsider</button>
+      const setAllBtns = `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:11px;color:var(--muted);min-width:48px">Team:</span>
+          <button onclick="setAllBreakdownTeams('${bdId}','New Era')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #4f7cff;color:#4f7cff;background:transparent;cursor:pointer">New Era</button>
+          <button onclick="setAllBreakdownTeams('${bdId}','Alpha C')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #f97316;color:#f97316;background:transparent;cursor:pointer">Alpha C</button>
+          <button onclick="setAllBreakdownTeams('${bdId}','Outsider')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid var(--muted);color:var(--muted);background:transparent;cursor:pointer">Outsider</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:11px;color:var(--muted);min-width:48px">Channel:</span>
+          <button onclick="setAllBreakdownChannels('${bdId}','DM')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #22c55e;color:#22c55e;background:transparent;cursor:pointer">DM</button>
+          <button onclick="setAllBreakdownChannels('${bdId}','TM')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #a78bfa;color:#a78bfa;background:transparent;cursor:pointer">TM</button>
+          <button onclick="setAllBreakdownChannels('${bdId}','XHS')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid var(--red);color:var(--red);background:transparent;cursor:pointer">XHS</button>
+        </div>
       </div>`;
       catHTML = rawCats.length > 0 ? `<div class="cat-section">
         <div class="cat-section-title">
@@ -7474,7 +7616,7 @@ async function showBreakdown(id) {
         ${setAllBtns}
         ${summaryParts ? `<div style="font-size:11px;margin-bottom:6px">${summaryParts}</div>` : ''}
         <div class="order-row header" style="font-size:10px">
-          <span>Order No</span><span>Customer</span><span>Product</span><span>Months</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team</span>
+          <span>Order No</span><span>Customer</span><span>Product</span><span>Months</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team / Ch</span>
         </div>
         ${orderRows}
       </div>` : '';
