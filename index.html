@@ -235,7 +235,7 @@
   .breakdown-content { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; overflow-y: auto; max-height: calc(100vh - 200px); }
   .cat-section { margin-bottom: 20px; }
   .cat-section-title { font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; padding: 8px 0; border-bottom: 1px solid var(--border); margin-bottom: 8px; display: flex; justify-content: space-between; }
-  .order-row { display: grid; grid-template-columns: 110px 1fr 110px 80px 90px 90px 80px; gap: 8px; font-size: 11px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.04); align-items: center; }
+  .order-row { display: grid; grid-template-columns: 90px 1fr 85px 65px 80px 78px 65px 130px; gap: 8px; font-size: 11px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.04); align-items: center; }
   .order-row:last-child { border-bottom: none; }
   .order-row.header { color: var(--muted); font-weight: 600; font-size: 10px; text-transform: uppercase; }
 </style>
@@ -3811,11 +3811,11 @@ function flattenBreakdownOrders(categoriesJson) {
     if (c && Array.isArray(c.new_orders)) {
       // nested shape: category -> new_orders[]
       for (const o of c.new_orders) {
-        if (o && (o.order_no || o.customer_name)) out.push({ order_no: o.order_no || null, customer_name: o.customer_name || '', total_com: parseFloat(o.total_com || 0) });
+        if (o && (o.order_no || o.customer_name)) out.push({ order_no: o.order_no || null, customer_name: o.customer_name || '', total_com: parseFloat(o.total_com || 0), team: o.team || 'New Era', channel: o.channel || null });
       }
     } else if (c && (c.order_no || c.customer_name)) {
       // flat shape: c itself is an order
-      out.push({ order_no: c.order_no || null, customer_name: c.customer_name || '', total_com: parseFloat(c.total_com || 0) });
+      out.push({ order_no: c.order_no || null, customer_name: c.customer_name || '', total_com: parseFloat(c.total_com || 0), team: c.team || 'New Era', channel: c.channel || null });
     }
   }
   return out;
@@ -3855,7 +3855,9 @@ async function previewAutoCommission() {
         norm_name: normName(o.customer_name),
         proxy_id: b.proxy_id,
         proxy_name: (proxyList.find(p => p.id === b.proxy_id) || {}).name || b.distributor_code || '—',
-        total_com: o.total_com || 0
+        total_com: o.total_com || 0,
+        team: o.team || 'New Era',
+        channel: o.channel || null
       }));
     });
 
@@ -3999,6 +4001,7 @@ async function previewAutoCommission() {
             <th>Staff</th>
             <th>收单追踪 Name</th>
             <th>Verified Orders</th>
+            <th>NE / AC</th>
             <th>Commission</th>
             <th>Breakdown</th>
             <th>Actions</th>
@@ -4006,11 +4009,18 @@ async function previewAutoCommission() {
         </thead>
         <tbody>`;
     autoCommissionData.forEach((row, idx) => {
+      const neCount = row.orders.filter(o => !o.team || o.team === 'New Era').length;
+      const acCount = row.orders.filter(o => o.team === 'Alpha C').length;
+      const teamSummary = [
+        neCount ? `<span style="color:#4f7cff">NE ${neCount}</span>` : '',
+        acCount ? `<span style="color:#f97316">AC ${acCount}</span>` : ''
+      ].filter(Boolean).join(' · ') || '—';
       html += `
           <tr>
             <td class="td-name">${row.staff.name}</td>
             <td class="td-mono">${row.staff.lead_staff_name}</td>
             <td class="td-mono">${row.orders.length}</td>
+            <td style="font-size:12px">${teamSummary}</td>
             <td class="td-mono" style="color:var(--green);font-weight:600">${fmt(row.commission)}</td>
             <td class="td-muted" style="font-size:11px">${row.breakdown}</td>
             <td>
@@ -4031,13 +4041,20 @@ async function previewAutoCommission() {
           <div style="font-weight:700;color:var(--yellow);margin-bottom:8px">⚠ Unmatched Payslip Orders (${unmatchedPayslipOrders.length}) — every order must belong to someone</div>
           <div style="font-size:11px;color:var(--muted);margin-bottom:10px">These orders appeared in this month's Coway payslips but no 收单追踪 claim matched the customer name. Assign each to a staff member manually.</div>
           <table>
-            <thead><tr><th>Order No</th><th>Customer</th><th>Proxy</th><th>Assign To</th></tr></thead>
+            <thead><tr><th>Order No</th><th>Customer</th><th>Proxy</th><th>Team</th><th>Assign To</th></tr></thead>
             <tbody>
-              ${unmatchedPayslipOrders.map((o, i) => `
+              ${unmatchedPayslipOrders.map((o, i) => {
+                const teamBadge = o.team === 'Alpha C'
+                  ? `<span style="color:#f97316;font-weight:600;font-size:11px">AC</span>`
+                  : o.team === 'Outsider'
+                    ? `<span style="color:var(--muted);font-size:11px">OS</span>`
+                    : `<span style="color:#4f7cff;font-weight:600;font-size:11px">NE</span>`;
+                return `
                 <tr>
                   <td class="td-mono">${o.order_no || '—'}</td>
                   <td class="td-name">${o.customer_name || '—'}</td>
                   <td class="td-muted">${o.proxy_name}</td>
+                  <td>${teamBadge}</td>
                   <td>
                     <select id="orphanAssign_${i}" style="font-size:12px;padding:4px 6px" onchange="updateOrphanAlgoDefault(${i})">
                       <option value="">— select staff —</option>
@@ -4050,7 +4067,7 @@ async function previewAutoCommission() {
                     </select>
                     <button class="btn btn-primary btn-sm" onclick="assignOrphanOrder(${i})">Assign</button>
                   </td>
-                </tr>`).join('')}
+                </tr>`; }).join('')}
             </tbody>
           </table>
         </div>`;
@@ -5543,25 +5560,25 @@ async function loadPL() {
       const key = `${bd.proxy_id}_${bd.year}_${bd.month}`;
       try {
         const orders = JSON.parse(bd.categories_json || '[]');
-        const teamTotals = {};
+        const bucketTotals = {};
         let grand = 0;
         orders.forEach(o => {
           const t = o.team || 'New Era';
+          const ch = o.channel || (t === 'Outsider' ? null : 'DM');
+          // Bucket key: "New Era|DM", "Alpha C|TM", "Outsider", etc.
+          const bucket = t === 'Outsider' ? 'Outsider' : `${t}|${ch || 'DM'}`;
           const com = parseFloat(o.total_com || 0);
           grand += com;
-          teamTotals[t] = (teamTotals[t] || 0) + com;
+          bucketTotals[bucket] = (bucketTotals[bucket] || 0) + com;
         });
-        if (grand > 0) breakdownShares[key] = Object.fromEntries(Object.entries(teamTotals).map(([t,v]) => [t, v/grand]));
+        if (grand > 0) breakdownShares[key] = Object.fromEntries(Object.entries(bucketTotals).map(([b,v]) => [b, v/grand]));
         else breakdownShares[key] = {};
       } catch(e) { /* malformed json */ }
     }
 
-    // Revenue by channel AND by team/bucket — full coway_payslip_amount,
-    // nothing excluded. Outsider is its own legitimate bucket now (not
-    // excluded from revenue), since that money still flows through the
-    // company's books before being paid back out.
+    // Revenue by channel AND by team+channel bucket (6-way split)
     const revByChannel = { DM:0, TM:0, XHS:0, OTHER:0 };
-    const revByTeam = { 'New Era':0, 'Alpha C':0, 'Outsider':0 };
+    const revByBucket = {};
     for (const inv of invoices) {
       const proxy = proxies.find(p => p.id === inv.proxy_id);
       const ch = proxy?.channel || 'OTHER';
@@ -5571,13 +5588,13 @@ async function loadPL() {
       const key = `${inv.proxy_id}_${inv.year}_${inv.month}`;
       const shares = breakdownShares[key];
       if (shares && Object.keys(shares).length) {
-        Object.entries(shares).forEach(([t, share]) => {
-          revByTeam[t] = (revByTeam[t] || 0) + amount * share;
+        Object.entries(shares).forEach(([bucket, share]) => {
+          revByBucket[bucket] = (revByBucket[bucket] || 0) + amount * share;
         });
       } else {
-        // No per-order breakdown data — fall back to invoice-level company_team
+        // Fall back to invoice-level company_team (no channel breakdown available)
         const tm = inv.company_team || proxy?.company_team || 'New Era';
-        revByTeam[tm] = (revByTeam[tm] || 0) + amount;
+        revByBucket[tm] = (revByBucket[tm] || 0) + amount;
       }
     }
 
@@ -5591,7 +5608,7 @@ async function loadPL() {
     const mgrPayslips = await sb('nec_manager_payslips', { filter: mgrPayslipFilter, select: 'pool_contribution' });
     const managerPoolRevenue = r2(mgrPayslips.reduce((s,m) => s + parseFloat(m.pool_contribution || 0), 0));
 
-    const totalRev = r2(revByTeam['New Era'] + revByTeam['Alpha C'] + revByTeam['Outsider'] + managerPoolRevenue);
+    const totalRev = r2(Object.values(revByBucket).reduce((s,v) => s+v, 0) + managerPoolRevenue);
 
     // ── Payroll costs ──────────────────────────────────────────
     // Every ringgit the company pays out is a cost — staff commission,
@@ -5663,25 +5680,52 @@ async function loadPL() {
     mgEl.textContent = margin.toFixed(1) + '%';
     mgEl.style.color = margin >= 20 ? 'var(--green)' : margin >= 0 ? 'var(--yellow)' : 'var(--red)';
 
-    // By Team/Bucket cards — 4 symmetric cards (New Era, Alpha C, Outsider,
-    // Manager Pool), each with full Revenue, a category-by-category Cost
-    // breakdown, and Net — nothing hidden or pre-netted.
-    const bucketColors = { 'New Era': '#4f7cff', 'Alpha C': '#f97316', 'Outsider': '#f59e0b', 'Manager Pool': '#a855f7' };
-    const bucketRev = { 'New Era': revByTeam['New Era'], 'Alpha C': revByTeam['Alpha C'], 'Outsider': revByTeam['Outsider'], 'Manager Pool': managerPoolRevenue };
-    document.getElementById('plTeams').innerHTML = BUCKETS.map(b => {
+    // By Team+Channel cards — show each non-zero bucket (NE-DM, NE-TM, NE-XHS,
+    // AC-DM, AC-TM, AC-XHS, Outsider, Manager Pool), plus fallback buckets
+    // from old data that was saved before channel was tracked (plain "New Era"/"Alpha C").
+    const BUCKET_ORDER = ['New Era|DM','New Era|TM','New Era|XHS','Alpha C|DM','Alpha C|TM','Alpha C|XHS','New Era','Alpha C','Outsider','Manager Pool'];
+    const bucketColors = {
+      'New Era|DM':'#4f7cff','New Era|TM':'#7c5cfc','New Era|XHS':'#ef4444',
+      'Alpha C|DM':'#f97316','Alpha C|TM':'#fb923c','Alpha C|XHS':'#fbbf24',
+      'New Era':'#4f7cff','Alpha C':'#f97316','Outsider':'#f59e0b','Manager Pool':'#a855f7'
+    };
+    const bucketLabel = (b) => {
+      if (['Outsider','Manager Pool','New Era','Alpha C'].includes(b)) return b;
+      const [team, channel] = b.split('|');
+      return `${team === 'New Era' ? 'NE' : 'AC'} — ${channel}`;
+    };
+    // Cost cost bucketing: map "New Era|DM" costs to the "New Era" bucket from manual costs,
+    // then split proportionally to sub-buckets. For now, manual costs stay at team level.
+    const activeBuckets = [...BUCKET_ORDER.filter(b => (revByBucket[b]||0) > 0 || b === 'Manager Pool'), ...Object.keys(revByBucket).filter(b => !BUCKET_ORDER.includes(b) && revByBucket[b] > 0)];
+    const bucketRev = { ...revByBucket, 'Manager Pool': managerPoolRevenue };
+
+    // For cost assignment: aggregate all "New Era|*" sub-buckets under "New Era" for cost lookup,
+    // similarly for "Alpha C|*". Outsider and Manager Pool costs stay their own bucket.
+    const costForBucket = (bucket) => {
+      if (bucket === 'Manager Pool') return costByBucket['Manager Pool'] || 0;
+      if (bucket === 'Outsider' || bucket === 'New Era' || bucket === 'Alpha C') return costByBucket[bucket] || 0;
+      const [team] = bucket.split('|');
+      const teamRev = Object.keys(revByBucket).filter(b => b.startsWith(team+'|')).reduce((s,b) => s+(revByBucket[b]||0), 0);
+      const thisRev = revByBucket[bucket] || 0;
+      const teamCost = costByBucket[team] || 0;
+      return teamRev > 0 ? r2(teamCost * thisRev / teamRev) : 0;
+    };
+
+    document.getElementById('plTeams').style.gridTemplateColumns = `repeat(${Math.min(activeBuckets.length,4)},1fr)`;
+    document.getElementById('plTeams').innerHTML = activeBuckets.map(b => {
       const rev = bucketRev[b] || 0;
-      const cost = costByBucket[b] || 0;
+      const cost = costForBucket(b);
       const net = rev - cost;
       const pct = totalRev > 0 ? (rev / totalRev * 100).toFixed(1) : '0.0';
-      const catEntries = Object.entries(costCategoryByBucket[b] || {}).filter(([,v]) => v > 0.005).sort((a,b2) => b2[1]-a[1]);
+      const catEntries = Object.entries(costCategoryByBucket[b] || costCategoryByBucket[b.split('|')[0]] || {}).filter(([,v]) => v > 0.005).sort((a,b2) => b2[1]-a[1]);
       const catHtml = catEntries.length ? catEntries.map(([label, amt]) => `
           <div style="display:flex;justify-content:space-between;font-size:11px;padding-left:8px">
             <span style="color:var(--muted)">${label}</span>
             <span style="font-family:var(--mono);color:var(--red)">${fmt(amt)}</span>
           </div>`).join('') : `<div style="font-size:11px;color:var(--muted);padding-left:8px">No costs this period</div>`;
       return `<div class="stat-card">
-        <div class="stat-label" style="color:${bucketColors[b]};font-weight:700">${b}</div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">${pct}% of total revenue</div>
+        <div class="stat-label" style="color:${bucketColors[b]||'var(--muted)'};font-weight:700">${bucketLabel(b)}</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">${pct}% of revenue</div>
         <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span style="color:var(--muted)">Revenue</span><span style="font-family:var(--mono);color:var(--green)">${fmt(rev)}</span></div>
         <div style="font-size:12px;color:var(--muted);margin:6px 0 4px">Costs</div>
         <div style="display:grid;gap:3px;margin-bottom:6px">${catHtml}</div>
@@ -6891,6 +6935,11 @@ const _teamMap = {};
 // Per-order channel: { [distributor_code + '|' + order_no]: 'DM'|'TM'|'XHS'|null }
 // null = Outsider (channel not applicable)
 const _channelMap = {};
+// Per-order staff assignment: { [distributor_code + '|' + order_no]: staffId|null }
+const _staffMap = {};
+function setOrderStaff(code, orderNo, staffId) {
+  _staffMap[`${code}|${orderNo}`] = staffId || null;
+}
 
 function getOrderTeam(code, orderNo) {
   const perOrder = _teamMap[`${code}|${orderNo}`];
@@ -6967,6 +7016,8 @@ async function handlePDFFiles(files) {
   if (!files.length) return;
   parsedPayslips = [];
   const parseErrors = [];
+  // Ensure staff list is ready so per-order staff dropdowns can be populated
+  if (!staffList.length) await loadStaff();
   document.getElementById('uploadProgress').style.display = 'block';
   document.getElementById('uploadResults').innerHTML = '';
   document.getElementById('uploadConfirmBar').style.display = 'none';
@@ -7067,10 +7118,12 @@ function buildParseResultHTML(result) {
     const oKey = `${code}|${o.order_no}`;
     _teamMap[oKey] = defaultTeam;
     _channelMap[oKey] = defaultTeam === 'Outsider' ? null : defaultChannel;
+    _staffMap[oKey] = null;
     const isOutsider = defaultTeam === 'Outsider';
     const chOpts = isOutsider
       ? '<option value="">—</option>'
       : `<option value="DM"${defaultChannel==='DM'?' selected':''}>DM</option><option value="TM"${defaultChannel==='TM'?' selected':''}>TM</option><option value="XHS"${defaultChannel==='XHS'?' selected':''}>XHS</option>`;
+    const staffOpts = staffList.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
     return `<div class="order-row">
       <span style="color:var(--muted);font-family:var(--mono);font-size:10px">${o.order_no}</span>
       <span>${o.customer_name}</span>
@@ -7079,7 +7132,7 @@ function buildParseResultHTML(result) {
       <span style="font-family:var(--mono);font-weight:700;color:var(--green)">${fmtNum(o.total_com)}</span>
       <select class="team-select-${code}" data-order-no="${o.order_no}"
               onchange="setOrderTeam('${code}','${o.order_no}',this.value);this.style.color=teamColorHex(this.value);syncChannelOnTeamChange('${code}','${o.order_no}',this.value)"
-              style="font-size:10px;padding:2px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:${teamColorHex(defaultTeam)};cursor:pointer">
+              style="font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:${teamColorHex(defaultTeam)};cursor:pointer">
         <option value="New Era"${defaultTeam==='New Era'?' selected':''}>New Era</option>
         <option value="Alpha C"${defaultTeam==='Alpha C'?' selected':''}>Alpha C</option>
         <option value="Outsider"${defaultTeam==='Outsider'?' selected':''}>Outsider</option>
@@ -7087,8 +7140,14 @@ function buildParseResultHTML(result) {
       <select class="channel-select-${code}" data-order-no="${o.order_no}"
               onchange="setOrderChannel('${code}','${o.order_no}',this.value)"
               ${isOutsider ? 'disabled' : ''}
-              style="font-size:10px;padding:2px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--muted);cursor:pointer">
+              style="font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--muted);cursor:pointer">
         ${chOpts}
+      </select>
+      <select class="staff-select-${code}" data-order-no="${o.order_no}"
+              onchange="setOrderStaff('${code}','${o.order_no}',this.value)"
+              style="font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--accent);cursor:pointer">
+        <option value="">— assign —</option>
+        ${staffOpts}
       </select>
     </div>`;
   }).join('');
@@ -7157,7 +7216,7 @@ function buildParseResultHTML(result) {
         <span style="color:${matchColor};margin-left:6px">${matchIcon}</span>
       </div>
       ${orderRows.length > 0 ? `
-        <div class="order-row header" style="font-size:10px"><span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team</span><span>Channel</span></div>
+        <div class="order-row header" style="font-size:10px"><span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team</span><span>Channel</span><span>Staff</span></div>
         ${orderRows}` : ''}
       ${result.allowances && result.allowances.length > 0 ? `<div style="font-size:10px;color:var(--muted);margin-top:6px">Allowance items: ${result.allowances.map(a => `${a.description} RM${fmtNum(a.amount)}`).join(', ')}</div>` : (result.allowance_total > 0 ? '' : `<div style="font-size:10px;color:var(--muted);margin-top:4px">No Allowance section found in PDF</div>`)}
       ${!result.matched ? `<div style="margin-top:10px;font-size:12px;color:var(--red)">⚠ Add "${result.distributor_name}" as proxy first, then re-upload.</div>` : ''}
@@ -7328,6 +7387,20 @@ async function confirmBulkSave() {
       });
 
       await logAudit('CREATE', 'proxy_invoices', `Bulk import: ${p.distributor_name} — ${MONTHS[month]} ${year} — RM${p.total_net_payable}`);
+
+      // Save per-order staff assignments for any orders that had a staff selected
+      for (const o of ordersWithTeam) {
+        const staffId = _staffMap[`${code}|${o.order_no}`];
+        if (!staffId) continue;
+        const commAlgo = (_channelMap[`${code}|${o.order_no}`] || 'DM').toLowerCase();
+        try {
+          await sbDelete('nec_order_assignments', `year=eq.${year}&month=eq.${month}&proxy_id=eq.${p.proxy_id}&order_no=eq.${o.order_no}&customer_name=eq.${encodeURIComponent(o.customer_name)}`);
+          await sb('nec_order_assignments', {
+            method: 'POST',
+            body: { year, month, order_no: o.order_no, customer_name: o.customer_name, proxy_id: p.proxy_id, staff_id: staffId, source: 'bulk_upload', commission_algo: commAlgo }
+          });
+        } catch(e) { /* non-fatal — assignment can be done manually in Auto Commission */ }
+      }
     } catch(e) {
       console.error('Save error for', p.distributor_name, e.message);
     }
@@ -7573,11 +7646,29 @@ async function showBreakdown(id) {
     let catHTML = '';
     if (isFlat) {
       const bdId = b.id;
+      // Fetch staff assignments for this proxy/period to show who owns each order
+      if (!staffList.length) await loadStaff();
+      let assignedStaffMap = {};
+      try {
+        const assignments = await sb('nec_order_assignments', {
+          filter: `proxy_id=eq.${b.proxy_id}&year=eq.${b.year}&month=eq.${b.month}`,
+          select: 'order_no,staff_id,commission_algo'
+        });
+        assignments.forEach(a => {
+          const staff = staffList.find(s => s.id === a.staff_id);
+          if (staff) assignedStaffMap[a.order_no] = { name: staff.name, algo: a.commission_algo };
+        });
+      } catch(e) { /* non-fatal */ }
       const neTotal = r2(rawCats.filter(o=>!o.team||o.team==='New Era').reduce((s,o)=>s+parseFloat(o.total_com||0),0));
       const acTotal = r2(rawCats.filter(o=>o.team==='Alpha C').reduce((s,o)=>s+parseFloat(o.total_com||0),0));
       const osTotal = r2(rawCats.filter(o=>o.team==='Outsider').reduce((s,o)=>s+parseFloat(o.total_com||0),0));
       const ordersTotal = r2(rawCats.reduce((s,o) => s + parseFloat(o.total_com||0), 0));
-      const orderRows = rawCats.map(o => `
+      const orderRows = rawCats.map(o => {
+        const assigned = assignedStaffMap[o.order_no];
+        const staffCell = assigned
+          ? `<span style="font-size:10px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${assigned.name} (${assigned.algo||''})">${assigned.name}</span>`
+          : `<span style="font-size:10px;color:var(--muted)">—</span>`;
+        return `
         <div class="order-row" style="${o.team==='Outsider'?'opacity:0.7':''}">
           <span style="color:var(--muted);font-family:var(--mono)">${o.order_no || '—'}</span>
           <span>${o.customer_name || '—'}</span>
@@ -7586,7 +7677,8 @@ async function showBreakdown(id) {
           <span style="font-family:var(--mono);font-weight:600;color:${o.team==='Outsider'?'var(--muted)':'var(--green)'}">${fmtNum(o.total_com)}</span>
           ${orderTeamSelect(o, bdId)}
           ${orderChannelSelect(o, bdId)}
-        </div>`).join('');
+          ${staffCell}
+        </div>`; }).join('');
       const summaryParts = [
         neTotal > 0 ? `<span style="color:#4f7cff">NE RM${fmtNum(neTotal)}</span>` : '',
         acTotal > 0 ? `<span style="color:#f97316">AC RM${fmtNum(acTotal)}</span>` : '',
@@ -7614,7 +7706,7 @@ async function showBreakdown(id) {
         ${setAllBtns}
         ${summaryParts ? `<div style="font-size:11px;margin-bottom:6px">${summaryParts}</div>` : ''}
         <div class="order-row header" style="font-size:10px">
-          <span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team</span><span>Channel</span>
+          <span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team</span><span>Channel</span><span>Staff</span>
         </div>
         ${orderRows}
       </div>` : '';
