@@ -235,7 +235,7 @@
   .breakdown-content { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; overflow-y: auto; max-height: calc(100vh - 200px); }
   .cat-section { margin-bottom: 20px; }
   .cat-section-title { font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; padding: 8px 0; border-bottom: 1px solid var(--border); margin-bottom: 8px; display: flex; justify-content: space-between; }
-  .order-row { display: grid; grid-template-columns: 110px 1fr 120px 50px 80px 80px 90px 80px; gap: 8px; font-size: 11px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.04); align-items: center; }
+  .order-row { display: grid; grid-template-columns: 110px 1fr 110px 80px 90px 90px 80px; gap: 8px; font-size: 11px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.04); align-items: center; }
   .order-row:last-child { border-bottom: none; }
   .order-row.header { color: var(--muted); font-weight: 600; font-size: 10px; text-transform: uppercase; }
 </style>
@@ -7554,21 +7554,20 @@ async function showBreakdown(id) {
       `<option value="${t}"${current===t?' selected':''}>${t}</option>`).join('');
     const chOpts = (current) => ['DM','TM','XHS'].map(ch =>
       `<option value="${ch}"${current===ch?' selected':''}>${ch}</option>`).join('');
-    const orderTeamSelect = (o, bdId) => {
+    const orderTeamSelect = (o, bdId) => `
+      <select onchange="this.style.color=teamColorHex(this.value);updateOrderTeam('${bdId}','${o.order_no}',this.value);syncBdChannel('${bdId}','${o.order_no}',this.value)"
+              style="font-size:10px;padding:2px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:${teamColorHex(o.team||'New Era')};cursor:pointer;width:100%">
+        ${teamOpts(o.team || 'New Era')}
+      </select>`;
+    const orderChannelSelect = (o, bdId) => {
       const isOutsider = (o.team || 'New Era') === 'Outsider';
       const ch = o.channel || 'DM';
-      return `<span style="display:flex;flex-direction:column;gap:2px">
-        <select onchange="this.style.color=teamColorHex(this.value);updateOrderTeam('${bdId}','${o.order_no}',this.value);syncBdChannel('${bdId}','${o.order_no}',this.value)"
-                style="font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:${teamColorHex(o.team||'New Era')};cursor:pointer">
-          ${teamOpts(o.team || 'New Era')}
-        </select>
-        <select id="bdCh_${bdId}_${o.order_no.replace(/[^a-z0-9]/gi,'_')}"
-                onchange="updateOrderChannel('${bdId}','${o.order_no}',this.value)"
-                ${isOutsider ? 'disabled' : ''}
-                style="font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--muted);cursor:pointer">
-          ${isOutsider ? '<option value="">—</option>' : chOpts(ch)}
-        </select>
-      </span>`;
+      return `<select id="bdCh_${bdId}_${o.order_no.replace(/[^a-z0-9]/gi,'_')}"
+              onchange="updateOrderChannel('${bdId}','${o.order_no}',this.value)"
+              ${isOutsider ? 'disabled' : ''}
+              style="font-size:10px;padding:2px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--muted);cursor:pointer;width:100%">
+        ${isOutsider ? '<option value="">—</option>' : chOpts(ch)}
+      </select>`;
     };
 
     let catHTML = '';
@@ -7582,12 +7581,11 @@ async function showBreakdown(id) {
         <div class="order-row" style="${o.team==='Outsider'?'opacity:0.7':''}">
           <span style="color:var(--muted);font-family:var(--mono)">${o.order_no || '—'}</span>
           <span>${o.customer_name || '—'}</span>
-          <span style="color:var(--muted);font-size:11px">${o.product || '—'}</span>
-          <span style="color:var(--muted)">${o.months != null ? o.months + 'M' : '—'}</span>
           <span style="font-family:var(--mono)">${o.com_from_payslip != null ? fmtNum(o.com_from_payslip) : '—'}</span>
           <span style="font-family:var(--mono);color:var(--yellow)">${parseFloat(o.allowance_portion||0) > 0 ? fmtNum(o.allowance_portion) : '—'}</span>
           <span style="font-family:var(--mono);font-weight:600;color:${o.team==='Outsider'?'var(--muted)':'var(--green)'}">${fmtNum(o.total_com)}</span>
           ${orderTeamSelect(o, bdId)}
+          ${orderChannelSelect(o, bdId)}
         </div>`).join('');
       const summaryParts = [
         neTotal > 0 ? `<span style="color:#4f7cff">NE RM${fmtNum(neTotal)}</span>` : '',
@@ -7616,7 +7614,7 @@ async function showBreakdown(id) {
         ${setAllBtns}
         ${summaryParts ? `<div style="font-size:11px;margin-bottom:6px">${summaryParts}</div>` : ''}
         <div class="order-row header" style="font-size:10px">
-          <span>Order No</span><span>Customer</span><span>Product</span><span>Months</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team / Ch</span>
+          <span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team</span><span>Channel</span>
         </div>
         ${orderRows}
       </div>` : '';
