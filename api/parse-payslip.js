@@ -255,7 +255,12 @@ function parseCowayPayslip(text) {
       }
       if (amountsBefore.length > 1) {
         const maxVal = Math.max(...amountsBefore);
-        const indivAmounts = amountsBefore.filter(n => n !== maxVal);
+        let indivAmounts = amountsBefore.filter(n => n !== maxVal);
+        // Edge case: all amounts are equal (individual == total, e.g. only one
+        // allowance type and the PDF repeats the same number twice). In this
+        // case the filter removes everything — fall back to using maxVal as the
+        // single allowance amount so it isn't silently dropped.
+        if (indivAmounts.length === 0) indivAmounts = [maxVal];
         // Collect description labels from sLines: any non-numeric,
         // non-header line before the first order-number-like line.
         const descLabels = [];
