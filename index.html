@@ -5697,7 +5697,8 @@ async function loadPL() {
     // By Team+Channel cards — show each non-zero bucket (NE-DM, NE-TM, NE-XHS,
     // AC-DM, AC-TM, AC-XHS, Outsider, Manager Pool), plus fallback buckets
     // from old data that was saved before channel was tracked (plain "New Era"/"Alpha C").
-    const BUCKET_ORDER = ['New Era|DM','New Era|TM','New Era|XHS','Alpha C|DM','Alpha C|TM','Alpha C|XHS','New Era','Alpha C','Outsider','Manager Pool'];
+    // Only show the 6 meaningful buckets: NE-DM, NE-TM, XHS (shared), AC-DM, AC-TM, Outsider
+    const BUCKET_ORDER = ['New Era|DM','New Era|TM','New Era|XHS','Alpha C|DM','Alpha C|TM','Outsider'];
     const bucketColors = {
       'New Era|DM':'#4f7cff','New Era|TM':'#7c5cfc','New Era|XHS':'#ef4444',
       'Alpha C|DM':'#f97316','Alpha C|TM':'#fb923c','Alpha C|XHS':'#fbbf24',
@@ -5710,8 +5711,9 @@ async function loadPL() {
     };
     // Cost cost bucketing: map "New Era|DM" costs to the "New Era" bucket from manual costs,
     // then split proportionally to sub-buckets. For now, manual costs stay at team level.
-    const activeBuckets = [...BUCKET_ORDER.filter(b => (revByBucket[b]||0) > 0 || b === 'Manager Pool'), ...Object.keys(revByBucket).filter(b => !BUCKET_ORDER.includes(b) && revByBucket[b] > 0)];
-    const bucketRev = { ...revByBucket, 'Manager Pool': managerPoolRevenue };
+    // Always show all 6 defined buckets (even if 0) — no extras, no Manager Pool card
+    const activeBuckets = BUCKET_ORDER;
+    const bucketRev = { ...revByBucket };
 
     // For cost assignment: aggregate all "New Era|*" sub-buckets under "New Era" for cost lookup,
     // similarly for "Alpha C|*". Outsider and Manager Pool costs stay their own bucket.
@@ -5725,7 +5727,7 @@ async function loadPL() {
       return teamRev > 0 ? r2(teamCost * thisRev / teamRev) : 0;
     };
 
-    document.getElementById('plTeams').style.gridTemplateColumns = `repeat(${Math.min(activeBuckets.length,4)},1fr)`;
+    document.getElementById('plTeams').style.gridTemplateColumns = 'repeat(3,1fr)';
     document.getElementById('plTeams').innerHTML = activeBuckets.map(b => {
       const rev = bucketRev[b] || 0;
       const cost = costForBucket(b);
@@ -5749,23 +5751,7 @@ async function loadPL() {
       </div>`;
     }).join('');
 
-    // Channel cards (acquisition channel — unchanged dimension, full
-    // payslip amount, nothing excluded)
-    const sharedCostPerChannel = costByChannel.SHARED / 4;
-    document.getElementById('plChannels').innerHTML = ['DM','TM','XHS','OTHER'].map(ch => {
-      const rev = revByChannel[ch] || 0;
-      const cost = (costByChannel[ch] || 0) + sharedCostPerChannel;
-      const net = rev - cost;
-      return `<div class="stat-card">
-        <div class="stat-label"><span class="badge badge-${ch.toLowerCase()}">${ch}</span></div>
-        <div style="margin-top:10px;display:grid;gap:6px;font-size:12px">
-          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Revenue</span><span style="font-family:var(--mono);color:var(--green)">${fmt(rev)}</span></div>
-          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Costs</span><span style="font-family:var(--mono);color:var(--red)">${fmt(cost)}</span></div>
-          <div style="height:1px;background:var(--border);margin:2px 0"></div>
-          <div style="display:flex;justify-content:space-between"><span style="font-weight:600">Net</span><span style="font-family:var(--mono);font-weight:700;color:${net>=0?'var(--green)':'var(--red)'}">${fmt(net)}</span></div>
-        </div>
-      </div>`;
-    }).join('');
+    document.getElementById('plChannels').innerHTML = ''; // Channel section removed
 
     // Cost table — grouped card-by-card (mirrors the Inv page's
     // manager-grouping pattern) instead of one flat chronological list.
@@ -6276,8 +6262,19 @@ function renderCCTracker() {
       <td><input type="number" step="0.01" value="${statementAmt || ''}" placeholder="0.00" style="width:110px;font-family:var(--mono)" onchange="upsertCCStatement('${card.id}',${year},${month},{statement_amount:parseFloat(this.value)||0})"></td>
       <td><input type="number" step="0.01" value="${paymentAmt || ''}" placeholder="0.00" style="width:110px;font-family:var(--mono)" onchange="upsertCCStatement('${card.id}',${year},${month},{payment_amount:parseFloat(this.value)||0})"></td>
       <td class="td-mono" style="color:${balance>0?'var(--red)':'var(--green)'}">${fmtNum(balance)}</td>
-      <td><input type="date" value="${statementDate}" style="width:140px" onchange="upsertCCStatement('${card.id}',${year},${month},{statement_date:this.value})"></td>
-      <td><input type="date" value="${dueDate}" style="width:140px" onchange="upsertCCStatement('${card.id}',${year},${month},{due_date:this.value})">${dueBadge ? `<div style="margin-top:2px">${dueBadge}</div>` : ''}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:4px">
+          <span id="sdDisplay_${card.id}_${year}_${month}" style="font-size:12px;font-family:var(--mono)">${statementDate || '—'}</span>
+          <button class="btn btn-ghost btn-sm" style="padding:2px 6px;font-size:10px" onclick="editCCDate('${card.id}',${year},${month},'statement_date','${statementDate || ''}')">✎</button>
+        </div>
+      </td>
+      <td>
+        <div style="display:flex;align-items:center;gap:4px">
+          <span id="ddDisplay_${card.id}_${year}_${month}" style="font-size:12px;font-family:var(--mono)">${dueDate || '—'}</span>
+          <button class="btn btn-ghost btn-sm" style="padding:2px 6px;font-size:10px" onclick="editCCDate('${card.id}',${year},${month},'due_date','${dueDate || ''}')">✎</button>
+        </div>
+        ${dueBadge ? `<div style="margin-top:2px">${dueBadge}</div>` : ''}
+      </td>
       <td>${isPaid ? `<span class="badge badge-paid">✓ Paid${s.payment_date ? ' '+s.payment_date : ''}</span>` : `<span class="badge" style="background:rgba(239,68,68,0.15);color:var(--red)">Unpaid</span>`}</td>
       <td>
         <button class="btn btn-ghost btn-sm" onclick="toggleCCPaid('${card.id}',${year},${month},${isPaid})">${isPaid ? 'Unmark' : 'Mark Paid'}</button>
@@ -6297,6 +6294,35 @@ function renderCCTracker() {
 // Creates or updates this card's statement row for the given year/month.
 // Used by every inline-editable field (amounts, dates) on the tracker —
 // each field saves independently on change/blur.
+// Open a small inline date picker when the user clicks ✎ on a CC Tracker date
+function editCCDate(cardId, year, month, field, currentVal) {
+  const displayId = field === 'statement_date'
+    ? `sdDisplay_${cardId}_${year}_${month}`
+    : `ddDisplay_${cardId}_${year}_${month}`;
+  const displayEl = document.getElementById(displayId);
+  if (!displayEl) return;
+  // Replace the span+button with a temporary date input
+  const container = displayEl.parentElement;
+  const oldHTML = container.innerHTML;
+  container.innerHTML = `<input type="date" value="${currentVal}" style="font-size:12px;padding:2px 4px;background:var(--surface2);border:1px solid var(--accent);border-radius:4px;color:var(--fg)" autofocus>`;
+  const input = container.querySelector('input');
+  input.focus();
+  const save = async () => {
+    const newVal = input.value;
+    container.innerHTML = oldHTML; // restore first
+    if (newVal && newVal !== currentVal) {
+      await upsertCCStatement(cardId, year, month, { [field]: newVal });
+      loadCCTracker();
+    }
+  };
+  input.addEventListener('change', save);
+  input.addEventListener('blur', async () => {
+    // slight delay so 'change' fires first if value changed
+    setTimeout(() => { if (container.querySelector('input')) { container.innerHTML = oldHTML; } }, 200);
+  });
+  input.addEventListener('keydown', e => { if (e.key === 'Escape') { container.innerHTML = oldHTML; } });
+}
+
 async function upsertCCStatement(cardId, year, month, patch) {
   try {
     const existing = ccStatements.find(s => s.card_id === cardId && s.year === year && s.month === month);
