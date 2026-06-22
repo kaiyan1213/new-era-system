@@ -1401,18 +1401,46 @@
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Team</label>
-          <select id="bankTeam" class="form-input">
-            <option value="Manager">Manager</option>
-            <option value="NEW ERA ADMIN">NEW ERA ADMIN</option>
-            <option value="NEW ERA EDITOR TEAM">NEW ERA EDITOR TEAM</option>
-            <option value="Digital Marketing Team">Digital Marketing Team</option>
-            <option value="Telemarketing Team">Telemarketing Team</option>
-            <option value="Others">Others</option>
+          <select id="bankTeam" class="form-input" onchange="onBankTeamChange()">
+            <optgroup label="New Era">
+              <option value="NE-DM">NE — Digital Marketing</option>
+              <option value="NE-TM">NE — Telemarketing</option>
+              <option value="NE-Admin" selected>NE — Admin</option>
+              <option value="NE-Editor">NE — Editor</option>
+              <option value="NE-Content Creator">NE — Content Creator</option>
+            </optgroup>
+            <optgroup label="Alpha C">
+              <option value="AC-DM">AC — Digital Marketing</option>
+              <option value="AC-TM">AC — Telemarketing</option>
+              <option value="AC-Admin">AC — Admin</option>
+              <option value="AC-Editor">AC — Editor</option>
+              <option value="AC-Content Creator">AC — Content Creator</option>
+            </optgroup>
+            <optgroup label="Shared (both teams)">
+              <option value="Shared-Admin">Shared — Admin</option>
+              <option value="Shared-Editor">Shared — Editor</option>
+              <option value="Shared-Content Creator">Shared — Content Creator</option>
+            </optgroup>
+            <optgroup label="Other">
+              <option value="Manager">Manager</option>
+              <option value="Other">Other</option>
+            </optgroup>
           </select>
         </div>
         <div class="form-group">
           <label class="form-label">Role / Note (optional)</label>
           <input type="text" id="bankRole" class="form-input" placeholder="e.g. Admin, Carmen Admin">
+        </div>
+      </div>
+      <!-- Salary split — only visible when team is Shared-* -->
+      <div class="form-row" id="bankSplitRow" style="display:none">
+        <div class="form-group">
+          <label class="form-label">New Era pays (%)</label>
+          <input type="number" id="bankSplitNE" class="form-input" placeholder="50" min="0" max="100" value="50" oninput="syncBankSplitAC()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Alpha C pays (%)</label>
+          <input type="number" id="bankSplitAC" class="form-input" placeholder="50" min="0" max="100" value="50" oninput="syncBankSplitNE()">
         </div>
       </div>
       <div class="form-row">
@@ -2853,7 +2881,24 @@ async function loadDirectory() {
   window.scrollTo(0, scrollY);
 }
 
-const BANK_TEAM_ORDER = ['Manager', 'NEW ERA ADMIN', 'NEW ERA EDITOR TEAM', 'Digital Marketing Team', 'Telemarketing Team', 'Others'];
+const BANK_TEAM_ORDER = [
+  'NE-DM','NE-TM','NE-Admin','NE-Editor','NE-Content Creator',
+  'AC-DM','AC-TM','AC-Admin','AC-Editor','AC-Content Creator',
+  'Shared-Admin','Shared-Editor','Shared-Content Creator',
+  'Manager','Other',
+  // Legacy values for backward compat
+  'NEW ERA ADMIN','NEW ERA EDITOR TEAM','Digital Marketing Team','Telemarketing Team','Others'
+];
+const BANK_TEAM_LABELS = {
+  'NE-DM':'NE — Digital Marketing','NE-TM':'NE — Telemarketing',
+  'NE-Admin':'NE — Admin','NE-Editor':'NE — Editor','NE-Content Creator':'NE — Content Creator',
+  'AC-DM':'AC — Digital Marketing','AC-TM':'AC — Telemarketing',
+  'AC-Admin':'AC — Admin','AC-Editor':'AC — Editor','AC-Content Creator':'AC — Content Creator',
+  'Shared-Admin':'Shared — Admin','Shared-Editor':'Shared — Editor','Shared-Content Creator':'Shared — Content Creator',
+  'Manager':'Manager','Other':'Other',
+  'NEW ERA ADMIN':'NE — Admin (legacy)','NEW ERA EDITOR TEAM':'NE — Editor (legacy)',
+  'Digital Marketing Team':'NE — DM (legacy)','Telemarketing Team':'NE — TM (legacy)','Others':'Other (legacy)'
+};
 let bankDirList = [];
 
 async function loadBankDirectory() {
@@ -2889,7 +2934,7 @@ async function loadBankDirectory() {
 
       return `
         <div class="table-wrap" data-team-block="${team}" style="margin-bottom:20px">
-          <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">${team}</div>
+          <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">${BANK_TEAM_LABELS[team] || team}</div>
           <table>
             <thead>
               <tr>
@@ -2937,9 +2982,11 @@ function filterBankDirTable() {
 // salary set — anyone can have it filled in later in Payroll, and
 // anyone can still receive Outsider commission regardless of type.
 function inferStaffTypeFromTeam(team) {
-  if (team === 'Digital Marketing Team') return { staff_type: 'sales', channel: 'DM' };
-  if (team === 'Telemarketing Team') return { staff_type: 'sales', channel: 'TM' };
-  return { staff_type: 'admin', channel: null };
+  if (team === 'NE-DM' || team === 'AC-DM' || team === 'Digital Marketing Team') return { staff_type: 'sales', channel: 'DM', company_team: team.startsWith('AC') ? 'Alpha C' : 'New Era' };
+  if (team === 'NE-TM' || team === 'AC-TM' || team === 'Telemarketing Team') return { staff_type: 'sales', channel: 'TM', company_team: team.startsWith('AC') ? 'Alpha C' : 'New Era' };
+  if (team.startsWith('AC-')) return { staff_type: 'admin', channel: null, company_team: 'Alpha C' };
+  if (team.startsWith('Shared-')) return { staff_type: 'admin', channel: null, company_team: 'Shared' };
+  return { staff_type: 'admin', channel: null, company_team: 'New Era' };
 }
 
 async function syncStaffFromBankEntry(bankId, name, team) {
@@ -2972,10 +3019,24 @@ async function syncStaffFromBankEntry(bankId, name, team) {
       const proxyMatch = await sb('proxy_accounts', { filter: `name=eq.${encodeURIComponent(name)}&is_active=eq.true&is_manager_account=eq.false`, select: 'id' });
       if (proxyMatch.length) ownProxyId = proxyMatch[0].id;
     } catch(e) { /* non-fatal — leave unlinked */ }
-    await sb('nec_staff', { method: 'POST', body: { name, staff_type, channel, base_salary: 0, bank_directory_id: bankId, own_proxy_id: ownProxyId, is_active: true } });
+    await sb('nec_staff', { method: 'POST', body: { name, staff_type, channel, company_team: inferStaffTypeFromTeam(team).company_team || 'New Era', base_salary: 0, bank_directory_id: bankId, own_proxy_id: ownProxyId, is_active: true } });
   } catch(e) {
     console.error('Staff sync from Bank Details failed:', e);
   }
+}
+
+function onBankTeamChange() {
+  const team = document.getElementById('bankTeam').value;
+  const isShared = team.startsWith('Shared');
+  document.getElementById('bankSplitRow').style.display = isShared ? '' : 'none';
+}
+function syncBankSplitAC() {
+  const ne = parseFloat(document.getElementById('bankSplitNE').value) || 0;
+  document.getElementById('bankSplitAC').value = Math.max(0, 100 - ne);
+}
+function syncBankSplitNE() {
+  const ac = parseFloat(document.getElementById('bankSplitAC').value) || 0;
+  document.getElementById('bankSplitNE').value = Math.max(0, 100 - ac);
 }
 
 function openBankEntryModal(id) {
@@ -2983,7 +3044,10 @@ function openBankEntryModal(id) {
   document.getElementById('bankName').value = '';
   document.getElementById('bankIC').value = '';
   document.getElementById('bankRole').value = '';
-  document.getElementById('bankTeam').value = 'NEW ERA ADMIN';
+  document.getElementById('bankTeam').value = 'NE-Admin';
+  document.getElementById('bankSplitRow').style.display = 'none';
+  document.getElementById('bankSplitNE').value = '50';
+  document.getElementById('bankSplitAC').value = '50';
   document.getElementById('bankBankName').value = '';
   document.getElementById('bankAccountNo').value = '';
 
@@ -2995,7 +3059,11 @@ function openBankEntryModal(id) {
       document.getElementById('bankName').value = p.name || '';
       document.getElementById('bankIC').value = p.ic_number || '';
       document.getElementById('bankRole').value = p.role || '';
-      document.getElementById('bankTeam').value = p.team || 'NEW ERA ADMIN';
+      document.getElementById('bankTeam').value = p.team || 'NE-Admin';
+      const isShared = (p.team || '').startsWith('Shared');
+      document.getElementById('bankSplitRow').style.display = isShared ? '' : 'none';
+      document.getElementById('bankSplitNE').value = p.salary_split_ne != null ? p.salary_split_ne : 50;
+      document.getElementById('bankSplitAC').value = p.salary_split_ac != null ? p.salary_split_ac : 50;
       document.getElementById('bankBankName').value = p.bank_name || '';
       document.getElementById('bankAccountNo').value = p.bank_account || '';
     }
@@ -3010,13 +3078,19 @@ async function saveBankEntry() {
   const name = document.getElementById('bankName').value.trim();
   if (!name) return showToast('Name is required', 'error');
 
+  const teamVal = document.getElementById('bankTeam').value;
+  const isShared = teamVal.startsWith('Shared');
+  const neRaw = parseFloat(document.getElementById('bankSplitNE').value) || 50;
+  const acRaw = parseFloat(document.getElementById('bankSplitAC').value) || 50;
   const body = {
     name,
     ic_number: document.getElementById('bankIC').value.trim() || null,
     role: document.getElementById('bankRole').value.trim() || null,
-    team: document.getElementById('bankTeam').value,
+    team: teamVal,
     bank_name: document.getElementById('bankBankName').value.trim() || null,
     bank_account: document.getElementById('bankAccountNo').value.trim() || null,
+    salary_split_ne: isShared ? neRaw : null,
+    salary_split_ac: isShared ? acRaw : null,
     is_active: true
   };
 
@@ -5741,9 +5815,22 @@ async function loadPL() {
     let payFilter = `year=eq.${year}`;
     if (month) payFilter += `&month=eq.${month}`;
     const payrollRows = await sb('nec_payroll', { filter: payFilter, select: 'staff_id,month,total_pay,commission_type,record_type' });
-    const allStaff = await sb('nec_staff', { select: 'id,staff_type,channel,company_team' });
+    const allStaff = await sb('nec_staff', { select: 'id,staff_type,channel,company_team,bank_directory_id' });
     const staffMap = {};
     allStaff.forEach(s => staffMap[s.id] = s);
+    // For Shared-team staff: load their salary split from bank directory
+    const sharedStaffIds = allStaff.filter(s => s.company_team === 'Shared' && s.bank_directory_id).map(s => s.bank_directory_id);
+    const bankDirSplitMap = {}; // staff_id -> {salary_split_ne, salary_split_ac}
+    if (sharedStaffIds.length) {
+      try {
+        const bdRows = await sb('nec_bank_directory', { filter: `id=in.(${sharedStaffIds.join(',')})`, select: 'id,salary_split_ne,salary_split_ac' });
+        const bdById = {};
+        bdRows.forEach(r => { bdById[r.id] = r; });
+        allStaff.filter(s => s.bank_directory_id && bdById[s.bank_directory_id]).forEach(s => {
+          bankDirSplitMap[s.id] = bdById[s.bank_directory_id];
+        });
+      } catch(e) { /* non-fatal */ }
+    }
 
     const payrollCostLines = []; // {label, bucket, amount}
     payrollRows.forEach(p => {
@@ -5759,6 +5846,15 @@ async function loadPL() {
       } else if (staff?.staff_type === 'sales') {
         const chLabel = staff.channel === 'TM' ? 'TM' : 'DM';
         payrollCostLines.push({ label: `Staff Commission (${chLabel})`, bucket: staff?.company_team || 'New Era', amount: netPay });
+      } else if (staff?.company_team === 'Shared') {
+        // Shared-team staff: split the cost proportionally between NE and AC
+        // using the salary_split_ne / salary_split_ac from their bank directory entry.
+        // Default 50/50 if not set.
+        const bankEntry = bankDirSplitMap[staff.id];
+        const nePct = bankEntry?.salary_split_ne != null ? bankEntry.salary_split_ne / 100 : 0.5;
+        const acPct = bankEntry?.salary_split_ac != null ? bankEntry.salary_split_ac / 100 : (1 - nePct);
+        if (nePct > 0) payrollCostLines.push({ label: 'Admin Salary (Shared)', bucket: 'New Era', amount: r2(netPay * nePct) });
+        if (acPct > 0) payrollCostLines.push({ label: 'Admin Salary (Shared)', bucket: 'Alpha C', amount: r2(netPay * acPct) });
       } else {
         payrollCostLines.push({ label: 'Admin Salary', bucket: staff?.company_team || 'New Era', amount: netPay });
       }
