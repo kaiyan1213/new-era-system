@@ -4044,11 +4044,12 @@ async function previewAutoCommission() {
             <thead><tr><th>Order No</th><th>Customer</th><th>Proxy</th><th>Team</th><th>Assign To</th></tr></thead>
             <tbody>
               ${unmatchedPayslipOrders.map((o, i) => {
-                const teamBadge = o.team === 'Alpha C'
-                  ? `<span style="color:#f97316;font-weight:600;font-size:11px">AC</span>`
-                  : o.team === 'Outsider'
-                    ? `<span style="color:var(--muted);font-size:11px">OS</span>`
-                    : `<span style="color:#4f7cff;font-weight:600;font-size:11px">NE</span>`;
+                const _teamVal = o.team || 'New Era';
+                const teamBadge = `<select id="orphanTeam_${i}" style="font-size:11px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:${teamColorHex(_teamVal)}" onchange="this.style.color=teamColorHex(this.value)">
+                  <option value="New Era"${_teamVal==='New Era'?' selected':''}>NE</option>
+                  <option value="Alpha C"${_teamVal==='Alpha C'?' selected':''}>AC</option>
+                  <option value="Outsider"${_teamVal==='Outsider'?' selected':''}>OS</option>
+                </select>`;
                 return `
                 <tr>
                   <td class="td-mono">${o.order_no || '—'}</td>
@@ -4096,16 +4097,14 @@ async function assignOrphanOrder(i) {
   const o = unmatchedPayslipOrders[i];
   const sel = document.getElementById(`orphanAssign_${i}`);
   const algoSel = document.getElementById(`orphanAlgo_${i}`);
+  const teamSel = document.getElementById(`orphanTeam_${i}`);
   const staffId = sel?.value;
   const commissionAlgo = algoSel?.value || 'dm';
+  const selectedTeam = teamSel?.value || o.team || 'New Era';
   if (!staffId) { showToast('Pick a staff member first', 'error'); return; }
   const year = parseInt(document.getElementById('acYear').value);
   const month = parseInt(document.getElementById('acMonth').value);
   try {
-    // Upsert: delete any existing assignment for this exact
-    // (year,month,proxy_id,order_no,customer_name) key first, in case the
-    // orphan list was stale and this order was already assigned —
-    // otherwise the UNIQUE constraint throws and the click silently fails.
     await sbDelete('nec_order_assignments', `year=eq.${year}&month=eq.${month}&proxy_id=eq.${o.proxy_id}&order_no=eq.${o.order_no}&customer_name=eq.${encodeURIComponent(o.customer_name)}`);
     await sb('nec_order_assignments', {
       method: 'POST',
@@ -4119,8 +4118,23 @@ async function assignOrphanOrder(i) {
         commission_algo: commissionAlgo
       }
     });
-    await logAudit('CREATE', 'nec_order_assignments', `Assigned order ${o.order_no || o.customer_name} to staff (${commissionAlgo})`);
-    showToast('Assigned ✓');
+    // Also update team in breakdown categories_json if team changed
+    if (selectedTeam !== (o.team || 'New Era')) {
+      try {
+        const [rec] = await sb('nec_payslip_breakdown', { filter: `proxy_id=eq.${o.proxy_id}&year=eq.${year}&month=eq.${month}`, select: 'id,categories_json' });
+        if (rec) {
+          const orders = JSON.parse(rec.categories_json || '[]');
+          const updated = orders.map(ord => ord.order_no === o.order_no ? { ...ord, team: selectedTeam, channel: selectedTeam === 'Outsider' ? null : (ord.channel || 'DM') } : ord);
+          await fetch(`${SUPABASE_URL}/rest/v1/nec_payslip_breakdown?id=eq.${rec.id}`, {
+            method: 'PATCH',
+            headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+            body: JSON.stringify({ categories_json: JSON.stringify(updated) })
+          });
+        }
+      } catch(e2) { /* non-fatal */ }
+    }
+    await logAudit('CREATE', 'nec_order_assignments', `Assigned order ${o.order_no || o.customer_name} to staff (${commissionAlgo}) team=${selectedTeam}`);
+    showToast('Assigned \u2713');
     previewAutoCommission();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
@@ -7216,7 +7230,7 @@ function buildParseResultHTML(result) {
         <span style="color:${matchColor};margin-left:6px">${matchIcon}</span>
       </div>
       ${orderRows.length > 0 ? `
-        <div class="order-row header" style="font-size:10px"><span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team</span><span>Channel</span><span>Staff</span></div>
+        <div class="order-row header" style="font-size:10px"><span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team</span><span>Channel</span><span>Sales Owner</span></div>
         ${orderRows}` : ''}
       ${result.allowances && result.allowances.length > 0 ? `<div style="font-size:10px;color:var(--muted);margin-top:6px">Allowance items: ${result.allowances.map(a => `${a.description} RM${fmtNum(a.amount)}`).join(', ')}</div>` : (result.allowance_total > 0 ? '' : `<div style="font-size:10px;color:var(--muted);margin-top:4px">No Allowance section found in PDF</div>`)}
       ${!result.matched ? `<div style="margin-top:10px;font-size:12px;color:var(--red)">⚠ Add "${result.distributor_name}" as proxy first, then re-upload.</div>` : ''}
@@ -7591,6 +7605,29 @@ async function updateOrderChannel(breakdownId, orderNo, channel) {
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
+
+// Assign a staff member to a specific order from the Breakdown page.
+// Saves to nec_order_assignments so Auto Commission Matching picks it up.
+async function assignBdOrderStaff(breakdownId, orderNo, staffId, proxyId, year, month, customerNameEncoded) {
+  const customerName = decodeURIComponent(customerNameEncoded);
+  const staff = staffList.find(s => s.id === parseInt(staffId));
+  try {
+    if (!staffId) {
+      // Clear assignment
+      await sbDelete('nec_order_assignments', `year=eq.${year}&month=eq.${month}&proxy_id=eq.${proxyId}&order_no=eq.${orderNo}`);
+      showToast('Assignment cleared');
+      return;
+    }
+    const commAlgo = (staff?.channel || 'DM').toLowerCase();
+    await sbDelete('nec_order_assignments', `year=eq.${year}&month=eq.${month}&proxy_id=eq.${proxyId}&order_no=eq.${orderNo}&customer_name=eq.${encodeURIComponent(customerName)}`);
+    await sb('nec_order_assignments', {
+      method: 'POST',
+      body: { year, month, order_no: orderNo, customer_name: customerName, proxy_id: proxyId, staff_id: parseInt(staffId), source: 'breakdown', commission_algo: commAlgo }
+    });
+    showToast(`${orderNo} → ${staff?.name || 'staff'} ✓`);
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
 async function setAllBreakdownChannels(breakdownId, channel) {
   try {
     const [rec] = await sb('nec_payslip_breakdown', { filter: `id=eq.${breakdownId}`, select: 'id,categories_json' });
@@ -7665,20 +7702,23 @@ async function showBreakdown(id) {
       const ordersTotal = r2(rawCats.reduce((s,o) => s + parseFloat(o.total_com||0), 0));
       const orderRows = rawCats.map(o => {
         const assigned = assignedStaffMap[o.order_no];
-        const staffCell = assigned
-          ? `<span style="font-size:10px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${assigned.name} (${assigned.algo||''})">${assigned.name}</span>`
-          : `<span style="font-size:10px;color:var(--muted)">—</span>`;
-        return `
-        <div class="order-row" style="${o.team==='Outsider'?'opacity:0.7':''}">
-          <span style="color:var(--muted);font-family:var(--mono)">${o.order_no || '—'}</span>
-          <span>${o.customer_name || '—'}</span>
-          <span style="font-family:var(--mono)">${o.com_from_payslip != null ? fmtNum(o.com_from_payslip) : '—'}</span>
-          <span style="font-family:var(--mono);color:var(--yellow)">${parseFloat(o.allowance_portion||0) > 0 ? fmtNum(o.allowance_portion) : '—'}</span>
-          <span style="font-family:var(--mono);font-weight:600;color:${o.team==='Outsider'?'var(--muted)':'var(--green)'}">${fmtNum(o.total_com)}</span>
-          ${orderTeamSelect(o, bdId)}
-          ${orderChannelSelect(o, bdId)}
-          ${staffCell}
-        </div>`; }).join('');
+        const assignedId = assigned ? (staffList.find(s => s.name === assigned.name) || {}).id || '' : '';
+        const soOpts = '<option value="">\u2014 assign \u2014</option>' + staffList.map(s =>
+          '<option value="' + s.id + '"' + (s.id === assignedId ? ' selected' : '') + '>' + s.name + '</option>'
+        ).join('');
+        const custEsc = (o.customer_name || '').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+        const staffCell = '<select style="font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--accent);cursor:pointer;width:100%" onchange="assignBdOrderStaff(\'' + bdId + '\',\'' + (o.order_no||'') + '\',this.value,' + b.proxy_id + ',' + b.year + ',' + b.month + ',\''+custEsc+'\')">'+soOpts+'</select>';
+        return '<div class="order-row" style="' + (o.team==='Outsider'?'opacity:0.7':'') + '">' +
+          '<span style="color:var(--muted);font-family:var(--mono)">' + (o.order_no || '\u2014') + '</span>' +
+          '<span>' + (o.customer_name || '\u2014') + '</span>' +
+          '<span style="font-family:var(--mono)">' + (o.com_from_payslip != null ? fmtNum(o.com_from_payslip) : '\u2014') + '</span>' +
+          '<span style="font-family:var(--mono);color:var(--yellow)">' + (parseFloat(o.allowance_portion||0) > 0 ? fmtNum(o.allowance_portion) : '\u2014') + '</span>' +
+          '<span style="font-family:var(--mono);font-weight:600;color:' + (o.team==='Outsider'?'var(--muted)':'var(--green)') + '">' + fmtNum(o.total_com) + '</span>' +
+          orderTeamSelect(o, bdId) +
+          orderChannelSelect(o, bdId) +
+          staffCell +
+          '</div>';
+      }).join('');
       const summaryParts = [
         neTotal > 0 ? `<span style="color:#4f7cff">NE RM${fmtNum(neTotal)}</span>` : '',
         acTotal > 0 ? `<span style="color:#f97316">AC RM${fmtNum(acTotal)}</span>` : '',
@@ -7706,7 +7746,7 @@ async function showBreakdown(id) {
         ${setAllBtns}
         ${summaryParts ? `<div style="font-size:11px;margin-bottom:6px">${summaryParts}</div>` : ''}
         <div class="order-row header" style="font-size:10px">
-          <span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team</span><span>Channel</span><span>Staff</span>
+          <span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team</span><span>Channel</span><span>Sales Owner</span>
         </div>
         ${orderRows}
       </div>` : '';
