@@ -8,19 +8,19 @@
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
   :root {
-    --bg: #0f1117;
-    --surface: #181c27;
-    --surface2: #1e2436;
-    --border: #2a3045;
-    --border2: #3a4460;
-    --accent: #4f7cff;
-    --accent2: #7c5cfc;
-    --green: #22c55e;
-    --yellow: #f59e0b;
-    --red: #ef4444;
-    --text: #e8eaf0;
-    --muted: #7a849e;
-    --muted2: #4a5568;
+    --bg: #faf8f4;
+    --surface: #f5f2ec;
+    --surface2: #ede9e0;
+    --border: #d8d2c6;
+    --border2: #c4bdb0;
+    --accent: #2563eb;
+    --accent2: #7c3aed;
+    --green: #16a34a;
+    --yellow: #b45309;
+    --red: #dc2626;
+    --text: #2c2a26;
+    --muted: #7a7268;
+    --muted2: #b0a898;
     --mono: 'JetBrains Mono', monospace;
   }
 
@@ -28,7 +28,7 @@
   body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; font-size: 14px; min-height: 100vh; }
 
   /* NAV */
-  .nav { display: flex; align-items: center; justify-content: space-between; padding: 0 32px; height: 56px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; }
+  .nav { display: flex; align-items: center; justify-content: space-between; padding: 0 32px; height: 56px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; box-shadow: 0 1px 6px rgba(0,0,0,0.07); }
   .nav-brand { display: flex; align-items: center; gap: 10px; }
   .nav-logo { width: 28px; height: 28px; background: linear-gradient(135deg, var(--accent), var(--accent2)); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; color: #fff; }
   .nav-title { font-weight: 600; font-size: 13px; color: var(--text); }
@@ -36,7 +36,7 @@
   .nav-links { display: flex; gap: 4px; }
   .nav-link { padding: 6px 12px; border-radius: 6px; color: var(--muted); font-size: 13px; text-decoration: none; cursor: pointer; transition: all 0.15s; border: none; background: none; }
   .nav-link:hover { color: var(--text); background: var(--surface2); }
-  .nav-link.active { color: var(--accent); background: rgba(79,124,255,0.1); }
+  .nav-link.active { color: var(--accent); background: rgba(37,99,235,0.09); }
 
   /* LAYOUT */
   .main { padding: 32px; max-width: 1400px; margin: 0 auto; }
@@ -46,7 +46,7 @@
 
   /* STATS ROW */
   .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
-  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
   .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
   .stat-value { font-size: 24px; font-weight: 700; font-family: var(--mono); color: var(--text); }
   .stat-value.green { color: var(--green); }
@@ -58,9 +58,10 @@
   .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
   .toolbar-left { display: flex; gap: 8px; flex: 1; }
   select, input[type="text"], input[type="number"] {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 7px;
+    background: #fff; border: 1px solid var(--border); border-radius: 7px;
     color: var(--text); padding: 8px 12px; font-size: 13px; font-family: 'Inter', sans-serif;
     outline: none; transition: border 0.15s;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
   }
   select:focus, input:focus { border-color: var(--accent); }
   select { cursor: pointer; }
@@ -68,35 +69,35 @@
   /* BUTTONS */
   .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 7px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: all 0.15s; font-family: 'Inter', sans-serif; }
   .btn-primary { background: var(--accent); color: #fff; }
-  .btn-primary:hover { background: #3d6aef; }
+  .btn-primary:hover { background: #1d4ed8; }
   .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
   .btn-ghost:hover { color: var(--text); border-color: var(--border2); background: var(--surface2); }
-  .btn-green { background: rgba(34,197,94,0.15); color: var(--green); border: 1px solid rgba(34,197,94,0.25); }
-  .btn-green:hover { background: rgba(34,197,94,0.25); }
-  .btn-danger { background: rgba(239,68,68,0.1); color: var(--red); border: 1px solid rgba(239,68,68,0.2); }
-  .btn-danger:hover { background: rgba(239,68,68,0.2); }
+  .btn-green { background: rgba(22,163,74,0.1); color: #15803d; border: 1px solid rgba(22,163,74,0.3); }
+  .btn-green:hover { background: rgba(22,163,74,0.25); }
+  .btn-danger { background: rgba(220,38,38,0.08); color: #b91c1c; border: 1px solid rgba(220,38,38,0.25); }
+  .btn-danger:hover { background: rgba(220,38,38,0.2); }
   .btn-sm { padding: 5px 10px; font-size: 12px; }
 
   /* TABLE */
-  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
   table { width: 100%; border-collapse: collapse; }
-  th { padding: 12px 16px; text-align: left; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; background: var(--surface2); border-bottom: 1px solid var(--border); }
+  th { padding: 12px 16px; text-align: left; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; background: var(--surface2); border-bottom: 1px solid var(--border); border-top: none; }
   td { padding: 13px 16px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
   tr:last-child td { border-bottom: none; }
-  tr:hover td { background: rgba(255,255,255,0.02); }
+  tr:hover td { background: rgba(0,0,0,0.025); }
   .td-mono { font-family: var(--mono); font-size: 13px; }
   .td-name { font-weight: 500; }
   .td-muted { color: var(--muted); font-size: 12px; }
 
   /* BADGES */
   .badge { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
-  .badge-dm { background: rgba(79,124,255,0.15); color: #7fa8ff; }
-  .badge-tm { background: rgba(124,92,252,0.15); color: #a98aff; }
-  .badge-xhs { background: rgba(239,68,68,0.15); color: #f87171; }
-  .badge-other { background: rgba(100,116,139,0.15); color: #94a3b8; }
-  .badge-draft { background: rgba(100,116,139,0.15); color: #94a3b8; }
-  .badge-issued { background: rgba(245,158,11,0.15); color: #fbbf24; }
-  .badge-paid { background: rgba(34,197,94,0.15); color: #4ade80; }
+  .badge-dm { background: rgba(37,99,235,0.12); color: #1e40af; }
+  .badge-tm { background: rgba(124,58,237,0.12); color: #5b21b6; }
+  .badge-xhs { background: rgba(220,38,38,0.12); color: #b91c1c; }
+  .badge-other { background: rgba(100,116,139,0.15); color: #7a7268; }
+  .badge-draft { background: rgba(100,116,139,0.15); color: #7a7268; }
+  .badge-issued { background: rgba(180,83,9,0.12); color: #92400e; }
+  .badge-paid { background: rgba(22,163,74,0.12); color: #15803d; }
 
   /* PROFIT INDICATOR */
   .profit-bar-wrap { display: flex; align-items: center; gap: 8px; }
@@ -114,7 +115,7 @@
   .group-row td { border-top: 1px solid var(--border); }
 
   /* MODAL */
-  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1000; backdrop-filter: blur(4px); }
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; backdrop-filter: blur(4px); }
   .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 28px; width: 520px; max-width: 95vw; max-height: 90vh; overflow-y: auto; }
   .modal-title { font-size: 17px; font-weight: 700; margin-bottom: 20px; }
   .form-grid { display: grid; gap: 14px; }
@@ -130,19 +131,19 @@
   .inv-company-name { font-size: 18px; font-weight: 800; color: #1a1a2e; letter-spacing: -0.02em; }
   .inv-reg { font-size: 11px; color: #666; margin-top: 2px; }
   .inv-address { font-size: 11px; color: #666; margin-top: 8px; line-height: 1.5; }
-  .inv-label { font-size: 28px; font-weight: 800; color: #4f7cff; text-align: right; }
+  .inv-label { font-size: 28px; font-weight: 800; color: #2563eb; text-align: right; }
   .inv-meta { text-align: right; font-size: 12px; color: #666; margin-top: 4px; }
-  .inv-divider { height: 2px; background: linear-gradient(to right, #4f7cff, #7c5cfc); border-radius: 1px; margin-bottom: 24px; }
+  .inv-divider { height: 2px; background: linear-gradient(to right, #2563eb, #7c3aed); border-radius: 1px; margin-bottom: 24px; }
   .inv-bill-to { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
   .inv-bill-name { font-size: 15px; font-weight: 700; color: #1a1a2e; }
   .inv-bill-sub { font-size: 12px; color: #666; margin-top: 2px; }
   .inv-table { width: 100%; margin: 24px 0; border-collapse: collapse; }
-  .inv-table th { background: #f0f4ff; padding: 10px 12px; text-align: left; font-size: 11px; color: #4f7cff; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+  .inv-table th { background: #f0f4ff; padding: 10px 12px; text-align: left; font-size: 11px; color: #2563eb; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
   .inv-table td { padding: 12px; border-bottom: 1px solid #eee; font-size: 13px; color: #333; }
   .inv-total-row { display: flex; justify-content: flex-end; }
   .inv-total-box { background: #f0f4ff; border-radius: 8px; padding: 16px 20px; min-width: 200px; }
   .inv-total-label { font-size: 12px; color: #666; }
-  .inv-total-amount { font-size: 22px; font-weight: 800; color: #4f7cff; margin-top: 4px; font-family: 'JetBrains Mono', monospace; }
+  .inv-total-amount { font-size: 22px; font-weight: 800; color: #2563eb; margin-top: 4px; font-family: 'JetBrains Mono', monospace; }
   .inv-footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #eee; font-size: 11px; color: #999; }
 
   /* TABS */
@@ -159,11 +160,11 @@
   /* TOAST */
   .toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface2); border: 1px solid var(--border2); border-radius: 8px; padding: 12px 16px; font-size: 13px; z-index: 2000; opacity: 0; transform: translateY(8px); transition: all 0.2s; display: flex; align-items: center; gap: 8px; }
   .toast.show { opacity: 1; transform: translateY(0); }
-  .toast.success { border-color: rgba(34,197,94,0.4); }
-  .toast.error { border-color: rgba(239,68,68,0.4); }
+  .toast.success { border-color: rgba(22,163,74,0.4); }
+  .toast.error { border-color: rgba(220,38,38,0.4); }
 
   /* SETUP BANNER */
-  .setup-banner { background: rgba(79,124,255,0.08); border: 1px solid rgba(79,124,255,0.2); border-radius: 10px; padding: 20px; margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .setup-banner { background: rgba(37,99,235,0.08); border: 1px solid rgba(37,99,235,0.2); border-radius: 10px; padding: 20px; margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
   .setup-banner-text { font-size: 13px; color: var(--text); }
   .setup-banner-sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
 
@@ -173,7 +174,7 @@
   .hidden { display: none !important; }
 
   /* SQL modal */
-  .sql-block { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-family: var(--mono); font-size: 11px; color: #94a3b8; line-height: 1.7; white-space: pre; overflow-x: auto; max-height: 300px; overflow-y: auto; }
+  .sql-block { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-family: var(--mono); font-size: 11px; color: #7a7268; line-height: 1.7; white-space: pre; overflow-x: auto; max-height: 300px; overflow-y: auto; }
 
   /* LOGIN SCREEN */
   .login-screen { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 9999; }
@@ -186,7 +187,7 @@
   .login-input { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 10px 14px; font-size: 14px; font-family: 'Inter', sans-serif; outline: none; transition: border 0.15s; width: 100%; }
   .login-input:focus { border-color: var(--accent); }
   .login-btn { width: 100%; padding: 11px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 6px; transition: background 0.15s; font-family: 'Inter', sans-serif; }
-  .login-btn:hover { background: #3d6aef; }
+  .login-btn:hover { background: #1d55d4; }
   .login-error { color: var(--red); font-size: 12px; margin-top: 8px; min-height: 16px; }
 
   /* USER CHIP IN NAV */
@@ -196,17 +197,17 @@
   .user-name { font-size: 12px; font-weight: 500; color: var(--text); }
   .user-role { font-size: 10px; color: var(--muted); }
   .logout-btn { padding: 5px 10px; border-radius: 6px; background: transparent; border: 1px solid var(--border); color: var(--muted); font-size: 11px; cursor: pointer; font-family: 'Inter', sans-serif; transition: all 0.15s; }
-  .logout-btn:hover { color: var(--red); border-color: rgba(239,68,68,0.3); }
+  .logout-btn:hover { color: var(--red); border-color: rgba(220,38,38,0.3); }
 
   /* AUDIT LOG */
   .audit-action { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius: 3px; }
-  .audit-create { background: rgba(34,197,94,0.1); color: var(--green); }
-  .audit-update { background: rgba(245,158,11,0.1); color: var(--yellow); }
-  .audit-delete { background: rgba(239,68,68,0.1); color: var(--red); }
+  .audit-create { background: rgba(22,163,74,0.1); color: #15803d; }
+  .audit-update { background: rgba(180,83,9,0.1); color: #92400e; }
+  .audit-delete { background: rgba(220,38,38,0.1); color: #b91c1c; }
 
   /* BULK UPLOAD */
   .upload-zone { border: 2px dashed var(--border2); border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.2s; background: var(--surface); }
-  .upload-zone:hover, .upload-zone.drag { border-color: var(--accent); background: rgba(79,124,255,0.05); }
+  .upload-zone:hover, .upload-zone.drag { border-color: var(--accent); background: rgba(37,99,235,0.06); }
   .upload-zone-icon { font-size: 36px; margin-bottom: 12px; }
   .upload-zone-text { font-size: 14px; font-weight: 500; color: var(--text); }
   .upload-zone-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
@@ -219,9 +220,9 @@
   .parse-cat-label { color: var(--muted); }
   .parse-cat-amount { font-family: var(--mono); font-weight: 500; }
   .parse-status { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 8px; border-radius: 4px; }
-  .parse-status.matched { background: rgba(34,197,94,0.1); color: var(--green); }
-  .parse-status.unmatched { background: rgba(239,68,68,0.1); color: var(--red); }
-  .parse-status.processing { background: rgba(245,158,11,0.1); color: var(--yellow); }
+  .parse-status.matched { background: rgba(22,163,74,0.1); color: #15803d; }
+  .parse-status.unmatched { background: rgba(220,38,38,0.1); color: #b91c1c; }
+  .parse-status.processing { background: rgba(180,83,9,0.1); color: #92400e; }
 
   /* BREAKDOWN PAGE */
   .breakdown-grid { display: grid; grid-template-columns: 280px 1fr; gap: 20px; align-items: start; }
@@ -230,12 +231,12 @@
   .breakdown-group-header { padding: 8px 16px; background: var(--surface2); border-bottom: 1px solid var(--border); font-size: 11px; font-weight: 700; color: var(--accent); }
   .breakdown-proxy-item { padding: 12px 16px; cursor: pointer; border-bottom: 1px solid var(--border); transition: background 0.1s; display: flex; justify-content: space-between; align-items: center; }
   .breakdown-proxy-item:hover { background: var(--surface2); }
-  .breakdown-proxy-item.active { background: rgba(79,124,255,0.1); border-left: 3px solid var(--accent); }
+  .breakdown-proxy-item.active { background: rgba(37,99,235,0.08); border-left: 3px solid var(--accent); }
   .breakdown-proxy-item:last-child { border-bottom: none; }
   .breakdown-content { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; overflow-y: auto; max-height: calc(100vh - 200px); }
   .cat-section { margin-bottom: 20px; }
   .cat-section-title { font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; padding: 8px 0; border-bottom: 1px solid var(--border); margin-bottom: 8px; display: flex; justify-content: space-between; }
-  .order-row { display: grid; grid-template-columns: 90px 1fr 85px 65px 80px 78px 65px 130px; gap: 8px; font-size: 11px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.04); align-items: center; }
+  .order-row { display: grid; grid-template-columns: 90px 1fr 85px 65px 80px 78px 65px 130px; gap: 8px; font-size: 11px; padding: 5px 0; border-bottom: 1px solid rgba(0,0,0,0.07); align-items: center; }
   .order-row:last-child { border-bottom: none; }
   .order-row.header { color: var(--muted); font-weight: 600; font-size: 10px; text-transform: uppercase; }
 </style>
@@ -316,7 +317,7 @@
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost" onclick="openAddProxyModal()">+Add Acc</button>
         <button class="btn btn-ghost" onclick="printAllInvoices()">📦 Save All as ZIP</button>
-        <button class="btn btn-ghost" onclick="showPage('upload')" style="color:var(--yellow);border-color:rgba(245,158,11,0.3)">⬆ Bulk Upload Payslips</button>
+        <button class="btn btn-ghost" onclick="showPage('upload')" style="color:var(--yellow);border-color:rgba(180,83,9,0.3)">⬆ Bulk Upload Payslips</button>
         <button class="btn btn-primary" onclick="openNewInvoiceModal()">New Invoice Entry</button>
       </div>
     </div>
@@ -2265,7 +2266,7 @@ function r2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
 // Shared color per team — used by every Team dropdown across the app
 // (Breakdown page, Bulk Payslip Upload review) so New Era / Alpha C /
 // Outsider are always visually distinct, never two teams sharing a color.
-function teamColorHex(t) { return t === 'Alpha C' ? '#f97316' : t === 'Outsider' ? '#f59e0b' : '#4f7cff'; }
+function teamColorHex(t) { return t === 'Alpha C' ? '#f97316' : t === 'Outsider' ? '#b45309' : '#2563eb'; }
 
 function showPage(page) {
   ['proxy','payroll','manager','pl','export','audit','upload','breakdown','setup','directory','bankdir','cctracker'].forEach(p => {
@@ -2366,7 +2367,7 @@ async function loadInvoices() {
     });
     const groupOrder = [...MANAGER_ORDER.filter(m => groups[m]), ...Object.keys(groups).filter(m => !MANAGER_ORDER.includes(m)).sort()];
 
-    const teamColorMap = { 'New Era': '#4f7cff', 'Alpha C': '#f97316' };
+    const teamColorMap = { 'New Era': '#2563eb', 'Alpha C': '#f97316' };
 
     let html = '';
     groupOrder.forEach(mgr => {
@@ -2721,11 +2722,11 @@ async function loadDirectory() {
         const paymentCountNote = paymentsForInv.length > 1 ? ` <span style="opacity:0.7">(${paymentsForInv.length}x)</span>` : '';
         const ownerStaff = staffOwnedProxyMap[p.id];
         const paymentCell = ownerStaff
-          ? `<span class="badge" style="cursor:pointer;background:rgba(79,124,255,0.15);color:var(--accent);border:1px solid rgba(79,124,255,0.3)" title="${ownerStaff.name}'s own proxy — settled net via Payroll, not tracked separately here" onclick="showPage('payroll')">↗ Payroll (${ownerStaff.name})</span>`
+          ? `<span class="badge" style="cursor:pointer;background:rgba(37,99,235,0.15);color:var(--accent);border:1px solid rgba(37,99,235,0.3)" title="${ownerStaff.name}'s own proxy — settled net via Payroll, not tracked separately here" onclick="showPage('payroll')">↗ Payroll (${ownerStaff.name})</span>`
           : fullyPaid
             ? `<span class="badge badge-paid" style="cursor:pointer" onclick="openRecordPaymentModal('${inv.id}')">${inv.payment_date || '✓ Paid'}${paymentCountNote}</span>`
             : partiallyPaid
-              ? `<span class="badge" style="cursor:pointer;background:rgba(245,158,11,0.15);color:var(--yellow);border:1px solid rgba(245,158,11,0.3)" onclick="openRecordPaymentModal('${inv.id}')">${fmt(totalPaid)} / ${fmt(expectedAmt)}${paymentCountNote}</span>`
+              ? `<span class="badge" style="cursor:pointer;background:rgba(180,83,9,0.15);color:var(--yellow);border:1px solid rgba(180,83,9,0.3)" onclick="openRecordPaymentModal('${inv.id}')">${fmt(totalPaid)} / ${fmt(expectedAmt)}${paymentCountNote}</span>`
               : inv
                 ? `<button class="btn btn-green btn-sm" onclick="openRecordPaymentModal('${inv.id}')">Mark Paid</button>`
                 : `<span class="td-muted">no invoice</span>`;
@@ -3212,19 +3213,19 @@ const INVOICE_PRINT_STYLE = `
       .inv-company-name{font-size:18px;font-weight:800;color:#1a1a2e}
       .inv-reg{font-size:11px;color:#666;margin-top:2px}
       .inv-address{font-size:11px;color:#666;margin-top:8px;line-height:1.5}
-      .inv-label{font-size:28px;font-weight:800;color:#4f7cff;text-align:right}
+      .inv-label{font-size:28px;font-weight:800;color:#2563eb;text-align:right}
       .inv-meta{text-align:right;font-size:12px;color:#666;margin-top:4px}
-      .inv-divider{height:2px;background:linear-gradient(to right,#4f7cff,#7c5cfc);border-radius:1px;margin-bottom:24px}
+      .inv-divider{height:2px;background:linear-gradient(to right,#2563eb,#7c3aed);border-radius:1px;margin-bottom:24px}
       .inv-bill-to{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
       .inv-bill-name{font-size:15px;font-weight:700;color:#1a1a2e}
       .inv-bill-sub{font-size:12px;color:#666;margin-top:2px}
       .inv-table{width:100%;margin:24px 0;border-collapse:collapse}
-      .inv-table th{background:#f0f4ff;padding:10px 12px;text-align:left;font-size:11px;color:#4f7cff;text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+      .inv-table th{background:#f0f4ff;padding:10px 12px;text-align:left;font-size:11px;color:#2563eb;text-transform:uppercase;letter-spacing:.06em;font-weight:600}
       .inv-table td{padding:12px;border-bottom:1px solid #eee;font-size:13px;color:#333}
       .inv-total-row{display:flex;justify-content:flex-end}
       .inv-total-box{background:#f0f4ff;border-radius:8px;padding:16px 20px;min-width:200px}
       .inv-total-label{font-size:12px;color:#666}
-      .inv-total-amount{font-size:22px;font-weight:800;color:#4f7cff;margin-top:4px;font-family:'JetBrains Mono',monospace}
+      .inv-total-amount{font-size:22px;font-weight:800;color:#2563eb;margin-top:4px;font-family:'JetBrains Mono',monospace}
       .inv-footer{margin-top:32px;padding-top:16px;border-top:1px solid #eee;font-size:11px;color:#999}`;
 
 // Loads jsPDF from cdnjs on demand (first call only).
@@ -3618,10 +3619,10 @@ function renderStaffList() {
     if (managerStaffIds.has(s.id)) return { label: 'Manager', color: 'var(--accent)' };
     if (s.staff_type === 'admin') return POSITION_LABELS[s.position] || POSITION_LABELS.admin;
     if (s.channel === 'TM') return { label: 'TM', color: '#f97316' };
-    if (s.channel === 'DM') return { label: 'DM', color: '#22c55e' };
+    if (s.channel === 'DM') return { label: 'DM', color: '#16a34a' };
     return { label: 'Outsider', color: 'var(--yellow)' };
   };
-  const teamColor = (t) => t === 'Alpha C' ? '#f97316' : '#4f7cff';
+  const teamColor = (t) => t === 'Alpha C' ? '#f97316' : '#2563eb';
   tbody.innerHTML = staffList.map(s => {
     const { label, color } = getStaffType(s);
     const team = s.company_team || 'New Era';
@@ -4012,7 +4013,7 @@ async function previewAutoCommission() {
       const neCount = row.orders.filter(o => !o.team || o.team === 'New Era').length;
       const acCount = row.orders.filter(o => o.team === 'Alpha C').length;
       const teamSummary = [
-        neCount ? `<span style="color:#4f7cff">NE ${neCount}</span>` : '',
+        neCount ? `<span style="color:#2563eb">NE ${neCount}</span>` : '',
         acCount ? `<span style="color:#f97316">AC ${acCount}</span>` : ''
       ].filter(Boolean).join(' · ') || '—';
       html += `
@@ -4377,7 +4378,7 @@ async function generateStaffPayslip(idx) {
     ${docHtml}
     <div style="height:24px"></div>
     ${calcHtml}
-    <br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#4f7cff;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
+    <br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
 }
 
 // Pulls out the two earning categories (Com, Claim) and the deduction
@@ -4553,7 +4554,7 @@ function buildStaffPayslipHTML(staff, r) {
             <div class="inv-address">No 21, Jalan Villa Puncak Desa 3,<br>Villa Puncak Desa, Taman Desa Petaling,<br>57100 Kuala Lumpur, W.P.</div>
           </div>
           <div>
-            <div class="inv-label" style="color:#22c55e">PAYSLIP</div>
+            <div class="inv-label" style="color:#16a34a">PAYSLIP</div>
             <div class="inv-meta">No: ${genStaffDocNumber('P', r)}<br>Date: ${MONTH_FULL[r.month]} ${r.year}</div>
           </div>
         </div>
@@ -4568,7 +4569,7 @@ function buildStaffPayslipHTML(staff, r) {
         <div class="inv-total-row">
           <div class="inv-total-box">
             <div class="inv-total-label">Total Pay</div>
-            <div class="inv-total-amount" style="color:#22c55e">RM ${fmtNum(totalPay)}</div>
+            <div class="inv-total-amount" style="color:#16a34a">RM ${fmtNum(totalPay)}</div>
           </div>
         </div>
         ${parseFloat(r.epf_employer||0) > 0 ? `<div style="font-size:11px;color:#888;margin-top:-8px">Employer EPF contribution (13%, company record only, not deducted from staff pay): RM ${fmtNum(r.epf_employer)}</div>` : ''}
@@ -4616,7 +4617,7 @@ function generatePayrollCalculation(recordId) {
   win.document.write(`<html><head><title>Calculation - ${staff.name} - ${MONTHS[r.month]} ${r.year}</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>body{margin:24px;background:#f5f5f5}@media print{body{margin:0;background:#fff}}</style></head>
-    <body>${html}<button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#4f7cff;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
+    <body>${html}<button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
 }
 
 function generatePayrollRecordPayslip(recordId) {
@@ -4637,7 +4638,7 @@ function generatePayrollRecordPayslip(recordId) {
     <style>body{margin:40px;background:#f5f5f5;font-family:Inter,sans-serif}
     ${INVOICE_PRINT_STYLE}
     @media print{body{margin:0;background:#fff}.invoice-preview{box-shadow:none}}
-    </style></head><body>${html}<br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#4f7cff;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
+    </style></head><body>${html}<br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
 }
 
 async function openPayrollEntryModal() {
@@ -5700,9 +5701,9 @@ async function loadPL() {
     // Only show the 6 meaningful buckets: NE-DM, NE-TM, XHS (shared), AC-DM, AC-TM, Outsider
     const BUCKET_ORDER = ['New Era|DM','New Era|TM','New Era|XHS','Alpha C|DM','Alpha C|TM','Outsider'];
     const bucketColors = {
-      'New Era|DM':'#4f7cff','New Era|TM':'#7c5cfc','New Era|XHS':'#ef4444',
-      'Alpha C|DM':'#f97316','Alpha C|TM':'#fb923c','Alpha C|XHS':'#fbbf24',
-      'New Era':'#4f7cff','Alpha C':'#f97316','Outsider':'#f59e0b','Manager Pool':'#a855f7'
+      'New Era|DM':'#2563eb','New Era|TM':'#7c3aed','New Era|XHS':'#dc2626',
+      'Alpha C|DM':'#f97316','Alpha C|TM':'#fb923c','Alpha C|XHS':'#d97706',
+      'New Era':'#2563eb','Alpha C':'#f97316','Outsider':'#b45309','Manager Pool':'#a855f7'
     };
     const bucketLabel = (b) => {
       if (['Outsider','Manager Pool','New Era','Alpha C'].includes(b)) return b;
@@ -6275,7 +6276,11 @@ function renderCCTracker() {
         </div>
         ${dueBadge ? `<div style="margin-top:2px">${dueBadge}</div>` : ''}
       </td>
+<<<<<<< Updated upstream
       <td>${isPaid ? `<span class="badge badge-paid">✓ Paid${s.payment_date ? ' '+s.payment_date : ''}</span>` : `<span class="badge" style="background:rgba(239,68,68,0.15);color:var(--red)">Unpaid</span>`}</td>
+=======
+      <td>${isPaid ? `<span class="badge badge-paid">✓ Paid${s.payment_date ? ' '+s.payment_date : ''}</span>` : `<span class="badge" style="background:rgba(220,38,38,0.15);color:var(--red)">Unpaid</span>`}</td>
+>>>>>>> Stashed changes
       <td>
         <button class="btn btn-ghost btn-sm" onclick="toggleCCPaid('${card.id}',${year},${month},${isPaid})">${isPaid ? 'Unmark' : 'Mark Paid'}</button>
       </td>
@@ -7204,7 +7209,7 @@ function buildParseResultHTML(result) {
             <div style="display:flex;align-items:center;gap:6px">
               <span style="font-size:11px;color:var(--muted);min-width:52px">Team:</span>
               <button id="teamBtn_${code}_New_Era" onclick="setAllOrderTeams('${code}','New Era')"
-                style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid #4f7cff;background:var(--surface2);color:#4f7cff;cursor:pointer;font-weight:${defaultTeam==='New Era'?'700':'400'}">
+                style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid #2563eb;background:var(--surface2);color:#2563eb;cursor:pointer;font-weight:${defaultTeam==='New Era'?'700':'400'}">
                 New Era
               </button>
               <button id="teamBtn_${code}_Alpha_C" onclick="setAllOrderTeams('${code}','Alpha C')"
@@ -7219,7 +7224,7 @@ function buildParseResultHTML(result) {
             <div style="display:flex;align-items:center;gap:6px">
               <span style="font-size:11px;color:var(--muted);min-width:52px">Channel:</span>
               <button id="chBtn_${code}_DM" onclick="setAllOrderChannels('${code}','DM')"
-                style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid #22c55e;background:var(--surface2);color:#22c55e;cursor:pointer;font-weight:${defaultChannel==='DM'?'700':'400'}">
+                style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid #16a34a;background:var(--surface2);color:#16a34a;cursor:pointer;font-weight:${defaultChannel==='DM'?'700':'400'}">
                 DM
               </button>
               <button id="chBtn_${code}_TM" onclick="setAllOrderChannels('${code}','TM')"
@@ -7268,7 +7273,7 @@ function renderParseError(filename, msg) {
 }
 
 function buildParseErrorHTML(filename, msg) {
-  return `<div class="parse-result-card" style="border-color:rgba(239,68,68,0.3)">
+  return `<div class="parse-result-card" style="border-color:rgba(220,38,38,0.3)">
       <div style="color:var(--red);font-weight:600">✗ ${filename}</div>
       <div style="font-size:12px;color:var(--muted);margin-top:4px">${msg}</div>
     </div>`;
@@ -7330,7 +7335,7 @@ async function debugPDF(file) {
   const data = await response.json();
   const raw = (data.raw_text || data.error || 'no data').replace(/</g,'&lt;').replace(/\n/g,'<br>');
   document.getElementById('uploadResults').innerHTML = `
-    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:16px;font-family:var(--mono);font-size:11px;color:#94a3b8;line-height:1.6;white-space:pre-wrap;max-height:600px;overflow-y:auto">${raw}</div>`;
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:16px;font-family:var(--mono);font-size:11px;color:#7a7268;line-height:1.6;white-space:pre-wrap;max-height:600px;overflow-y:auto">${raw}</div>`;
 }
 
 async function confirmBulkSave() {
@@ -7746,20 +7751,20 @@ async function showBreakdown(id) {
           '</div>';
       }).join('');
       const summaryParts = [
-        neTotal > 0 ? `<span style="color:#4f7cff">NE RM${fmtNum(neTotal)}</span>` : '',
+        neTotal > 0 ? `<span style="color:#2563eb">NE RM${fmtNum(neTotal)}</span>` : '',
         acTotal > 0 ? `<span style="color:#f97316">AC RM${fmtNum(acTotal)}</span>` : '',
         osTotal > 0 ? `<span style="color:var(--muted)">OS RM${fmtNum(osTotal)} (not billed)</span>` : '',
       ].filter(Boolean).join(' · ');
       const setAllBtns = `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px">
         <div style="display:flex;align-items:center;gap:8px">
           <span style="font-size:11px;color:var(--muted);min-width:48px">Team:</span>
-          <button onclick="setAllBreakdownTeams('${bdId}','New Era')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #4f7cff;color:#4f7cff;background:transparent;cursor:pointer">New Era</button>
+          <button onclick="setAllBreakdownTeams('${bdId}','New Era')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #2563eb;color:#2563eb;background:transparent;cursor:pointer">New Era</button>
           <button onclick="setAllBreakdownTeams('${bdId}','Alpha C')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #f97316;color:#f97316;background:transparent;cursor:pointer">Alpha C</button>
           <button onclick="setAllBreakdownTeams('${bdId}','Outsider')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid var(--muted);color:var(--muted);background:transparent;cursor:pointer">Outsider</button>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <span style="font-size:11px;color:var(--muted);min-width:48px">Channel:</span>
-          <button onclick="setAllBreakdownChannels('${bdId}','DM')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #22c55e;color:#22c55e;background:transparent;cursor:pointer">DM</button>
+          <button onclick="setAllBreakdownChannels('${bdId}','DM')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #16a34a;color:#16a34a;background:transparent;cursor:pointer">DM</button>
           <button onclick="setAllBreakdownChannels('${bdId}','TM')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #a78bfa;color:#a78bfa;background:transparent;cursor:pointer">TM</button>
           <button onclick="setAllBreakdownChannels('${bdId}','XHS')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid var(--red);color:var(--red);background:transparent;cursor:pointer">XHS</button>
         </div>
