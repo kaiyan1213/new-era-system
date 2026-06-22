@@ -4106,43 +4106,80 @@ async function previewAutoCommission() {
     });
     html += `</tbody></table>`;
 
-    // Unmatched payslip orders — every order must belong to someone.
+    // Unmatched payslip orders — grouped by manager (PIC) then by proxy acc,
+    // same MANAGER_ORDER pattern used everywhere else in the app.
     if (unmatchedPayslipOrders.length) {
+      // Build a global index so each order row knows its flat index (for DOM IDs)
+      const orphanIndexed = unmatchedPayslipOrders.map((o, i) => ({ ...o, _i: i }));
+
+      // Group by manager → then by proxy_name within each manager
+      const mgrGroups = {};
+      MANAGER_ORDER.forEach(m => mgrGroups[m] = {});
+      mgrGroups['Unassigned'] = {};
+      orphanIndexed.forEach(o => {
+        const proxy = proxyList.find(p => p.id === o.proxy_id);
+        const mgr = (proxy && MANAGER_ORDER.includes(proxy.manager)) ? proxy.manager : 'Unassigned';
+        if (!mgrGroups[mgr]) mgrGroups[mgr] = {};
+        const pName = o.proxy_name || '—';
+        if (!mgrGroups[mgr][pName]) mgrGroups[mgr][pName] = [];
+        mgrGroups[mgr][pName].push(o);
+      });
+
+      const staffOptsHtml = assignableStaff.map(s =>
+        `<option value="${s.id}" data-algo="${s.staff_type === 'sales' ? (s.channel || 'DM').toLowerCase() : 'outsider'}">${s.name}</option>`
+      ).join('');
+
+      const mgrOrder = [...MANAGER_ORDER, 'Unassigned'].filter(m => Object.keys(mgrGroups[m] || {}).length > 0);
+
+      let orphanHtml = '';
+      mgrOrder.forEach(mgr => {
+        const proxyNames = Object.keys(mgrGroups[mgr]).sort();
+        let mgrTotal = proxyNames.reduce((s, p) => s + mgrGroups[mgr][p].length, 0);
+        // Manager group header
+        orphanHtml += `<div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.06em;padding:10px 0 6px;border-bottom:1px solid var(--border);margin-bottom:8px">${mgr} (PIC) — ${mgrTotal} order${mgrTotal>1?'s':''}</div>`;
+
+        proxyNames.forEach(pName => {
+          const orders = mgrGroups[mgr][pName];
+          // Proxy sub-header
+          orphanHtml += `<div style="display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-bottom:4px;margin-top:8px">
+            <span style="font-size:12px;font-weight:600;color:var(--text)">${pName}</span>
+            <span style="font-size:11px;color:var(--muted)">${orders.length} order${orders.length>1?'s':''}</span>
+          </div>`;
+          // Orders table for this proxy
+          orphanHtml += `<table style="margin-bottom:4px"><thead><tr><th>Order No</th><th>Customer</th><th>Team</th><th>Assign To</th></tr></thead><tbody>`;
+          orders.forEach(o => {
+            const i = o._i;
+            const _tv = o.team || 'New Era';
+            orphanHtml += `<tr>
+              <td class="td-mono">${o.order_no || '—'}</td>
+              <td class="td-name">${o.customer_name || '—'}</td>
+              <td><select id="orphanTeam_${i}" style="font-size:11px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:${teamColorHex(_tv)}" onchange="this.style.color=teamColorHex(this.value)">
+                <option value="New Era"${_tv==='New Era'?' selected':''}>NE</option>
+                <option value="Alpha C"${_tv==='Alpha C'?' selected':''}>AC</option>
+                <option value="Outsider"${_tv==='Outsider'?' selected':''}>OS</option>
+              </select></td>
+              <td style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
+                <select id="orphanAssign_${i}" style="font-size:12px;padding:4px 6px" onchange="updateOrphanAlgoDefault(${i})">
+                  <option value="">— select staff —</option>${staffOptsHtml}
+                </select>
+                <select id="orphanAlgo_${i}" style="font-size:12px;padding:4px 6px">
+                  <option value="dm">DM</option><option value="tm">TM</option><option value="outsider">Outsider</option>
+                </select>
+                <button class="btn btn-primary btn-sm" onclick="assignOrphanOrder(${i})">Assign</button>
+              </td>
+            </tr>`;
+          });
+          orphanHtml += `</tbody></table>`;
+        });
+        // Spacer between manager groups
+        orphanHtml += `<div style="height:16px"></div>`;
+      });
+
       html += `
-        <div style="margin-top:18px;padding:14px;border:1px solid var(--yellow);border-radius:8px">
-          <div style="font-weight:700;color:var(--yellow);margin-bottom:8px">⚠ Unmatched Payslip Orders (${unmatchedPayslipOrders.length}) — every order must belong to someone</div>
-          <div style="font-size:11px;color:var(--muted);margin-bottom:10px">These orders appeared in this month's Coway payslips but no 收单追踪 claim matched the customer name. Assign each to a staff member manually.</div>
-          <table>
-            <thead><tr><th>Order No</th><th>Customer</th><th>Proxy</th><th>Team</th><th>Assign To</th></tr></thead>
-            <tbody>
-              ${unmatchedPayslipOrders.map((o, i) => {
-                const _teamVal = o.team || 'New Era';
-                const teamBadge = `<select id="orphanTeam_${i}" style="font-size:11px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:${teamColorHex(_teamVal)}" onchange="this.style.color=teamColorHex(this.value)">
-                  <option value="New Era"${_teamVal==='New Era'?' selected':''}>NE</option>
-                  <option value="Alpha C"${_teamVal==='Alpha C'?' selected':''}>AC</option>
-                  <option value="Outsider"${_teamVal==='Outsider'?' selected':''}>OS</option>
-                </select>`;
-                return `
-                <tr>
-                  <td class="td-mono">${o.order_no || '—'}</td>
-                  <td class="td-name">${o.customer_name || '—'}</td>
-                  <td class="td-muted">${o.proxy_name}</td>
-                  <td>${teamBadge}</td>
-                  <td>
-                    <select id="orphanAssign_${i}" style="font-size:12px;padding:4px 6px" onchange="updateOrphanAlgoDefault(${i})">
-                      <option value="">— select staff —</option>
-                      ${assignableStaff.map(s => `<option value="${s.id}" data-algo="${s.staff_type === 'sales' ? (s.channel || 'DM').toLowerCase() : 'outsider'}">${s.name}</option>`).join('')}
-                    </select>
-                    <select id="orphanAlgo_${i}" style="font-size:12px;padding:4px 6px">
-                      <option value="dm">DM</option>
-                      <option value="tm">TM</option>
-                      <option value="outsider">Outsider</option>
-                    </select>
-                    <button class="btn btn-primary btn-sm" onclick="assignOrphanOrder(${i})">Assign</button>
-                  </td>
-                </tr>`; }).join('')}
-            </tbody>
-          </table>
+        <div style="margin-top:18px;padding:16px;border:1px solid var(--yellow);border-radius:8px">
+          <div style="font-weight:700;color:var(--yellow);margin-bottom:6px">⚠ Unmatched Payslip Orders (${unmatchedPayslipOrders.length}) — every order must belong to someone</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Orders from this month's Coway payslips with no 收单追踪 match — grouped by manager (PIC) then by proxy account.</div>
+          ${orphanHtml}
         </div>`;
     }
 
