@@ -6925,6 +6925,7 @@ async function handlePDFFiles(files) {
   files = Array.from(files);
   if (!files.length) return;
   parsedPayslips = [];
+  const parseErrors = [];
   document.getElementById('uploadProgress').style.display = 'block';
   document.getElementById('uploadResults').innerHTML = '';
   document.getElementById('uploadConfirmBar').style.display = 'none';
@@ -6937,11 +6938,14 @@ async function handlePDFFiles(files) {
     try {
       const result = await parsePayslipPDF(files[i]);
       parsedPayslips.push(result);
-      renderParseResult(result);
     } catch(e) {
-      renderParseError(files[i].name, e.message);
+      parseErrors.push({ filename: files[i].name, msg: e.message });
     }
   }
+
+  // Render all results at once grouped by manager (PIC), same
+  // MANAGER_ORDER-then-alphabetical pattern as Breakdown sidebar and Inv page.
+  renderAllParseResults(parsedPayslips, parseErrors);
 
   document.getElementById('uploadProgressText').textContent = `Done — ${total} files processed`;
   if (parsedPayslips.filter(r => r.matched).length > 0) {
@@ -7002,7 +7006,10 @@ async function parsePayslipPDF(file) {
 }
 
 function renderParseResult(result) {
-  const container = document.getElementById('uploadResults');
+  document.getElementById('uploadResults').innerHTML += buildParseResultHTML(result);
+}
+
+function buildParseResultHTML(result) {
   const statusCls = result.matched ? 'matched' : 'unmatched';
   const statusText = result.matched ? `✓ Matched: ${result.proxy?.name}` : '✗ No match found in system';
   const matchColor = result._match ? 'var(--green)' : 'var(--yellow)';
@@ -7032,7 +7039,7 @@ function renderParseResult(result) {
     </div>`;
   }).join('');
 
-  container.innerHTML += `
+  return `
     <div class="parse-result-card">
       <div class="parse-result-header">
         <div>
@@ -7087,13 +7094,48 @@ function renderParseResult(result) {
 }
 
 function renderParseError(filename, msg) {
-  document.getElementById('uploadResults').innerHTML +=
-    `<div class="parse-result-card" style="border-color:rgba(239,68,68,0.3)">
+  document.getElementById('uploadResults').innerHTML += buildParseErrorHTML(filename, msg);
+}
+
+function buildParseErrorHTML(filename, msg) {
+  return `<div class="parse-result-card" style="border-color:rgba(239,68,68,0.3)">
       <div style="color:var(--red);font-weight:600">✗ ${filename}</div>
       <div style="font-size:12px;color:var(--muted);margin-top:4px">${msg}</div>
     </div>`;
 }
 
+// Renders bulk-upload results grouped by manager (PIC), MANAGER_ORDER then
+// alphabetical within each group. Unmatched and failed go in trailing groups.
+function renderAllParseResults(results, errors) {
+  const container = document.getElementById('uploadResults');
+  const groups = {};
+  const unmatched = [];
+  results.forEach(r => {
+    if (!r.matched || !r.proxy) { unmatched.push(r); return; }
+    const mgr = r.proxy.manager || 'Unassigned';
+    if (!groups[mgr]) groups[mgr] = [];
+    groups[mgr].push(r);
+  });
+  const groupOrder = [...MANAGER_ORDER.filter(m => groups[m]), ...Object.keys(groups).filter(m => !MANAGER_ORDER.includes(m)).sort()];
+
+  const hdrStyle = 'margin:16px 0 8px;border-radius:8px';
+  let html = '';
+  groupOrder.forEach(mgr => {
+    const rows = groups[mgr].sort((a,b) => (a.proxy?.name||'').localeCompare(b.proxy?.name||''));
+    html += `<div class="breakdown-group-header" style="${hdrStyle}">${mgr} (PIC)</div>`;
+    rows.forEach(r => { html += buildParseResultHTML(r); });
+  });
+  if (unmatched.length) {
+    unmatched.sort((a,b) => (a.distributor_name||'').localeCompare(b.distributor_name||''));
+    html += `<div class="breakdown-group-header" style="${hdrStyle}">Unmatched</div>`;
+    unmatched.forEach(r => { html += buildParseResultHTML(r); });
+  }
+  if (errors && errors.length) {
+    html += `<div class="breakdown-group-header" style="${hdrStyle}">Failed to parse</div>`;
+    errors.forEach(e => { html += buildParseErrorHTML(e.filename, e.msg); });
+  }
+  container.innerHTML = html;
+}
 function clearUpload() {
   parsedPayslips = [];
   document.getElementById('uploadResults').innerHTML = '';
