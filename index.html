@@ -4189,7 +4189,7 @@ async function previewAutoCommission() {
             <td class="td-muted" style="font-size:11px">${row.breakdown}</td>
             <td>
               <div style="display:flex;gap:4px;flex-wrap:wrap">
-                <button class="btn btn-ghost btn-sm" onclick="viewAutoCommOrders(${idx})">View Orders</button>
+
                 <button class="btn btn-primary btn-sm" onclick="saveAutoCommissionRow(${idx})">Save to Payroll</button>
                 <button class="btn btn-ghost btn-sm" onclick="generateStaffPayslip(${idx})">🖨 Payslip</button>
               </div>
@@ -4665,22 +4665,12 @@ async function generateStaffPayslip(idx) {
     epf_employee: epfEmployee, epf_employer: epfEmployer, own_proxy_offset: ownProxyOffset,
     total_pay: totalPay, month, year, orders_count: orders.length, notes: null,
   };
-  const isInv = isInvoiceRecord(fakeRecord);
-  const docHtml = isInv ? buildStaffInvoiceHTML(staff, fakeRecord) : buildStaffPayslipHTML(staff, fakeRecord);
   const calcHtml = buildCalculationHTML(staff, fakeRecord, orders);
-
   const win = window.open('', '_blank', 'width=760,height=900');
-  win.document.write(`<html><head><title>${isInv ? 'Invoice' : 'Payslip'} Preview - ${staff.name} - ${MONTHS[month]} ${year}</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
-    <style>body{margin:40px;background:#f5f5f5;font-family:Inter,sans-serif}
-    ${INVOICE_PRINT_STYLE}
-    @media print{body{margin:0;background:#fff}.invoice-preview{box-shadow:none}}
-    </style></head><body>
-    <div style="max-width:700px;margin:0 auto 12px;font-size:12px;color:#c00;font-weight:600">⚠ Preview only — not yet saved to Payroll</div>
-    ${docHtml}
-    <div style="height:24px"></div>
-    ${calcHtml}
-    <br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
+  win.document.write(`<html><head><title>Calculation - ${staff.name} - ${MONTHS[month]} ${year}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>body{margin:24px;background:#f5f5f5}@media print{body{margin:0;background:#fff}}</style></head>
+    <body>${calcHtml}<br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
 }
 
 // Pulls out the two earning categories (Com, Claim) and the deduction
