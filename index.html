@@ -3558,7 +3558,7 @@ let payrollRecords = [];
 async function loadStaff() {
   try {
     staffList = await sb('nec_staff', { filter: 'is_active=eq.true' });
-    console.log('[Staff] first entry keys:', staffList[0] ? Object.keys(staffList[0]) : 'empty', 'sample:', JSON.stringify(staffList[0]).slice(0,100));
+    console.log('[Staff] first entry keys:', staffList[0] ? Object.keys(staffList[0]) : 'empty', 'FULL:', JSON.stringify(staffList[0]));
     return staffList;
   } catch(e) { return []; }
 }
