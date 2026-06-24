@@ -3558,7 +3558,7 @@ let payrollRecords = [];
 async function loadStaff() {
   try {
     staffList = await sb('nec_staff', { filter: 'is_active=eq.true' });
-    console.log('[Staff] first entry keys:', staffList[0] ? Object.keys(staffList[0]) : 'empty', 'FULL:', JSON.stringify(staffList[0]));
+
     return staffList;
   } catch(e) { return []; }
 }
@@ -7883,9 +7883,7 @@ async function setAllBreakdownOwner(breakdownId) {
   if (!bdRows.length) return;
   const b = bdRows[0];
   const proxyVal = isNaN(parseInt(b.proxy_id)) ? b.proxy_id : parseInt(b.proxy_id);
-  // staffId from dropdown is UUID; nec_order_assignments.staff_id is integer
-  // Look up the integer id from staffList if possible (some DBs use integer PK)
-  const staffVal = parseInt(staffId) || staffId; // if UUID, just store UUID
+  const staffVal = staffId; // always use the raw dropdown value (UUID)
   const commAlgo = (staff?.channel || 'DM').toLowerCase();
   const orders = JSON.parse(b.categories_json || '[]').filter(o => o.order_no);
   if (!orders.length) return showToast('No orders', 'error');
@@ -8036,9 +8034,7 @@ async function bdAssignSave(btn) {
   // Try to get the UUID from proxyList (to match how Bulk Upload stores proxy_id)
   const proxyListEntry = proxyList.find(p => String(p.id) === String(proxyid));
   const proxyValFinal = proxyListEntry?.id || proxyVal;
-  // staffId from dropdown is UUID; nec_order_assignments.staff_id is integer
-  // Look up the integer id from staffList if possible (some DBs use integer PK)
-  const staffVal = parseInt(staffId) || staffId; // if UUID, just store UUID
+  const staffVal = staffId; // always use the raw dropdown value (UUID)
   try {
     // Step 1: Delete any existing row for this order (broad: year+month+proxy+order_no, no customer_name filter)
     const delResp = await fetch(
@@ -8187,7 +8183,7 @@ async function showBreakdown(id) {
         // Use high limit to avoid Supabase's default 1000-row cap
         const assignments = await sb('nec_order_assignments', {
           filter: `year=eq.${bd.year}&month=eq.${bd.month}`,
-          select: 'order_no,staff_id,commission_algo,proxy_id',
+          select: 'order_no,staff_id,commission_algo,proxy_id,customer_name',
           limit: 10000
         });
         const filtered = assignments.filter(a => 
@@ -8195,20 +8191,11 @@ async function showBreakdown(id) {
           (proxy.id && String(a.proxy_id) === String(proxy.id))
         );
         console.log('[BD] total assignments year/month:', assignments.length, '| proxy', _pUUID, proxy.id, '| filtered:', filtered.length, '| sample proxy_ids:', [...new Set(assignments.map(a=>a.proxy_id))].slice(0,5));
-        // Build integer-to-UUID staff lookup if needed
-        // (nec_order_assignments may store old integer staff IDs)
-        const intStaffIds = filtered.map(a => a.staff_id).filter(id => !isNaN(parseInt(id)) && !String(id).includes('-'));
-        let intStaffMap = {}; // int_id -> staff
-        if (intStaffIds.length) {
-          try {
-            const intStaff = await sb('nec_staff', { filter: `id=in.(${[...new Set(intStaffIds)].join(',')})`, select: 'id,name,channel' });
-            intStaff.forEach(s => { intStaffMap[String(s.id)] = s; });
-          } catch(e) { /* non-fatal */ }
-        }
         filtered.forEach(a => {
+          // Match by UUID (current format) or by name if staff_id is an old integer
           const staff = staffList.find(s => String(s.id) === String(a.staff_id))
-                     || intStaffMap[String(a.staff_id)];
-          if (staff) assignedStaffMap[String(a.order_no)] = { name: staff.name, algo: a.commission_algo, staff_id: a.staff_id };
+                     || staffList.find(s => s.name && String(s.name) === String(a.staff_name));
+          if (staff) assignedStaffMap[String(a.order_no)] = { name: staff.name, algo: a.commission_algo, staff_id: staff.id };
         });
       } catch(e) { /* non-fatal */ }
       const neTotal = r2(rawCats.filter(o=>!o.team||o.team==='New Era').reduce((s,o)=>s+parseFloat(o.total_com||0),0));
