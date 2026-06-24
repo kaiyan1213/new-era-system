@@ -7918,7 +7918,8 @@ async function bdAssignSave(btn) {
     // both new assignments and updates to existing ones atomically.
     const proxyVal = isNaN(parseInt(proxyid)) ? proxyid : parseInt(proxyid);
     const staffVal = parseInt(staffId) || staffId;
-    await fetch(`${SUPABASE_URL}/rest/v1/nec_order_assignments`, {
+    // on_conflict tells PostgREST which columns define uniqueness for upsert
+    const upsertResp = await fetch(`${SUPABASE_URL}/rest/v1/nec_order_assignments?on_conflict=year,month,proxy_id,order_no,customer_name`, {
       method: 'POST',
       headers: {
         'apikey': SUPABASE_KEY,
@@ -7933,6 +7934,10 @@ async function bdAssignSave(btn) {
         source: 'breakdown', commission_algo: commAlgo
       })
     });
+    if (!upsertResp.ok) {
+      const errText = await upsertResp.text();
+      throw new Error(errText);
+    }
     showToast(orderno + ' \u2192 ' + (staff?.name||'staff') + ' \u2713');
     if (modal) modal.remove();
     // Refresh breakdown
