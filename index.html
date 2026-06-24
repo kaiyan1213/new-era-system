@@ -7873,7 +7873,7 @@ async function assignBdOrderStaff(breakdownId, orderNo, staffId, proxyId, year, 
     const commAlgo = (staff?.channel || 'DM').toLowerCase();
     await sb('nec_order_assignments', {
       method: 'POST',
-      body: { year: parseInt(year), month: parseInt(month), order_no: orderNo, customer_name: customerName, proxy_id: parseInt(proxyId), staff_id: parseInt(staffId), source: 'breakdown', commission_algo: commAlgo }
+      body: { year: parseInt(year), month: parseInt(month), order_no: orderNo, customer_name: customerName, proxy_id: proxyId, staff_id: parseInt(staffId), source: 'breakdown', commission_algo: commAlgo }
     });
     // Update the dropdown colour to accent so user sees it saved
     const sel = event?.target;
