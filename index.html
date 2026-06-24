@@ -4216,20 +4216,33 @@ async function previewAutoCommission() {
           const orders = mgrGroups[mgr][pName];
           // Proxy sub-header with Set All controls
           const pgId = `og_${mgr.replace(/\W/g,'_')}_${pName.replace(/\W/g,'_')}`;
-          orphanHtml += `<div style="display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-bottom:4px;margin-top:8px;flex-wrap:wrap">
-            <span style="font-size:12px;font-weight:600;color:var(--text)">${pName}</span>
-            <span style="font-size:11px;color:var(--muted)">${orders.length} order${orders.length>1?'s':''}</span>
-            <span style="flex:1"></span>
-            <select id="${pgId}_team" style="font-size:11px;padding:2px 5px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text)">
-              <option value="New Era">NE</option><option value="Alpha C">AC</option><option value="Outsider">OS</option>
-            </select>
-            <select id="${pgId}_staff" style="font-size:11px;padding:2px 5px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text)">
-              <option value="">— owner —</option>${staffOptsHtml}
-            </select>
-            <select id="${pgId}_algo" style="font-size:11px;padding:2px 5px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text)">
-              <option value="dm">DM</option><option value="tm">TM</option><option value="outsider">OS</option>
-            </select>
-            <button onclick="setAllOrphanGroup('${pgId}',${JSON.stringify(orders.map(o=>o._i))})" style="font-size:11px;padding:2px 10px;border-radius:4px;border:1px solid var(--accent);color:var(--accent);background:transparent;cursor:pointer">Set All</button>
+          const indicesJson = JSON.stringify(orders.map(o=>o._i));
+          orphanHtml += `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:4px;margin-top:8px">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+              <span style="font-size:12px;font-weight:600;color:var(--text)">${pName}</span>
+              <span style="font-size:11px;color:var(--muted)">${orders.length} order${orders.length>1?'s':''}</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;align-items:center;gap:6px">
+                <span style="font-size:11px;color:var(--muted);min-width:52px">Team:</span>
+                <button onclick="setAllOrphanTeam('${pgId}','New Era',${indicesJson})" style="padding:2px 10px;font-size:11px;border-radius:4px;border:1px solid #2563eb;color:#2563eb;background:transparent;cursor:pointer">NE</button>
+                <button onclick="setAllOrphanTeam('${pgId}','Alpha C',${indicesJson})" style="padding:2px 10px;font-size:11px;border-radius:4px;border:1px solid #f97316;color:#f97316;background:transparent;cursor:pointer">AC</button>
+                <button onclick="setAllOrphanTeam('${pgId}','Outsider',${indicesJson})" style="padding:2px 10px;font-size:11px;border-radius:4px;border:1px solid var(--muted);color:var(--muted);background:transparent;cursor:pointer">OS</button>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <span style="font-size:11px;color:var(--muted);min-width:52px">Channel:</span>
+                <button onclick="setAllOrphanAlgo('${pgId}','dm',${indicesJson})" style="padding:2px 10px;font-size:11px;border-radius:4px;border:1px solid #16a34a;color:#16a34a;background:transparent;cursor:pointer">DM</button>
+                <button onclick="setAllOrphanAlgo('${pgId}','tm',${indicesJson})" style="padding:2px 10px;font-size:11px;border-radius:4px;border:1px solid #a78bfa;color:#a78bfa;background:transparent;cursor:pointer">TM</button>
+                <button onclick="setAllOrphanAlgo('${pgId}','outsider',${indicesJson})" style="padding:2px 10px;font-size:11px;border-radius:4px;border:1px solid var(--muted);color:var(--muted);background:transparent;cursor:pointer">OS</button>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <span style="font-size:11px;color:var(--muted);min-width:52px">Owner:</span>
+                <select id="${pgId}_staff" style="font-size:11px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text)">
+                  <option value="">— pick owner —</option>${staffOptsHtml}
+                </select>
+                <button onclick="setAllOrphanOwner('${pgId}',${indicesJson})" style="padding:2px 10px;font-size:11px;border-radius:4px;border:1px solid var(--accent);color:var(--accent);background:transparent;cursor:pointer">Set All</button>
+              </div>
+            </div>
           </div>`;
           // Orders table for this proxy
           orphanHtml += `<table style="margin-bottom:4px"><thead><tr><th>Order No</th><th>Customer</th><th>Team</th><th>Assign To</th></tr></thead><tbody>`;
@@ -4288,25 +4301,47 @@ function updateOrphanAlgoDefault(i) {
   if (algoSel) algoSel.value = defaultAlgo;
 }
 
-async function setAllOrphanGroup(pgId, indices) {
-  const teamSel = document.getElementById(pgId + '_team');
+// Set Team only — independent of Owner and Channel
+function setAllOrphanTeam(pgId, team, indices) {
+  indices.forEach(i => {
+    const tEl = document.getElementById('orphanTeam_' + i);
+    if (tEl) { tEl.value = team; tEl.style.color = teamColorHex(team); }
+  });
+  const label = team === 'New Era' ? 'NE' : team === 'Alpha C' ? 'AC' : 'OS';
+  showToast('Team → ' + label + ' (' + indices.length + ' orders)');
+}
+
+// Set Channel/Algo only — independent of Owner and Team
+function setAllOrphanAlgo(pgId, algo, indices) {
+  indices.forEach(i => {
+    const aEl = document.getElementById('orphanAlgo_' + i);
+    if (aEl) aEl.value = algo;
+    // If setting outsider, also update team dropdown
+    if (algo === 'outsider') {
+      const tEl = document.getElementById('orphanTeam_' + i);
+      if (tEl) { tEl.value = 'Outsider'; tEl.style.color = teamColorHex('Outsider'); }
+    }
+  });
+  showToast('Channel → ' + algo.toUpperCase() + ' (' + indices.length + ' orders)');
+}
+
+// Set Owner only — independent of Team and Channel
+async function setAllOrphanOwner(pgId, indices) {
   const staffSel = document.getElementById(pgId + '_staff');
-  const algoSel = document.getElementById(pgId + '_algo');
-  const team = teamSel?.value || 'New Era';
   const staffId = staffSel?.value;
-  const algo = team === 'Outsider' ? 'outsider' : (algoSel?.value || 'dm');
   if (!staffId) return showToast('Pick a staff member first', 'error');
   const staff = staffList.find(s => String(s.id) === String(staffId));
   for (const i of indices) {
-    const tEl = document.getElementById('orphanTeam_' + i);
     const sEl = document.getElementById('orphanAssign_' + i);
-    const aEl = document.getElementById('orphanAlgo_' + i);
-    if (tEl) { tEl.value = team; tEl.style.color = teamColorHex(team); }
     if (sEl) sEl.value = staffId;
-    if (aEl) aEl.value = algo;
     await assignOrphanOrder(i);
   }
   showToast(indices.length + ' orders → ' + (staff?.name||'staff') + ' ✓');
+}
+
+async function setAllOrphanGroup(pgId, indices) {
+  // Legacy wrapper — used if called from old-format buttons
+  await setAllOrphanOwner(pgId, indices);
 }
 
 async function assignOrphanOrder(i) {
