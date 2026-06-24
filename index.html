@@ -575,6 +575,7 @@
           <tr>
             <th>Staff Name</th>
             <th>Channel</th>
+            <th>Team</th>
             <th>Type</th>
             <th>Month</th>
             <th>Orders</th>
@@ -587,7 +588,7 @@
           </tr>
         </thead>
         <tbody id="payrollTableBody">
-          <tr><td colspan="11"><div class="empty"><div class="empty-icon">👥</div><div class="empty-text">Loading payroll...</div></div></td></tr>
+          <tr><td colspan="12"><div class="empty"><div class="empty-icon">👥</div><div class="empty-text">Loading payroll...</div></div></td></tr>
         </tbody>
       </table>
     </div>
@@ -3664,7 +3665,7 @@ async function loadPayroll() {
 
     const tbody = document.getElementById('payrollTableBody');
     if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="11"><div class="empty"><div class="empty-icon">👥</div><div class="empty-text">No payroll records. Add staff first then record payroll.</div></div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="12"><div class="empty"><div class="empty-icon">👥</div><div class="empty-text">No payroll records. Add staff first then record payroll.</div></div></td></tr>`;
       return;
     }
     // Sort: DM → TM → XHS → Admin → Manager, then alphabetical within each group
@@ -3693,6 +3694,13 @@ async function loadPayroll() {
       return `<tr>
         <td class="td-name">${staff.name}</td>
         <td>${staff.channel ? `<span class="badge badge-${staff.channel.toLowerCase()}">${staff.channel}</span>` : '<span class="td-muted">—</span>'}</td>
+        <td>${(() => {
+          const t = isManager ? '' : (staff.company_team || '');
+          if (!t) return '<span class="td-muted">—</span>';
+          const color = t === 'New Era' ? '#2563eb' : t === 'Alpha C' ? '#f97316' : t === 'Shared' ? '#7c3aed' : '';
+          const label = t === 'New Era' ? 'NE' : t === 'Alpha C' ? 'AC' : t === 'Shared' ? 'Shared' : t;
+          return `<span style="font-size:11px;font-weight:700;color:${color}">${label}</span>`;
+        })()}</td>
         <td>
           <span class="badge badge-other" style="${typeBadgeColor}">${typeLabel}</span>
           ${isInvoice ? '<span class="badge badge-other" style="color:var(--red)" title="Staff owes New Era back">Invoice</span>' : ''}
@@ -3715,7 +3723,7 @@ async function loadPayroll() {
       </tr>`;
     }).join('');
   } catch(e) {
-    document.getElementById('payrollTableBody').innerHTML = `<tr><td colspan="11"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Tables not set up yet. Go to Setup tab.</div></div></td></tr>`;
+    document.getElementById('payrollTableBody').innerHTML = `<tr><td colspan="12"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Tables not set up yet. Go to Setup tab.</div></div></td></tr>`;
   }
 }
 
