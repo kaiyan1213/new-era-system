@@ -7913,7 +7913,7 @@ async function bdAssignSave(btn) {
     await sb('nec_order_assignments', { method: 'POST', body: {
       year: parseInt(year), month: parseInt(month),
       order_no: orderno, customer_name: custname,
-      proxy_id: parseInt(proxyid) || proxyid,
+      proxy_id: proxyid,
       staff_id: parseInt(staffId) || staffId,
       source: 'breakdown',
       commission_algo: (staff?.channel || 'DM').toLowerCase()
@@ -8032,9 +8032,12 @@ async function showBreakdown(id) {
       // Fetch staff assignments for this proxy/period to show who owns each order
       if (!staffList.length) await loadStaff();
       let assignedStaffMap = {};
+      const _pUUID = (proxyList.find(p => String(p.id) === String(bd.proxy_id)) ||
+                      proxyList.find(p => p.coway_id === String(bd.distributor_code)) ||
+                      {}).id || bd.proxy_id;
       try {
         const assignments = await sb('nec_order_assignments', {
-          filter: `proxy_id=eq.${bd.proxy_id}&year=eq.${bd.year}&month=eq.${bd.month}`,
+          filter: `proxy_id=eq.${_pUUID}&year=eq.${bd.year}&month=eq.${bd.month}`,
           select: 'order_no,staff_id,commission_algo'
         });
         console.log('[BD] assignments fetched:', assignments.length);
@@ -8054,8 +8057,12 @@ async function showBreakdown(id) {
         const btnLabel = assignedName
           ? '<span style="font-size:10px;color:var(--accent)">' + assignedName + '</span> <button style="font-size:10px;padding:1px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);cursor:pointer" onclick="openBdAssignModal(event)">✎</button>'
           : '<button style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid var(--accent);background:transparent;color:var(--accent);cursor:pointer" onclick="openBdAssignModal(event)">+ Assign</button>';
+        // proxyUUID: look up real UUID from proxyList by matching int id or distributor code
+        const proxyUUID = (proxyList.find(p => String(p.id) === String(bd.proxy_id)) ||
+                           proxyList.find(p => p.coway_id === String(bd.distributor_code)) ||
+                           {}).id || bd.proxy_id;
         const staffCell = '<div class="bd-assign-cell"'
-          + ' data-proxyid="' + bd.proxy_id + '"'
+          + ' data-proxyid="' + proxyUUID + '"'
           + ' data-year="' + bd.year + '"'
           + ' data-month="' + bd.month + '"'
           + ' data-orderno="' + (o.order_no||'') + '"'
