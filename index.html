@@ -4073,14 +4073,15 @@ async function previewAutoCommission() {
 
       if (staff) {
         if (!matchedByStaffId[staff.id]) matchedByStaffId[staff.id] = [];
-        // commission_algo resolution: an explicit per-order choice
-        // recorded on the assignment (set via the algo dropdown in the UI)
-        // takes precedence; otherwise fall back to the staff's own Channel
-        // (DM/TM) — Channel IS the commission algorithm for sales staff,
-        // not a separate concept, so there's no dedicated
-        // default_commission_algo field. This is what lets the same staff
-        // have a mix of e.g. mostly-DM orders + a few Outsider orders.
-        const algo = (manualAssign && manualAssign.commission_algo) || (staff.channel || 'DM').toLowerCase();
+        // commission_algo resolution: explicit per-order manual assignment
+        // takes highest precedence. Then: if the order is tagged Outsider
+        // in the breakdown, always use outsider (full com) regardless of
+        // the staff's own channel. Otherwise fall back to staff.channel
+        // (DM/TM) — this is what lets e.g. Jess have TM orders + Outsider
+        // orders calculated with the right formula for each.
+        const algoFromManual = manualAssign?.commission_algo;
+        const algoFromTeam = po.team === 'Outsider' ? 'outsider' : null;
+        const algo = algoFromManual || algoFromTeam || (staff.channel || 'DM').toLowerCase();
         matchedByStaffId[staff.id].push({ ...po, commission_algo: algo });
         matchedNormNamesUsed.add(po.norm_name);
       } else {
@@ -4271,8 +4272,12 @@ async function previewAutoCommission() {
 function updateOrphanAlgoDefault(i) {
   const sel = document.getElementById(`orphanAssign_${i}`);
   const algoSel = document.getElementById(`orphanAlgo_${i}`);
+  const teamSel = document.getElementById(`orphanTeam_${i}`);
   const selectedOption = sel?.options[sel.selectedIndex];
-  const defaultAlgo = selectedOption?.dataset?.algo || 'dm';
+  const staffDefaultAlgo = selectedOption?.dataset?.algo || 'dm';
+  // If this order is tagged Outsider, always use outsider regardless of staff channel
+  const orderTeam = teamSel?.value || '';
+  const defaultAlgo = orderTeam === 'Outsider' ? 'outsider' : staffDefaultAlgo;
   if (algoSel) algoSel.value = defaultAlgo;
 }
 
