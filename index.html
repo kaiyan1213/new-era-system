@@ -8039,18 +8039,21 @@ async function bdAssignSave(btn) {
     );
     console.log('[BDSave] DELETE status:', delResp.status);
     // Step 2: Insert fresh row
+    const insBody = {
+      year: parseInt(year), month: parseInt(month),
+      order_no: orderno, customer_name: custname,
+      proxy_id: proxyVal, staff_id: staffVal,
+      source: 'breakdown', commission_algo: commAlgo
+    };
+    console.log('[BDSave] INSERT body:', JSON.stringify(insBody));
     const insResp = await fetch(`${SUPABASE_URL}/rest/v1/nec_order_assignments`, {
       method: 'POST',
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-      body: JSON.stringify({
-        year: parseInt(year), month: parseInt(month),
-        order_no: orderno, customer_name: custname,
-        proxy_id: proxyVal, staff_id: staffVal,
-        source: 'breakdown', commission_algo: commAlgo
-      })
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
+      body: JSON.stringify(insBody)
     });
-    console.log('[BDSave] INSERT status:', insResp.status, 'body:', await insResp.clone().text());
-    if (!insResp.ok) throw new Error(await insResp.text());
+    const insText = await insResp.text();
+    console.log('[BDSave] INSERT status:', insResp.status, 'response:', insText);
+    if (!insResp.ok) throw new Error(insText);
     showToast(orderno + ' \u2192 ' + (staff?.name||'staff') + ' \u2713');
     if (modal) modal.remove();
     const active = document.querySelector('.breakdown-proxy-item.active');
