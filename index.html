@@ -7913,20 +7913,19 @@ async function bdAssignSave(btn) {
   const commAlgo = (modal.dataset.orderteam === 'Outsider')
     ? 'outsider'
     : (staff?.channel || modal.dataset.orderchannel || 'DM').toLowerCase();
+  const proxyVal = isNaN(parseInt(proxyid)) ? proxyid : parseInt(proxyid);
+  const staffVal = parseInt(staffId) || staffId;
   try {
-    // Use upsert (POST with Prefer: resolution=merge-duplicates) to handle
-    // both new assignments and updates to existing ones atomically.
-    const proxyVal = isNaN(parseInt(proxyid)) ? proxyid : parseInt(proxyid);
-    const staffVal = parseInt(staffId) || staffId;
-    // on_conflict tells PostgREST which columns define uniqueness for upsert
-    const upsertResp = await fetch(`${SUPABASE_URL}/rest/v1/nec_order_assignments?on_conflict=year,month,proxy_id,order_no,customer_name`, {
+    // Step 1: Delete any existing row for this order (broad: year+month+proxy+order_no, no customer_name filter)
+    const delResp = await fetch(
+      `${SUPABASE_URL}/rest/v1/nec_order_assignments?year=eq.${year}&month=eq.${month}&proxy_id=eq.${proxyVal}&order_no=eq.${encodeURIComponent(orderno)}`,
+      { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
+    );
+    console.log('[BDSave] DELETE status:', delResp.status);
+    // Step 2: Insert fresh row
+    const insResp = await fetch(`${SUPABASE_URL}/rest/v1/nec_order_assignments`, {
       method: 'POST',
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'resolution=merge-duplicates,return=minimal'
-      },
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
       body: JSON.stringify({
         year: parseInt(year), month: parseInt(month),
         order_no: orderno, customer_name: custname,
@@ -7934,41 +7933,15 @@ async function bdAssignSave(btn) {
         source: 'breakdown', commission_algo: commAlgo
       })
     });
-    if (!upsertResp.ok) {
-      const errText = await upsertResp.text();
-      throw new Error(errText);
-    }
-    // Verify the save actually worked by reading back immediately
-    const verifyRows = await sb('nec_order_assignments', {
-      filter: `year=eq.${year}&month=eq.${month}&order_no=eq.${orderno}`,
-      select: 'id,proxy_id,staff_id,order_no,customer_name'
-    });
-    console.log('[BD Save] upsert sent:', { year, month, orderno, custname, proxyVal, staffVal });
-    console.log('[BD Save] verify read back:', verifyRows.length, 'rows', verifyRows);
-    if (!verifyRows.length) {
-      // upsert returned ok but nothing in DB — customer_name mismatch in on_conflict
-      // Try delete+insert instead
-      console.warn('[BD Save] upsert wrote 0 rows — falling back to delete+insert');
-      await fetch(`${SUPABASE_URL}/rest/v1/nec_order_assignments?year=eq.${year}&month=eq.${month}&order_no=eq.${orderno}`, {
-        method: 'DELETE',
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
-      });
-      const insertResp = await fetch(`${SUPABASE_URL}/rest/v1/nec_order_assignments`, {
-        method: 'POST',
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ year: parseInt(year), month: parseInt(month), order_no: orderno, customer_name: custname, proxy_id: proxyVal, staff_id: staffVal, source: 'breakdown', commission_algo: commAlgo })
-      });
-      if (!insertResp.ok) throw new Error(await insertResp.text());
-      console.log('[BD Save] fallback insert OK');
-    }
+    console.log('[BDSave] INSERT status:', insResp.status, 'body:', await insResp.clone().text());
+    if (!insResp.ok) throw new Error(await insResp.text());
     showToast(orderno + ' \u2192 ' + (staff?.name||'staff') + ' \u2713');
     if (modal) modal.remove();
-    // Refresh breakdown
     const active = document.querySelector('.breakdown-proxy-item.active');
-    if (active) { const id = active.dataset.bdId || active.onclick?.toString().match(/showBreakdown\('([^']+)'/)?.[1]; if (id) showBreakdown(id); }
-    else document.querySelector('.breakdown-proxy-item')?.click();
-  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+    if (active) { const id = active.onclick?.toString().match(/showBreakdown\('([^']+)'/)?.[1]; if (id) showBreakdown(id); }
+  } catch(e) { showToast('Save error: ' + e.message, 'error'); }
 }
+
 
 async function bdAssignClear(btn) {
   const modal = document.getElementById('bdAssignFloating');
