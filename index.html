@@ -7958,8 +7958,8 @@ async function showBreakdown(id) {
       const orderRows = rawCats.map(o => {
         const assigned = assignedStaffMap[String(o.order_no)];
         const assignedId = assigned?.staff_id || (assigned ? (staffList.find(s => s.name === assigned.name) || {}).id || '' : '');
-        const soOpts = '<option value="">\u2014 assign \u2014</option>' + [...staffList].sort((a,b) => a.name.localeCompare(bd.name)).map(s =>
-          '<option value="' + s.id + '"' + (s.id === assignedId ? ' selected' : '') + '>' + s.name + '</option>'
+        const soOpts = '<option value="">\u2014 assign \u2014</option>' + [...staffList].sort((a,b) => a.name.localeCompare(b.name)).map(s =>
+          '<option value="' + s.id + '"' + (String(s.id) === String(assignedId) ? ' selected' : '') + '>' + s.name + '</option>'
         ).join('');
         const custEsc = (o.customer_name || '').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
         const staffCell = '<select style="font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--accent);cursor:pointer;width:100%" onchange="assignBdOrderStaff(\'' + bdId + '\',\'' + (o.order_no||'') + '\',this.value,\'' + bd.proxy_id + '\',' + bd.year + ',' + bd.month + ',\''+custEsc+'\')">'+soOpts+'</select>';
