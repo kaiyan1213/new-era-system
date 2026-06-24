@@ -3669,19 +3669,30 @@ async function loadPayroll() {
       return;
     }
     // Sort: DM → TM → XHS → Admin → Manager, then alphabetical within each group
-    const typeOrder = { 'DM': 0, 'TM': 1, 'XHS': 2, 'admin': 3, 'outsider_staff': 4, 'manager': 5 };
+    // Sort order: NE-DM → NE-TM → NE-Admin → NE-Editor → NE-Content Creator
+    //             → AC-DM → AC-TM → AC-Admin → AC-Content Creator
+    //             → Shared → Outsider Staff → Manager
+    const getSortKey = (r) => {
+      const s = staffList.find(x => x.id === r.staff_id) || {};
+      const isManager = r.record_type === 'manager' || managerList.some(m => m.staff_id === r.staff_id);
+      if (isManager) return [11, s.name || ''];
+      const isOs = (r.commission_type === 'outsider') && s.staff_type !== 'sales';
+      if (isOs) return [10, s.name || ''];
+      const team = s.company_team || 'New Era';
+      const ch = (s.channel || '').toUpperCase();
+      const pos = s.position || s.role || s.staff_type || '';
+      // Team base: NE=0, AC=5, Shared=9
+      const teamBase = team === 'Alpha C' ? 5 : team === 'Shared' ? 9 : 0;
+      // Within team: DM=0, TM=1, Admin=2, Editor=3, Content Creator=4
+      const roleOff = ch === 'DM' ? 0 : ch === 'TM' ? 1 :
+        pos.toLowerCase().includes('editor') ? 3 :
+        pos.toLowerCase().includes('content') ? 4 : 2;
+      return [teamBase + roleOff, s.name || ''];
+    };
     filtered = [...filtered].sort((a, b) => {
-      const sA = staffList.find(s => s.id === a.staff_id) || {};
-      const sB = staffList.find(s => s.id === b.staff_id) || {};
-      const isManagerA = a.record_type === 'manager' || managerList.some(m => m.staff_id === a.staff_id);
-      const isManagerB = b.record_type === 'manager' || managerList.some(m => m.staff_id === b.staff_id);
-      const isOsA = !isManagerA && (a.commission_type === 'outsider') && sA.staff_type !== 'sales';
-      const isOsB = !isManagerB && (b.commission_type === 'outsider') && sB.staff_type !== 'sales';
-      const keyA = isManagerA ? 'manager' : isOsA ? 'outsider_staff' : (sA.channel || (sA.staff_type === 'admin' ? 'admin' : 'DM'));
-      const keyB = isManagerB ? 'manager' : isOsB ? 'outsider_staff' : (sB.channel || (sB.staff_type === 'admin' ? 'admin' : 'DM'));
-      const orderDiff = (typeOrder[keyA] ?? 3) - (typeOrder[keyB] ?? 3);
-      if (orderDiff !== 0) return orderDiff;
-      return (sA.name || '').localeCompare(sB.name || '');
+      const [ka, na] = getSortKey(a);
+      const [kb, nb] = getSortKey(b);
+      return ka !== kb ? ka - kb : na.localeCompare(nb);
     });
     tbody.innerHTML = filtered.map(r => {
       const staff = staffList.find(s => s.id === r.staff_id) || { name: 'Unknown', staff_type: 'sales', channel: 'DM' };
