@@ -4214,20 +4214,10 @@ async function previewAutoCommission() {
 
         proxyNames.forEach(pName => {
           const orders = mgrGroups[mgr][pName];
-          // Proxy sub-header with set-all staff
-          const pgId = `orphanGroup_${mgr.replace(/\s/g,'_')}_${pName.replace(/\s/g,'_')}`;
-          orphanHtml += `<div style="display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-bottom:4px;margin-top:8px;flex-wrap:wrap">
+          // Proxy sub-header
+          orphanHtml += `<div style="display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-bottom:4px;margin-top:8px">
             <span style="font-size:12px;font-weight:600;color:var(--text)">${pName}</span>
             <span style="font-size:11px;color:var(--muted)">${orders.length} order${orders.length>1?'s':''}</span>
-            <span style="flex:1"></span>
-            <select id="${pgId}_staff" style="font-size:11px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text)">
-              <option value="">— set all owner —</option>
-              ${staffOptsHtml}
-            </select>
-            <select id="${pgId}_algo" style="font-size:11px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text)">
-              <option value="dm">DM</option><option value="tm">TM</option><option value="outsider">OS</option>
-            </select>
-            <button onclick="setAllOrphanGroupOwner('${pgId}',${JSON.stringify(orders.map(o=>o._i))})" style="font-size:11px;padding:2px 10px;border-radius:4px;border:1px solid var(--accent);color:var(--accent);background:transparent;cursor:pointer">Set All</button>
           </div>`;
           // Orders table for this proxy
           orphanHtml += `<table style="margin-bottom:4px"><thead><tr><th>Order No</th><th>Customer</th><th>Team</th><th>Assign To</th></tr></thead><tbody>`;
@@ -4284,23 +4274,6 @@ function updateOrphanAlgoDefault(i) {
   const selectedOption = sel?.options[sel.selectedIndex];
   const defaultAlgo = selectedOption?.dataset?.algo || 'dm';
   if (algoSel) algoSel.value = defaultAlgo;
-}
-
-async function setAllOrphanGroupOwner(pgId, indices) {
-  const staffSel = document.getElementById(`${pgId}_staff`);
-  const algoSel = document.getElementById(`${pgId}_algo`);
-  const staffId = staffSel?.value;
-  const algo = algoSel?.value || 'dm';
-  if (!staffId) return showToast('Pick a staff member first', 'error');
-  const staff = staffList.find(s => String(s.id) === String(staffId));
-  for (const i of indices) {
-    const sEl = document.getElementById(`orphanAssign_${i}`);
-    const aEl = document.getElementById(`orphanAlgo_${i}`);
-    if (sEl) sEl.value = staffId;
-    if (aEl) aEl.value = algo;
-    await assignOrphanOrder(i);
-  }
-  showToast(`${indices.length} orders → ${staff?.name || 'staff'} ✓`);
 }
 
 async function assignOrphanOrder(i) {
@@ -7265,26 +7238,6 @@ function syncChannelOnTeamChange(code, orderNo, team) {
   }
 }
 
-function setAllUploadOwner(code) {
-  const sel = document.getElementById(`ownerSel_${code}`);
-  const staffId = sel?.value;
-  if (!staffId) return showToast('Pick a staff member first', 'error');
-  // Set all staff dropdowns in this card
-  document.querySelectorAll(`[data-code="${code}"] .order-staff-sel`).forEach(s => {
-    s.value = staffId;
-  });
-  // Store in _staffMap for confirmBulkSave to pick up
-  const result = parseResults?.[code];
-  if (result?.categories) {
-    result.categories.forEach(o => {
-      if (!_staffMap[code]) _staffMap[code] = {};
-      _staffMap[code][o.order_no] = staffId;
-    });
-  }
-  const staff = staffList.find(s => String(s.id) === String(staffId));
-  showToast(`All → ${staff?.name || 'staff'} set`);
-}
-
 function setAllOrderTeams(code, team) {
   // Set the proxy-level default
   _teamMap[code] = team;
@@ -7501,14 +7454,6 @@ function buildParseResultHTML(result) {
                 style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid var(--red);background:var(--surface2);color:var(--red);cursor:pointer;font-weight:${defaultChannel==='XHS'?'700':'400'}">
                 XHS
               </button>
-            </div>
-            <div style="display:flex;align-items:center;gap:6px">
-              <span style="font-size:11px;color:var(--muted);min-width:52px">Owner:</span>
-              <select id="ownerSel_${code}" style="font-size:11px;padding:3px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text)">
-                <option value="">— pick staff —</option>
-                ${[...staffList].sort((a,b)=>a.name.localeCompare(b.name)).map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}
-              </select>
-              <button onclick="setAllUploadOwner('${code}')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid var(--accent);color:var(--accent);background:transparent;cursor:pointer">Set All</button>
             </div>
           </div>
           <span class="parse-status ${statusCls}">${statusText}</span>
@@ -7842,38 +7787,6 @@ function renderBreakdownSidebar() {
 // Sets ALL orders in a breakdown record to the same team in one shot —
 // fetches the current categories_json, maps every order to the new team,
 // writes back, then re-renders the card so the dropdowns update visually.
-async function setAllBreakdownOwner(breakdownId) {
-  const sel = document.getElementById(`bdSetAllStaff_${breakdownId}`);
-  const staffId = sel?.value;
-  if (!staffId) return showToast('Pick a staff member first', 'error');
-  const staff = staffList.find(s => String(s.id) === String(staffId));
-  const bd = await sb('nec_payslip_breakdown', { filter: `id=eq.${breakdownId}`, select: 'proxy_id,year,month,categories_json,distributor_code' });
-  if (!bd.length) return;
-  const b = bd[0];
-  const proxyUUID = (proxyList.find(p => String(p.id) === String(b.proxy_id)) ||
-                     proxyList.find(p => p.coway_id === String(b.distributor_code)) ||
-                     {}).id || b.proxy_id;
-  const orders = JSON.parse(b.categories_json || '[]');
-  const commAlgo = (staff.channel || 'DM').toLowerCase();
-  const upserts = orders.map(o => ({
-    year: parseInt(b.year), month: parseInt(b.month),
-    order_no: o.order_no, customer_name: o.customer_name,
-    proxy_id: parseInt(proxyUUID) || proxyUUID,
-    staff_id: parseInt(staffId) || staffId,
-    source: 'breakdown',
-    commission_algo: o.team === 'Outsider' ? 'outsider' : commAlgo
-  }));
-  try {
-    await fetch(`${SUPABASE_URL}/rest/v1/nec_order_assignments?on_conflict=year,month,proxy_id,order_no,customer_name`, {
-      method: 'POST',
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify(upserts)
-    });
-    showToast(`All ${orders.length} orders → ${staff.name} ✓`);
-    showBreakdown(breakdownId);
-  } catch(e) { showToast('Error: ' + e.message, 'error'); }
-}
-
 async function setAllBreakdownTeams(breakdownId, team) {
   try {
     const [rec] = await sb('nec_payslip_breakdown', { filter: `id=eq.${breakdownId}`, select: 'id,categories_json' });
@@ -8005,7 +7918,8 @@ async function bdAssignSave(btn) {
     // both new assignments and updates to existing ones atomically.
     const proxyVal = isNaN(parseInt(proxyid)) ? proxyid : parseInt(proxyid);
     const staffVal = parseInt(staffId) || staffId;
-    await fetch(`${SUPABASE_URL}/rest/v1/nec_order_assignments`, {
+    // on_conflict tells PostgREST which columns define uniqueness for upsert
+    const upsertResp = await fetch(`${SUPABASE_URL}/rest/v1/nec_order_assignments?on_conflict=year,month,proxy_id,order_no,customer_name`, {
       method: 'POST',
       headers: {
         'apikey': SUPABASE_KEY,
@@ -8020,6 +7934,10 @@ async function bdAssignSave(btn) {
         source: 'breakdown', commission_algo: commAlgo
       })
     });
+    if (!upsertResp.ok) {
+      const errText = await upsertResp.text();
+      throw new Error(errText);
+    }
     showToast(orderno + ' \u2192 ' + (staff?.name||'staff') + ' \u2713');
     if (modal) modal.remove();
     // Refresh breakdown
@@ -8134,12 +8052,15 @@ async function showBreakdown(id) {
       let assignedStaffMap = {};
       const _pUUID = proxyUUID; // bd.proxy_id integer
       try {
+        // Fetch all assignments for this year+month, then filter by proxy_id in JS
+        // to avoid text vs integer comparison issues in the DB filter
         const assignments = await sb('nec_order_assignments', {
-          filter: `proxy_id=eq.${_pUUID}&year=eq.${bd.year}&month=eq.${bd.month}`,
-          select: 'order_no,staff_id,commission_algo'
+          filter: `year=eq.${bd.year}&month=eq.${bd.month}`,
+          select: 'order_no,staff_id,commission_algo,proxy_id'
         });
-        console.log('[BD] assignments fetched:', assignments.length);
-        assignments.forEach(a => {
+        const filtered = assignments.filter(a => String(a.proxy_id) === String(_pUUID));
+        console.log('[BD] assignments fetched:', assignments.length, 'filtered:', filtered.length);
+        filtered.forEach(a => {
           const staff = staffList.find(s => String(s.id) === String(a.staff_id));
           if (staff) assignedStaffMap[String(a.order_no)] = { name: staff.name, algo: a.commission_algo, staff_id: staff.id };
         });
@@ -8183,26 +8104,18 @@ async function showBreakdown(id) {
         acTotal > 0 ? `<span style="color:#f97316">AC RM${fmtNum(acTotal)}</span>` : '',
         osTotal > 0 ? `<span style="color:var(--muted)">OS RM${fmtNum(osTotal)} (not billed)</span>` : '',
       ].filter(Boolean).join(' · ');
-      const bdStaffOpts = [...staffList].sort((a,b)=>a.name.localeCompare(b.name)).map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
       const setAllBtns = `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px">
         <div style="display:flex;align-items:center;gap:8px">
-          <span style="font-size:11px;color:var(--muted);min-width:52px">Team:</span>
+          <span style="font-size:11px;color:var(--muted);min-width:48px">Team:</span>
           <button onclick="setAllBreakdownTeams('${bdId}','New Era')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #2563eb;color:#2563eb;background:transparent;cursor:pointer">New Era</button>
           <button onclick="setAllBreakdownTeams('${bdId}','Alpha C')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #f97316;color:#f97316;background:transparent;cursor:pointer">Alpha C</button>
           <button onclick="setAllBreakdownTeams('${bdId}','Outsider')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid var(--muted);color:var(--muted);background:transparent;cursor:pointer">Outsider</button>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <span style="font-size:11px;color:var(--muted);min-width:52px">Channel:</span>
+          <span style="font-size:11px;color:var(--muted);min-width:48px">Channel:</span>
           <button onclick="setAllBreakdownChannels('${bdId}','DM')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #16a34a;color:#16a34a;background:transparent;cursor:pointer">DM</button>
           <button onclick="setAllBreakdownChannels('${bdId}','TM')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #a78bfa;color:#a78bfa;background:transparent;cursor:pointer">TM</button>
           <button onclick="setAllBreakdownChannels('${bdId}','XHS')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid var(--red);color:var(--red);background:transparent;cursor:pointer">XHS</button>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <span style="font-size:11px;color:var(--muted);min-width:52px">Owner:</span>
-          <select id="bdSetAllStaff_${bdId}" style="font-size:11px;padding:3px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text)">
-            <option value="">— pick staff —</option>${bdStaffOpts}
-          </select>
-          <button onclick="setAllBreakdownOwner('${bdId}')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid var(--accent);color:var(--accent);background:transparent;cursor:pointer">Set All</button>
         </div>
       </div>`;
       catHTML = rawCats.length > 0 ? `<div class="cat-section">
