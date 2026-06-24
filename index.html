@@ -7862,7 +7862,7 @@ async function updateOrderChannel(breakdownId, orderNo, channel) {
 function openBdAssignModal(event) {
   const cell = event.target.closest('.bd-assign-cell');
   if (!cell) return;
-  const { proxyid, year, month, orderno, custname, assignedid } = cell.dataset;
+  const { proxyid, year, month, orderno, custname, assignedid, orderteam, orderchannel } = cell.dataset;
 
   // Build the modal HTML inline
   const sorted = [...staffList].sort((a,b) => a.name.localeCompare(b.name));
@@ -7881,6 +7881,8 @@ function openBdAssignModal(event) {
   div.dataset.month = month;
   div.dataset.orderno = orderno;
   div.dataset.custname = custname;
+  div.dataset.orderteam = cell.dataset.orderteam || 'New Era';
+  div.dataset.orderchannel = cell.dataset.orderchannel || 'DM';
   div.innerHTML =
     '<div style="font-weight:700;font-size:14px;margin-bottom:4px">Assign Sales Owner</div>' +
     '<div style="font-size:11px;color:var(--muted);margin-bottom:12px">' + (custname||orderno) + '</div>' +
@@ -7913,10 +7915,12 @@ async function bdAssignSave(btn) {
     await sb('nec_order_assignments', { method: 'POST', body: {
       year: parseInt(year), month: parseInt(month),
       order_no: orderno, customer_name: custname,
-      proxy_id: proxyid,
+      proxy_id: (isNaN(parseInt(proxyid)) ? proxyid : parseInt(proxyid)),
       staff_id: parseInt(staffId) || staffId,
       source: 'breakdown',
-      commission_algo: (staff?.channel || 'DM').toLowerCase()
+      commission_algo: (modal.dataset.orderteam === 'Outsider')
+        ? 'outsider'
+        : (staff?.channel || modal.dataset.orderchannel || 'DM').toLowerCase()
     }});
     showToast(orderno + ' → ' + (staff?.name||'staff') + ' ✓');
     if (modal) modal.remove();
@@ -7990,15 +7994,12 @@ async function showBreakdown(id) {
   event?.target?.closest('.breakdown-proxy-item')?.classList.add('active');
 
   try {
-    // Fetch breakdown + join the related proxy_accounts to get its UUID
-    const [bd] = await sb('nec_payslip_breakdown', { filter: `id=eq.${id}`, select: '*,proxy_accounts(id)' });
-    // bd.proxy_accounts?.id is the real UUID (from the FK join).
-    // Fall back to proxyList lookup if join didn't work (RLS or no FK).
-    const _joinedProxyId = bd.proxy_accounts?.id;
-    const proxy = proxyList.find(p => String(p.id) === String(_joinedProxyId || bd.proxy_id))
+    const [bd] = await sb('nec_payslip_breakdown', { filter: `id=eq.${id}` });
+    const proxy = proxyList.find(p => String(p.id) === String(bd.proxy_id))
       || proxyList.find(p => p.coway_id === String(bd.distributor_code))
-      || { name: bd.distributor_code, id: _joinedProxyId || bd.proxy_id };
-    const proxyUUID = _joinedProxyId || proxy.id || bd.proxy_id;
+      || { name: bd.distributor_code, id: bd.proxy_id };
+    // proxyUUID: the actual DB uses the same proxy_id integer in all tables
+    const proxyUUID = bd.proxy_id;
     const rawCats = JSON.parse(bd.categories_json || '[]');
     const allowances = JSON.parse(bd.allowances_json || '[]');
     const tbc = parseFloat(bd.team_building_total || 0);
@@ -8033,8 +8034,7 @@ async function showBreakdown(id) {
       // Fetch staff assignments for this proxy/period to show who owns each order
       if (!staffList.length) await loadStaff();
       let assignedStaffMap = {};
-      // proxyUUID already resolved above via FK join
-      const _pUUID = proxyUUID;
+      const _pUUID = proxyUUID; // bd.proxy_id integer
       try {
         const assignments = await sb('nec_order_assignments', {
           filter: `proxy_id=eq.${_pUUID}&year=eq.${bd.year}&month=eq.${bd.month}`,
@@ -8065,6 +8065,8 @@ async function showBreakdown(id) {
           + ' data-orderno="' + (o.order_no||'') + '"'
           + ' data-custname="' + (o.customer_name||'').replace(/"/g,'&quot;') + '"'
           + ' data-assignedid="' + (assigned?.staff_id||'') + '"'
+          + ' data-orderteam="' + (o.team||'New Era') + '"'
+          + ' data-orderchannel="' + (o.channel||'DM') + '"'
           + ' style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">'
           + btnLabel + '</div>';
         return '<div class="order-row" style="' + (o.team==='Outsider'?'opacity:0.7':'') + '">' +
