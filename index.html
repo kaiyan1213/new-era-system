@@ -8192,6 +8192,7 @@ async function showBreakdown(id) {
         console.log('[BD] total assignments year/month:', assignments.length, '| proxy', _pUUID, proxy.id, '| filtered:', filtered.length, '| sample proxy_ids:', [...new Set(assignments.map(a=>a.proxy_id))].slice(0,5));
         filtered.forEach(a => {
           const staff = staffList.find(s => String(s.id) === String(a.staff_id));
+          console.log('[BD] order', a.order_no, 'staff_id:', a.staff_id, 'found:', staff?.name || 'NOT FOUND', '| staffList sample ids:', staffList.slice(0,3).map(s=>s.id));
           if (staff) assignedStaffMap[String(a.order_no)] = { name: staff.name, algo: a.commission_algo, staff_id: staff.id };
         });
       } catch(e) { /* non-fatal */ }
