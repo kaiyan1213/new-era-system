@@ -7938,7 +7938,7 @@ async function showBreakdown(id) {
       const orderRows = rawCats.map(o => {
         const assigned = assignedStaffMap[o.order_no];
         const assignedId = assigned ? (staffList.find(s => s.name === assigned.name) || {}).id || '' : '';
-        const soOpts = '<option value="">\u2014 assign \u2014</option>' + staffList.map(s =>
+        const soOpts = '<option value="">\u2014 assign \u2014</option>' + [...staffList].sort((a,b) => a.name.localeCompare(b.name)).map(s =>
           '<option value="' + s.id + '"' + (s.id === assignedId ? ' selected' : '') + '>' + s.name + '</option>'
         ).join('');
         const custEsc = (o.customer_name || '').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
