@@ -4964,9 +4964,42 @@ function generatePayrollRecordPayslip(recordId) {
 
 async function openPayrollEntryModal() {
   await loadStaff();
+  if (!managerList.length) await loadManagers();
+  const managerStaffIds = new Set(managerList.map(m => m.staff_id).filter(Boolean));
+
+  // Sort staff same as payroll table: NE-DM/TM/Admin/Editor/Content → AC-DM/TM/Admin/Content → Shared → Outsider → Manager
+  const getStaffSortKey = (s) => {
+    const isManager = managerStaffIds.has(s.id);
+    if (isManager) return [11, s.name];
+    const team = s.company_team || 'New Era';
+    const ch = (s.channel || '').toUpperCase();
+    const pos = (s.position || s.role || s.staff_type || '').toLowerCase();
+    const teamBase = team === 'Alpha C' ? 5 : team === 'Shared' ? 9 : 0;
+    const roleOff = ch === 'DM' ? 0 : ch === 'TM' ? 1 :
+      pos.includes('editor') ? 3 : pos.includes('content') ? 4 : 2;
+    return [teamBase + roleOff, s.name];
+  };
+
+  const getStaffLabel = (s) => {
+    const isManager = managerStaffIds.has(s.id);
+    if (isManager) return 'Manager';
+    const team = s.company_team || 'New Era';
+    const ch = s.channel || '';
+    const teamLabel = team === 'New Era' ? 'NE' : team === 'Alpha C' ? 'AC' : team;
+    if (ch) return `${teamLabel}-${ch}`;
+    const pos = (s.position || s.role || s.staff_type || '');
+    return `${teamLabel}-${pos}`;
+  };
+
+  const sorted = [...staffList].sort((a, b) => {
+    const [ka, na] = getStaffSortKey(a);
+    const [kb, nb] = getStaffSortKey(b);
+    return ka !== kb ? ka - kb : na.localeCompare(nb);
+  });
+
   const sel = document.getElementById('prStaff');
   sel.innerHTML = '<option value="">Select staff...</option>' +
-    staffList.map(s => `<option value="${s.id}" data-type="${s.staff_type}" data-comm="${s.commission_per_order}" data-salary="${s.base_salary}" data-epf="${s.epf_applicable ? '1' : '0'}">${s.name} (${s.staff_type})</option>`).join('');
+    sorted.map(s => `<option value="${s.id}" data-type="${s.staff_type}" data-comm="${s.commission_per_order}" data-salary="${s.base_salary}" data-epf="${s.epf_applicable ? '1' : '0'}">${s.name} (${getStaffLabel(s)})</option>`).join('');
   openModal('modalPayrollEntry');
 }
 
