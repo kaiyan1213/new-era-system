@@ -3668,14 +3668,16 @@ async function loadPayroll() {
       return;
     }
     // Sort: DM → TM → XHS → Admin → Manager, then alphabetical within each group
-    const typeOrder = { 'DM': 0, 'TM': 1, 'XHS': 2, 'admin': 3, 'manager': 4 };
+    const typeOrder = { 'DM': 0, 'TM': 1, 'XHS': 2, 'admin': 3, 'outsider_staff': 4, 'manager': 5 };
     filtered = [...filtered].sort((a, b) => {
       const sA = staffList.find(s => s.id === a.staff_id) || {};
       const sB = staffList.find(s => s.id === b.staff_id) || {};
-      const isManagerA = a.record_type === 'manager';
-      const isManagerB = b.record_type === 'manager';
-      const keyA = isManagerA ? 'manager' : (sA.channel || (sA.staff_type === 'admin' ? 'admin' : 'DM'));
-      const keyB = isManagerB ? 'manager' : (sB.channel || (sB.staff_type === 'admin' ? 'admin' : 'DM'));
+      const isManagerA = a.record_type === 'manager' || managerList.some(m => m.staff_id === a.staff_id);
+      const isManagerB = b.record_type === 'manager' || managerList.some(m => m.staff_id === b.staff_id);
+      const isOsA = !isManagerA && (a.commission_type === 'outsider') && sA.staff_type !== 'sales';
+      const isOsB = !isManagerB && (b.commission_type === 'outsider') && sB.staff_type !== 'sales';
+      const keyA = isManagerA ? 'manager' : isOsA ? 'outsider_staff' : (sA.channel || (sA.staff_type === 'admin' ? 'admin' : 'DM'));
+      const keyB = isManagerB ? 'manager' : isOsB ? 'outsider_staff' : (sB.channel || (sB.staff_type === 'admin' ? 'admin' : 'DM'));
       const orderDiff = (typeOrder[keyA] ?? 3) - (typeOrder[keyB] ?? 3);
       if (orderDiff !== 0) return orderDiff;
       return (sA.name || '').localeCompare(sB.name || '');
@@ -3683,13 +3685,16 @@ async function loadPayroll() {
     tbody.innerHTML = filtered.map(r => {
       const staff = staffList.find(s => s.id === r.staff_id) || { name: 'Unknown', staff_type: 'sales', channel: 'DM' };
       const isInvoice = isInvoiceRecord(r);
-      const isManager = r.record_type === 'manager';
+      const isManager = r.record_type === 'manager' || managerList.some(m => m.staff_id === r.staff_id);
+      const isOutsiderRecord = r.commission_type === 'outsider' || r.commission_type === 'outsider_only';
+      // Determine display type label
+      const typeLabel = isManager ? 'Manager' : (isOutsiderRecord && staff.staff_type !== 'sales' ? 'Outsider Staff' : staff.staff_type);
+      const typeBadgeColor = isManager ? 'color:#f59e0b;border-color:#f59e0b' : (isOutsiderRecord && staff.staff_type !== 'sales' ? 'color:#9ca3af;border-color:#9ca3af' : '');
       return `<tr>
         <td class="td-name">${staff.name}</td>
         <td>${staff.channel ? `<span class="badge badge-${staff.channel.toLowerCase()}">${staff.channel}</span>` : '<span class="td-muted">—</span>'}</td>
         <td>
-          <span class="badge badge-${isManager ? 'other' : (staff.staff_type === 'sales' ? 'dm' : 'other')}" style="${isManager ? 'color:#f59e0b;border-color:#f59e0b' : ''}">${isManager ? 'Manager' : staff.staff_type}</span>
-          ${r.commission_type === 'outsider' ? '<span class="badge badge-other" title="Full payslip commission, not from ads">Outsider</span>' : ''}
+          <span class="badge badge-other" style="${typeBadgeColor}">${typeLabel}</span>
           ${isInvoice ? '<span class="badge badge-other" style="color:var(--red)" title="Staff owes New Era back">Invoice</span>' : ''}
         </td>
         <td class="td-mono">${MONTHS[r.month]} ${r.year}</td>
