@@ -8032,9 +8032,22 @@ async function showBreakdown(id) {
       // Fetch staff assignments for this proxy/period to show who owns each order
       if (!staffList.length) await loadStaff();
       let assignedStaffMap = {};
-      const _pUUID = (proxyList.find(p => String(p.id) === String(bd.proxy_id)) ||
-                      proxyList.find(p => p.coway_id === String(bd.distributor_code)) ||
-                      {}).id || bd.proxy_id;
+      // Resolve real UUID: bd.proxy_id may be an integer (pre-migration data).
+      // Try proxyList first (fastest), then fetch from DB using coway_id.
+      let _pUUID = (proxyList.find(p => String(p.id) === String(bd.proxy_id)) ||
+                    proxyList.find(p => String(p.coway_id) === String(bd.distributor_code)) ||
+                    proxyList.find(p => p.name === proxy.name)
+                   )?.id;
+      if (!_pUUID) {
+        try {
+          const pRows = await sb('proxy_accounts', {
+            filter: `coway_id=eq.${bd.distributor_code}&is_active=eq.true`,
+            select: 'id'
+          });
+          _pUUID = pRows?.[0]?.id;
+        } catch(e) { /* fallback */ }
+      }
+      if (!_pUUID) _pUUID = bd.proxy_id; // last resort — may fail if int
       try {
         const assignments = await sb('nec_order_assignments', {
           filter: `proxy_id=eq.${_pUUID}&year=eq.${bd.year}&month=eq.${bd.month}`,
