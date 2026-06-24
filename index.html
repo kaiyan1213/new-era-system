@@ -6073,7 +6073,7 @@ let ccCardsLoaded = false;
 async function loadCreditCards(force = false) {
   if (ccCardsLoaded && !force) return;
   try {
-    ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true&order=card_name.asc' });
+    ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true&order=card_name.asc', select: 'id,card_name,bank,statement_day,due_day,owner_team' });
     ccCardsLoaded = true;
   } catch(e) { ccCards = []; } // table not set up yet — features degrade gracefully
 }
@@ -6462,8 +6462,13 @@ function renderCCTracker() {
       else if (daysLeft <= 3) dueBadge = `<span style="color:var(--yellow);font-size:10px;font-weight:700">${daysLeft===0?'DUE TODAY':`${daysLeft}d left`}</span>`;
     }
 
+    const ownerTeamOpts = ['NE — Kai Yan','NE — Carine','NE — Chloe','NE — Jess','AC — Kai Yan','AC — Carine','AC — Chloe','AC — Jess','Shared','Other'].map(t=>
+      `<option value="${t}"${(card.owner_team||'')===t?' selected':''}>${t}</option>`).join('');
     return `<tr>
       <td class="td-name">${card.card_name}${card.bank ? `<div class="td-muted" style="font-size:10px">${card.bank}</div>` : ''}</td>
+      <td><select style="font-size:11px;padding:3px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);min-width:120px" onchange="updateCCCardOwner('${card.id}',this.value)">
+        <option value="">— team —</option>${ownerTeamOpts}
+      </select></td>
       <td><input type="number" step="0.01" value="${statementAmt || ''}" placeholder="0.00" style="width:110px;font-family:var(--mono)" onchange="upsertCCStatement('${card.id}',${year},${month},{statement_amount:parseFloat(this.value)||0})"></td>
       <td><input type="number" step="0.01" value="${paymentAmt || ''}" placeholder="0.00" style="width:110px;font-family:var(--mono)" onchange="upsertCCStatement('${card.id}',${year},${month},{payment_amount:parseFloat(this.value)||0})"></td>
       <td class="td-mono" style="color:${balance>0?'var(--red)':'var(--green)'}">${fmtNum(balance)}</td>
@@ -6480,11 +6485,7 @@ function renderCCTracker() {
         </div>
         ${dueBadge ? `<div style="margin-top:2px">${dueBadge}</div>` : ''}
       </td>
-<<<<<<< Updated upstream
-      <td>${isPaid ? `<span class="badge badge-paid">✓ Paid${s.payment_date ? ' '+s.payment_date : ''}</span>` : `<span class="badge" style="background:rgba(239,68,68,0.15);color:var(--red)">Unpaid</span>`}</td>
-=======
       <td>${isPaid ? `<span class="badge badge-paid">✓ Paid${s.payment_date ? ' '+s.payment_date : ''}</span>` : `<span class="badge" style="background:rgba(220,38,38,0.15);color:var(--red)">Unpaid</span>`}</td>
->>>>>>> Stashed changes
       <td>
         <button class="btn btn-ghost btn-sm" onclick="toggleCCPaid('${card.id}',${year},${month},${isPaid})">${isPaid ? 'Unmark' : 'Mark Paid'}</button>
       </td>
@@ -6496,7 +6497,7 @@ function renderCCTracker() {
     <td class="td-mono">${fmtNum(totalStatement)}</td>
     <td class="td-mono">${fmtNum(totalPayment)}</td>
     <td class="td-mono" style="color:${totalBalance>0?'var(--red)':'var(--green)'}">${fmtNum(totalBalance)}</td>
-    <td colspan="4"></td>
+    <td colspan="5"></td>
   </tr>`;
 }
 
@@ -6530,6 +6531,20 @@ function editCCDate(cardId, year, month, field, currentVal) {
     setTimeout(() => { if (container.querySelector('input')) { container.innerHTML = oldHTML; } }, 200);
   });
   input.addEventListener('keydown', e => { if (e.key === 'Escape') { container.innerHTML = oldHTML; } });
+}
+
+async function updateCCCardOwner(cardId, ownerTeam) {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/nec_credit_cards?id=eq.${cardId}`, {
+      method: 'PATCH',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ owner_team: ownerTeam })
+    });
+    // Refresh ccCards in memory
+    const idx = ccCards.findIndex(c => c.id === cardId);
+    if (idx >= 0) ccCards[idx].owner_team = ownerTeam;
+    showToast('Team updated ✓');
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
 async function upsertCCStatement(cardId, year, month, patch) {
@@ -7847,18 +7862,22 @@ async function assignBdOrderStaff(breakdownId, orderNo, staffId, proxyId, year, 
   const customerName = decodeURIComponent(customerNameEncoded);
   const staff = staffList.find(s => s.id === parseInt(staffId));
   try {
+    // Always delete any existing assignment for this order first (broad match —
+    // don't filter on customer_name because it might differ slightly in encoding)
+    await sbDelete('nec_order_assignments', `year=eq.${year}&month=eq.${month}&proxy_id=eq.${proxyId}&order_no=eq.${orderNo}`);
     if (!staffId) {
-      // Clear assignment
-      await sbDelete('nec_order_assignments', `year=eq.${year}&month=eq.${month}&proxy_id=eq.${proxyId}&order_no=eq.${orderNo}`);
       showToast('Assignment cleared');
+      // Update the select UI color to muted
       return;
     }
     const commAlgo = (staff?.channel || 'DM').toLowerCase();
-    await sbDelete('nec_order_assignments', `year=eq.${year}&month=eq.${month}&proxy_id=eq.${proxyId}&order_no=eq.${orderNo}&customer_name=eq.${encodeURIComponent(customerName)}`);
     await sb('nec_order_assignments', {
       method: 'POST',
-      body: { year, month, order_no: orderNo, customer_name: customerName, proxy_id: proxyId, staff_id: parseInt(staffId), source: 'breakdown', commission_algo: commAlgo }
+      body: { year: parseInt(year), month: parseInt(month), order_no: orderNo, customer_name: customerName, proxy_id: parseInt(proxyId), staff_id: parseInt(staffId), source: 'breakdown', commission_algo: commAlgo }
     });
+    // Update the dropdown colour to accent so user sees it saved
+    const sel = event?.target;
+    if (sel) sel.style.color = 'var(--accent)';
     showToast(`${orderNo} → ${staff?.name || 'staff'} ✓`);
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
