@@ -7858,6 +7858,87 @@ async function updateOrderChannel(breakdownId, orderNo, channel) {
 
 // Assign a staff member to a specific order from the Breakdown page.
 // Saves to nec_order_assignments so Auto Commission Matching picks it up.
+// BD Assign modal — opens a small panel to pick a staff member for an order row
+function openBdAssignModal(event) {
+  const cell = event.target.closest('.bd-assign-cell');
+  if (!cell) return;
+  const { proxyid, year, month, orderno, custname, assignedid } = cell.dataset;
+
+  // Build the modal HTML inline
+  const sorted = [...staffList].sort((a,b) => a.name.localeCompare(b.name));
+  const opts = sorted.map(s =>
+    '<option value="' + s.id + '"' + (String(s.id) === String(assignedid) ? ' selected' : '') + '>' + s.name + '</option>'
+  ).join('');
+
+  const existing = document.getElementById('bdAssignFloating');
+  if (existing) existing.remove();
+
+  const div = document.createElement('div');
+  div.id = 'bdAssignFloating';
+  div.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9999;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;min-width:300px;box-shadow:0 8px 32px rgba(0,0,0,0.25)';
+  div.dataset.proxyid = proxyid;
+  div.dataset.year = year;
+  div.dataset.month = month;
+  div.dataset.orderno = orderNo;
+  div.dataset.custname = customerName;
+  div.innerHTML =
+    '<div style="font-weight:700;font-size:14px;margin-bottom:4px">Assign Sales Owner</div>' +
+    '<div style="font-size:11px;color:var(--muted);margin-bottom:12px">' + (custname||orderno) + '</div>' +
+    '<select id="bdAssignSel" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--input-bg);color:var(--text);font-size:13px;margin-bottom:12px">' +
+    '<option value="">— assign —</option>' + opts + '</select>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+    '<button class="btn btn-ghost" onclick="document.getElementById(\'bdAssignFloating\').remove()">Cancel</button>' +
+    '<button class="btn btn-danger btn-sm" onclick="bdAssignClear(this)">Clear</button>' +
+    '<button class="btn btn-primary" onclick="bdAssignSave(this)">Save</button>' +
+    '</div>';
+
+  document.body.appendChild(div);
+  document.getElementById('bdAssignSel').focus();
+
+  // Close on backdrop click
+  setTimeout(() => {
+    const backdrop = (e) => { if (!div.contains(e.target)) { div.remove(); document.removeEventListener('click', backdrop); } };
+    document.addEventListener('click', backdrop);
+  }, 100);
+}
+
+async function bdAssignSave(btn) {
+  const modal = document.getElementById('bdAssignFloating');
+  const { proxyid, year, month, orderno, custname } = modal.dataset;
+  const staffId = document.getElementById('bdAssignSel')?.value;
+  if (!staffId) return showToast('Pick a staff member', 'error');
+  const staff = staffList.find(s => String(s.id) === String(staffId));
+  try {
+    await sbDelete('nec_order_assignments', 'year=eq.' + year + '&month=eq.' + month + '&proxy_id=eq.' + proxyid + '&order_no=eq.' + orderno);
+    await sb('nec_order_assignments', { method: 'POST', body: {
+      year: parseInt(year), month: parseInt(month),
+      order_no: orderno, customer_name: custname,
+      proxy_id: parseInt(proxyid) || proxyid,
+      staff_id: parseInt(staffId) || staffId,
+      source: 'breakdown',
+      commission_algo: (staff?.channel || 'DM').toLowerCase()
+    }});
+    showToast(orderno + ' → ' + (staff?.name||'staff') + ' ✓');
+    if (modal) modal.remove();
+    // Refresh breakdown
+    const active = document.querySelector('.breakdown-proxy-item.active');
+    if (active) { const id = active.dataset.bdId || active.onclick?.toString().match(/showBreakdown\('([^']+)'/)?.[1]; if (id) showBreakdown(id); }
+    else document.querySelector('.breakdown-proxy-item')?.click();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function bdAssignClear(btn) {
+  const modal = document.getElementById('bdAssignFloating');
+  const { proxyid, year, month, orderno } = modal.dataset;
+  try {
+    await sbDelete('nec_order_assignments', 'year=eq.' + year + '&month=eq.' + month + '&proxy_id=eq.' + proxyid + '&order_no=eq.' + orderno);
+    showToast('Assignment cleared');
+    if (modal) modal.remove();
+    const active = document.querySelector('.breakdown-proxy-item.active');
+    if (active) active.click();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
 function handleBdStaffChange(sel) {
   const { bdid, orderno, proxyid, year, month, cust } = sel.dataset;
   assignBdOrderStaff(bdid, orderno, sel.value, proxyid, parseInt(year), parseInt(month), cust);
@@ -7968,12 +8049,20 @@ async function showBreakdown(id) {
       const ordersTotal = r2(rawCats.reduce((s,o) => s + parseFloat(o.total_com||0), 0));
       const orderRows = rawCats.map(o => {
         const assigned = assignedStaffMap[String(o.order_no)];
-        const assignedId = assigned?.staff_id || (assigned ? (staffList.find(s => s.name === assigned.name) || {}).id || '' : '');
-        const soOpts = '<option value="">\u2014 assign \u2014</option>' + [...staffList].sort((a,b) => a.name.localeCompare(b.name)).map(s =>
-          '<option value="' + s.id + '"' + (String(s.id) === String(assignedId) ? ' selected' : '') + '>' + s.name + '</option>'
-        ).join('');
-        const custEsc = (o.customer_name || '').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-        const staffCell = '<select class="bd-staff-sel" data-bdid="' + bdId + '" data-orderno="' + (o.order_no||'') + '" data-proxyid="' + bd.proxy_id + '" data-year="' + bd.year + '" data-month="' + bd.month + '" data-cust="' + custEsc + '" style="font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--accent);cursor:pointer;width:100%" onchange="handleBdStaffChange(this)">'+soOpts+'</select>';
+        const assignedName = assigned?.name || '';
+        // Simple button — no inline dropdown, avoids all proxy_id type issues
+        const btnLabel = assignedName
+          ? '<span style="font-size:10px;color:var(--accent)">' + assignedName + '</span> <button style="font-size:10px;padding:1px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);cursor:pointer" onclick="openBdAssignModal(event)">✎</button>'
+          : '<button style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid var(--accent);background:transparent;color:var(--accent);cursor:pointer" onclick="openBdAssignModal(event)">+ Assign</button>';
+        const staffCell = '<div class="bd-assign-cell"'
+          + ' data-proxyid="' + bd.proxy_id + '"'
+          + ' data-year="' + bd.year + '"'
+          + ' data-month="' + bd.month + '"'
+          + ' data-orderno="' + (o.order_no||'') + '"'
+          + ' data-custname="' + (o.customer_name||'').replace(/"/g,'&quot;') + '"'
+          + ' data-assignedid="' + (assigned?.staff_id||'') + '"'
+          + ' style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">'
+          + btnLabel + '</div>';
         return '<div class="order-row" style="' + (o.team==='Outsider'?'opacity:0.7':'') + '">' +
           '<span style="color:var(--muted);font-family:var(--mono)">' + (o.order_no || '\u2014') + '</span>' +
           '<span>' + (o.customer_name || '\u2014') + '</span>' +
