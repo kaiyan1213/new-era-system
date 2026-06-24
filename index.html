@@ -4214,10 +4214,22 @@ async function previewAutoCommission() {
 
         proxyNames.forEach(pName => {
           const orders = mgrGroups[mgr][pName];
-          // Proxy sub-header
-          orphanHtml += `<div style="display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-bottom:4px;margin-top:8px">
+          // Proxy sub-header with Set All controls
+          const pgId = `og_${mgr.replace(/\W/g,'_')}_${pName.replace(/\W/g,'_')}`;
+          orphanHtml += `<div style="display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-bottom:4px;margin-top:8px;flex-wrap:wrap">
             <span style="font-size:12px;font-weight:600;color:var(--text)">${pName}</span>
             <span style="font-size:11px;color:var(--muted)">${orders.length} order${orders.length>1?'s':''}</span>
+            <span style="flex:1"></span>
+            <select id="${pgId}_team" style="font-size:11px;padding:2px 5px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text)">
+              <option value="New Era">NE</option><option value="Alpha C">AC</option><option value="Outsider">OS</option>
+            </select>
+            <select id="${pgId}_staff" style="font-size:11px;padding:2px 5px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text)">
+              <option value="">— owner —</option>${staffOptsHtml}
+            </select>
+            <select id="${pgId}_algo" style="font-size:11px;padding:2px 5px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text)">
+              <option value="dm">DM</option><option value="tm">TM</option><option value="outsider">OS</option>
+            </select>
+            <button onclick="setAllOrphanGroup('${pgId}',${JSON.stringify(orders.map(o=>o._i))})" style="font-size:11px;padding:2px 10px;border-radius:4px;border:1px solid var(--accent);color:var(--accent);background:transparent;cursor:pointer">Set All</button>
           </div>`;
           // Orders table for this proxy
           orphanHtml += `<table style="margin-bottom:4px"><thead><tr><th>Order No</th><th>Customer</th><th>Team</th><th>Assign To</th></tr></thead><tbody>`;
@@ -4274,6 +4286,27 @@ function updateOrphanAlgoDefault(i) {
   const selectedOption = sel?.options[sel.selectedIndex];
   const defaultAlgo = selectedOption?.dataset?.algo || 'dm';
   if (algoSel) algoSel.value = defaultAlgo;
+}
+
+async function setAllOrphanGroup(pgId, indices) {
+  const teamSel = document.getElementById(pgId + '_team');
+  const staffSel = document.getElementById(pgId + '_staff');
+  const algoSel = document.getElementById(pgId + '_algo');
+  const team = teamSel?.value || 'New Era';
+  const staffId = staffSel?.value;
+  const algo = team === 'Outsider' ? 'outsider' : (algoSel?.value || 'dm');
+  if (!staffId) return showToast('Pick a staff member first', 'error');
+  const staff = staffList.find(s => String(s.id) === String(staffId));
+  for (const i of indices) {
+    const tEl = document.getElementById('orphanTeam_' + i);
+    const sEl = document.getElementById('orphanAssign_' + i);
+    const aEl = document.getElementById('orphanAlgo_' + i);
+    if (tEl) { tEl.value = team; tEl.style.color = teamColorHex(team); }
+    if (sEl) sEl.value = staffId;
+    if (aEl) aEl.value = algo;
+    await assignOrphanOrder(i);
+  }
+  showToast(indices.length + ' orders → ' + (staff?.name||'staff') + ' ✓');
 }
 
 async function assignOrphanOrder(i) {
@@ -7238,6 +7271,16 @@ function syncChannelOnTeamChange(code, orderNo, team) {
   }
 }
 
+function setAllUploadOwner(code) {
+  const sel = document.getElementById(`ownerSel_${code}`);
+  const staffId = sel?.value;
+  if (!staffId) return showToast('Pick a staff first', 'error');
+  // Set every staff dropdown in this card
+  document.querySelectorAll(`[data-code="${code}"] select[id^="staffSel_"]`).forEach(s => { s.value = staffId; });
+  const staff = staffList.find(s => String(s.id) === String(staffId));
+  showToast(`All set → ${staff?.name || 'staff'}`);
+}
+
 function setAllOrderTeams(code, team) {
   // Set the proxy-level default
   _teamMap[code] = team;
@@ -7454,6 +7497,14 @@ function buildParseResultHTML(result) {
                 style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid var(--red);background:var(--surface2);color:var(--red);cursor:pointer;font-weight:${defaultChannel==='XHS'?'700':'400'}">
                 XHS
               </button>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-size:11px;color:var(--muted);min-width:52px">Owner:</span>
+              <select id="ownerSel_${code}" style="font-size:11px;padding:3px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text)">
+                <option value="">— pick owner —</option>
+                ${[...staffList].sort((a,b2)=>a.name.localeCompare(b2.name)).map(s=>'<option value="'+s.id+'">'+s.name+'</option>').join('')}
+              </select>
+              <button onclick="setAllUploadOwner('${code}')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid var(--accent);color:var(--accent);background:transparent;cursor:pointer">Set All</button>
             </div>
           </div>
           <span class="parse-status ${statusCls}">${statusText}</span>
@@ -7787,6 +7838,36 @@ function renderBreakdownSidebar() {
 // Sets ALL orders in a breakdown record to the same team in one shot —
 // fetches the current categories_json, maps every order to the new team,
 // writes back, then re-renders the card so the dropdowns update visually.
+async function setAllBreakdownOwner(breakdownId) {
+  const sel = document.getElementById(`bdSetAllStaff_${breakdownId}`);
+  const staffId = sel?.value;
+  if (!staffId) return showToast('Pick a staff member first', 'error');
+  const staff = staffList.find(s => String(s.id) === String(staffId));
+  const bdRows = await sb('nec_payslip_breakdown', { filter: `id=eq.${breakdownId}`, select: 'proxy_id,year,month,categories_json,distributor_code' });
+  if (!bdRows.length) return;
+  const b = bdRows[0];
+  const proxyVal = isNaN(parseInt(b.proxy_id)) ? b.proxy_id : parseInt(b.proxy_id);
+  const staffVal = parseInt(staffId) || staffId;
+  const commAlgo = (staff?.channel || 'DM').toLowerCase();
+  const orders = JSON.parse(b.categories_json || '[]').filter(o => o.order_no);
+  if (!orders.length) return showToast('No orders', 'error');
+  let ok = 0;
+  for (const o of orders) {
+    try {
+      await fetch(`${SUPABASE_URL}/rest/v1/nec_order_assignments?year=eq.${b.year}&month=eq.${b.month}&proxy_id=eq.${proxyVal}&order_no=eq.${encodeURIComponent(o.order_no)}`,
+        { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/nec_order_assignments`, {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ year: parseInt(b.year), month: parseInt(b.month), order_no: o.order_no, customer_name: o.customer_name||'', proxy_id: proxyVal, staff_id: staffVal, source: 'breakdown', commission_algo: o.team==='Outsider'?'outsider':commAlgo })
+      });
+      if (r.ok) ok++;
+    } catch(e) {}
+  }
+  showToast(`${ok}/${orders.length} orders → ${staff?.name} ✓`);
+  showBreakdown(breakdownId);
+}
+
 async function setAllBreakdownTeams(breakdownId, team) {
   try {
     const [rec] = await sb('nec_payslip_breakdown', { filter: `id=eq.${breakdownId}`, select: 'id,categories_json' });
@@ -8100,18 +8181,26 @@ async function showBreakdown(id) {
         acTotal > 0 ? `<span style="color:#f97316">AC RM${fmtNum(acTotal)}</span>` : '',
         osTotal > 0 ? `<span style="color:var(--muted)">OS RM${fmtNum(osTotal)} (not billed)</span>` : '',
       ].filter(Boolean).join(' · ');
+      const bdStaffOpts = [...staffList].sort((a,b)=>a.name.localeCompare(b.name)).map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
       const setAllBtns = `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px">
         <div style="display:flex;align-items:center;gap:8px">
-          <span style="font-size:11px;color:var(--muted);min-width:48px">Team:</span>
+          <span style="font-size:11px;color:var(--muted);min-width:52px">Team:</span>
           <button onclick="setAllBreakdownTeams('${bdId}','New Era')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #2563eb;color:#2563eb;background:transparent;cursor:pointer">New Era</button>
           <button onclick="setAllBreakdownTeams('${bdId}','Alpha C')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #f97316;color:#f97316;background:transparent;cursor:pointer">Alpha C</button>
           <button onclick="setAllBreakdownTeams('${bdId}','Outsider')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid var(--muted);color:var(--muted);background:transparent;cursor:pointer">Outsider</button>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <span style="font-size:11px;color:var(--muted);min-width:48px">Channel:</span>
+          <span style="font-size:11px;color:var(--muted);min-width:52px">Channel:</span>
           <button onclick="setAllBreakdownChannels('${bdId}','DM')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #16a34a;color:#16a34a;background:transparent;cursor:pointer">DM</button>
           <button onclick="setAllBreakdownChannels('${bdId}','TM')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #a78bfa;color:#a78bfa;background:transparent;cursor:pointer">TM</button>
           <button onclick="setAllBreakdownChannels('${bdId}','XHS')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid var(--red);color:var(--red);background:transparent;cursor:pointer">XHS</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:11px;color:var(--muted);min-width:52px">Owner:</span>
+          <select id="bdSetAllStaff_${bdId}" style="font-size:11px;padding:3px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text)">
+            <option value="">— pick owner —</option>${bdStaffOpts}
+          </select>
+          <button onclick="setAllBreakdownOwner('${bdId}')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid var(--accent);color:var(--accent);background:transparent;cursor:pointer">Set All</button>
         </div>
       </div>`;
       catHTML = rawCats.length > 0 ? `<div class="cat-section">
