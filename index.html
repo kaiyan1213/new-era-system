@@ -7945,7 +7945,7 @@ async function showBreakdown(id) {
           filter: `proxy_id=eq.${b.proxy_id}&year=eq.${b.year}&month=eq.${b.month}`,
           select: 'order_no,staff_id,commission_algo'
         });
-        console.log('[BD] assignments fetched for proxy', b.proxy_id, ':', assignments.length, 'records', assignments);
+        console.log('[BD] assignments fetched:', assignments.length);
         assignments.forEach(a => {
           const staff = staffList.find(s => String(s.id) === String(a.staff_id));
           if (staff) assignedStaffMap[String(a.order_no)] = { name: staff.name, algo: a.commission_algo, staff_id: staff.id };
@@ -7962,7 +7962,7 @@ async function showBreakdown(id) {
           '<option value="' + s.id + '"' + (s.id === assignedId ? ' selected' : '') + '>' + s.name + '</option>'
         ).join('');
         const custEsc = (o.customer_name || '').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-        const staffCell = '<select style="font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--accent);cursor:pointer;width:100%" onchange="assignBdOrderStaff(\'' + bdId + '\',\'' + (o.order_no||'') + '\',this.value,' + b.proxy_id + ',' + b.year + ',' + b.month + ',\''+custEsc+'\')">'+soOpts+'</select>';
+        const staffCell = '<select style="font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--accent);cursor:pointer;width:100%" onchange="assignBdOrderStaff(\'' + bdId + '\',\'' + (o.order_no||'') + '\',this.value,\'' + b.proxy_id + '\',' + b.year + ',' + b.month + ',\''+custEsc+'\')">'+soOpts+'</select>';
         return '<div class="order-row" style="' + (o.team==='Outsider'?'opacity:0.7':'') + '">' +
           '<span style="color:var(--muted);font-family:var(--mono)">' + (o.order_no || '\u2014') + '</span>' +
           '<span>' + (o.customer_name || '\u2014') + '</span>' +
