@@ -7882,7 +7882,10 @@ async function setAllBreakdownOwner(breakdownId, selectedOnly = false) {
   const bdRows = await sb('nec_payslip_breakdown', { filter: `id=eq.${breakdownId}`, select: 'proxy_id,year,month,categories_json,distributor_code' });
   if (!bdRows.length) return;
   const b = bdRows[0];
-  const proxyVal = isNaN(parseInt(b.proxy_id)) ? b.proxy_id : parseInt(b.proxy_id);
+  // Look up real UUID from proxyList (same as bdAssignSave uses via data-proxyid)
+  const _proxyEntry = proxyList.find(p => String(p.id) === String(b.proxy_id))
+                   || proxyList.find(p => p.coway_id === String(b.distributor_code));
+  const proxyVal = _proxyEntry?.id || b.proxy_id;
   const staffVal = staffId; // always use the raw dropdown value (UUID)
   const commAlgo = (staff?.channel || 'DM').toLowerCase();
   let orders = JSON.parse(b.categories_json || '[]').filter(o => o.order_no);
@@ -8149,8 +8152,9 @@ async function showBreakdown(id) {
     const proxy = proxyList.find(p => String(p.id) === String(bd.proxy_id))
       || proxyList.find(p => p.coway_id === String(bd.distributor_code))
       || { name: bd.distributor_code, id: bd.proxy_id };
-    // proxyUUID: the actual DB uses the same proxy_id integer in all tables
-    const proxyUUID = bd.proxy_id;
+    // proxyUUID: use proxy.id (UUID from proxyList) as the canonical key
+    // This is what bdAssignSave stores (via data-proxyid = proxy.id || bd.proxy_id)
+    const proxyUUID = proxy.id || bd.proxy_id;
     const rawCats = JSON.parse(bd.categories_json || '[]');
     const allowances = JSON.parse(bd.allowances_json || '[]');
     const tbc = parseFloat(bd.team_building_total || 0);
@@ -8199,7 +8203,7 @@ async function showBreakdown(id) {
           String(a.proxy_id) === String(_pUUID) ||
           (proxy.id && String(a.proxy_id) === String(proxy.id))
         );
-        console.log('[BD] total assignments year/month:', assignments.length, '| proxy', _pUUID, proxy.id, '| filtered:', filtered.length, '| sample proxy_ids:', [...new Set(assignments.map(a=>a.proxy_id))].slice(0,5));
+        console.log('[BD] proxy.id:', proxy.id, '| bd.proxy_id:', bd.proxy_id, '| proxyUUID used:', _pUUID, '| filtered:', filtered.length, '| sample proxy_ids in DB:', [...new Set(assignments.map(a=>a.proxy_id))].slice(0,5));
         filtered.forEach(a => {
           // Match by UUID id (new format) or by staff_name (fallback for old integer-id records)
           const staff = staffList.find(s => String(s.id) === String(a.staff_id))
