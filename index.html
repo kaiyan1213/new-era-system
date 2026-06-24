@@ -7910,19 +7910,30 @@ async function bdAssignSave(btn) {
   const staffId = document.getElementById('bdAssignSel')?.value;
   if (!staffId) return showToast('Pick a staff member', 'error');
   const staff = staffList.find(s => String(s.id) === String(staffId));
+  const commAlgo = (modal.dataset.orderteam === 'Outsider')
+    ? 'outsider'
+    : (staff?.channel || modal.dataset.orderchannel || 'DM').toLowerCase();
   try {
-    await sbDelete('nec_order_assignments', 'year=eq.' + year + '&month=eq.' + month + '&proxy_id=eq.' + proxyid + '&order_no=eq.' + orderno);
-    await sb('nec_order_assignments', { method: 'POST', body: {
-      year: parseInt(year), month: parseInt(month),
-      order_no: orderno, customer_name: custname,
-      proxy_id: (isNaN(parseInt(proxyid)) ? proxyid : parseInt(proxyid)),
-      staff_id: parseInt(staffId) || staffId,
-      source: 'breakdown',
-      commission_algo: (modal.dataset.orderteam === 'Outsider')
-        ? 'outsider'
-        : (staff?.channel || modal.dataset.orderchannel || 'DM').toLowerCase()
-    }});
-    showToast(orderno + ' → ' + (staff?.name||'staff') + ' ✓');
+    // Use upsert (POST with Prefer: resolution=merge-duplicates) to handle
+    // both new assignments and updates to existing ones atomically.
+    const proxyVal = isNaN(parseInt(proxyid)) ? proxyid : parseInt(proxyid);
+    const staffVal = parseInt(staffId) || staffId;
+    await fetch(`${SUPABASE_URL}/rest/v1/nec_order_assignments`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates,return=minimal'
+      },
+      body: JSON.stringify({
+        year: parseInt(year), month: parseInt(month),
+        order_no: orderno, customer_name: custname,
+        proxy_id: proxyVal, staff_id: staffVal,
+        source: 'breakdown', commission_algo: commAlgo
+      })
+    });
+    showToast(orderno + ' \u2192 ' + (staff?.name||'staff') + ' \u2713');
     if (modal) modal.remove();
     // Refresh breakdown
     const active = document.querySelector('.breakdown-proxy-item.active');
