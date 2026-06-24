@@ -6462,7 +6462,7 @@ function renderCCTracker() {
       else if (daysLeft <= 3) dueBadge = `<span style="color:var(--yellow);font-size:10px;font-weight:700">${daysLeft===0?'DUE TODAY':`${daysLeft}d left`}</span>`;
     }
 
-    const ownerTeamOpts = ['NE — Kai Yan','NE — Carine','NE — Chloe','NE — Jess','AC — Kai Yan','AC — Carine','AC — Chloe','AC — Jess','Shared','Other'].map(t=>
+    const ownerTeamOpts = ['NE — Chloe','NE — Carine','Alpha C','Shared','Other'].map(t=>
       `<option value="${t}"${(card.owner_team||'')===t?' selected':''}>${t}</option>`).join('');
     return `<tr>
       <td class="td-name">${card.card_name}${card.bank ? `<div class="td-muted" style="font-size:10px">${card.bank}</div>` : ''}</td>
@@ -7879,7 +7879,7 @@ async function assignBdOrderStaff(breakdownId, orderNo, staffId, proxyId, year, 
     const sel = event?.target;
     if (sel) sel.style.color = 'var(--accent)';
     showToast(`${orderNo} → ${staff?.name || 'staff'} ✓`);
-  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+  } catch(e) { console.error('assignBdOrderStaff error:', e); showToast('Save error: ' + e.message, 'error'); }
 }
 
 async function setAllBreakdownChannels(breakdownId, channel) {
@@ -7945,9 +7945,10 @@ async function showBreakdown(id) {
           filter: `proxy_id=eq.${b.proxy_id}&year=eq.${b.year}&month=eq.${b.month}`,
           select: 'order_no,staff_id,commission_algo'
         });
+        console.log('[BD] assignments fetched for proxy', b.proxy_id, ':', assignments.length, 'records', assignments);
         assignments.forEach(a => {
-          const staff = staffList.find(s => s.id === a.staff_id);
-          if (staff) assignedStaffMap[a.order_no] = { name: staff.name, algo: a.commission_algo };
+          const staff = staffList.find(s => String(s.id) === String(a.staff_id));
+          if (staff) assignedStaffMap[String(a.order_no)] = { name: staff.name, algo: a.commission_algo, staff_id: staff.id };
         });
       } catch(e) { /* non-fatal */ }
       const neTotal = r2(rawCats.filter(o=>!o.team||o.team==='New Era').reduce((s,o)=>s+parseFloat(o.total_com||0),0));
@@ -7955,8 +7956,8 @@ async function showBreakdown(id) {
       const osTotal = r2(rawCats.filter(o=>o.team==='Outsider').reduce((s,o)=>s+parseFloat(o.total_com||0),0));
       const ordersTotal = r2(rawCats.reduce((s,o) => s + parseFloat(o.total_com||0), 0));
       const orderRows = rawCats.map(o => {
-        const assigned = assignedStaffMap[o.order_no];
-        const assignedId = assigned ? (staffList.find(s => s.name === assigned.name) || {}).id || '' : '';
+        const assigned = assignedStaffMap[String(o.order_no)];
+        const assignedId = assigned?.staff_id || (assigned ? (staffList.find(s => s.name === assigned.name) || {}).id || '' : '');
         const soOpts = '<option value="">\u2014 assign \u2014</option>' + [...staffList].sort((a,b) => a.name.localeCompare(b.name)).map(s =>
           '<option value="' + s.id + '"' + (s.id === assignedId ? ' selected' : '') + '>' + s.name + '</option>'
         ).join('');
