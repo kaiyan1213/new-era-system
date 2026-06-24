@@ -7874,7 +7874,7 @@ function renderBreakdownSidebar() {
 // Sets ALL orders in a breakdown record to the same team in one shot —
 // fetches the current categories_json, maps every order to the new team,
 // writes back, then re-renders the card so the dropdowns update visually.
-async function setAllBreakdownOwner(breakdownId) {
+async function setAllBreakdownOwner(breakdownId, selectedOnly = false) {
   const sel = document.getElementById(`bdSetAllStaff_${breakdownId}`);
   const staffId = sel?.value;
   if (!staffId) return showToast('Pick a staff member first', 'error');
@@ -7885,7 +7885,12 @@ async function setAllBreakdownOwner(breakdownId) {
   const proxyVal = isNaN(parseInt(b.proxy_id)) ? b.proxy_id : parseInt(b.proxy_id);
   const staffVal = staffId; // always use the raw dropdown value (UUID)
   const commAlgo = (staff?.channel || 'DM').toLowerCase();
-  const orders = JSON.parse(b.categories_json || '[]').filter(o => o.order_no);
+  let orders = JSON.parse(b.categories_json || '[]').filter(o => o.order_no);
+  if (selectedOnly) {
+    const checkedNos = new Set([...document.querySelectorAll(`.bd-order-chk[data-bdid="${breakdownId}"]:checked`)].map(c => c.dataset.orderno));
+    if (!checkedNos.size) return showToast('Tick some orders first', 'error');
+    orders = orders.filter(o => checkedNos.has(String(o.order_no)));
+  }
   if (!orders.length) return showToast('No orders', 'error');
   let ok = 0;
   for (const o of orders) {
@@ -7902,6 +7907,10 @@ async function setAllBreakdownOwner(breakdownId) {
   }
   showToast(`${ok}/${orders.length} orders → ${staff?.name} ✓`);
   showBreakdown(breakdownId);
+}
+
+function toggleAllBdChk(bdId, checked) {
+  document.querySelectorAll(`.bd-order-chk[data-bdid="${bdId}"]`).forEach(c => { c.checked = checked; });
 }
 
 async function setAllBreakdownTeams(breakdownId, team) {
@@ -8222,7 +8231,8 @@ async function showBreakdown(id) {
           + ' data-orderchannel="' + (o.channel||'DM') + '"'
           + ' style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">'
           + btnLabel + '</div>';
-        return '<div class="order-row" style="' + (o.team==='Outsider'?'opacity:0.7':'') + '">' +
+        return '<div class="order-row bd-order-row" data-bdid="' + bdId + '" data-orderno="' + (o.order_no||'') + '" style="grid-template-columns:20px 1fr 1.5fr 0.8fr 0.7fr 0.8fr 0.8fr 0.8fr 1.2fr;' + (o.team==='Outsider'?'opacity:0.7':'') + '">' +
+          '<span><input type="checkbox" class="bd-order-chk" data-bdid="' + bdId + '" data-orderno="' + (o.order_no||'') + '" style="cursor:pointer"></span>' +
           '<span style="color:var(--muted);font-family:var(--mono)">' + (o.order_no || '\u2014') + '</span>' +
           '<span>' + (o.customer_name || '\u2014') + '</span>' +
           '<span style="font-family:var(--mono)">' + (o.com_from_payslip != null ? fmtNum(o.com_from_payslip) : '\u2014') + '</span>' +
@@ -8257,7 +8267,8 @@ async function showBreakdown(id) {
           <select id="bdSetAllStaff_${bdId}" style="font-size:11px;padding:3px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text)">
             <option value="">— pick owner —</option>${bdStaffOpts}
           </select>
-          <button onclick="setAllBreakdownOwner('${bdId}')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid var(--accent);color:var(--accent);background:transparent;cursor:pointer">Set All</button>
+          <button onclick="setAllBreakdownOwner('${bdId}',false)" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid var(--accent);color:var(--accent);background:transparent;cursor:pointer">Set All</button>
+          <button onclick="setAllBreakdownOwner('${bdId}',true)" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #16a34a;color:#16a34a;background:transparent;cursor:pointer">✓ Set Selected</button>
         </div>
       </div>`;
       catHTML = rawCats.length > 0 ? `<div class="cat-section">
@@ -8267,7 +8278,8 @@ async function showBreakdown(id) {
         </div>
         ${setAllBtns}
         ${summaryParts ? `<div style="font-size:11px;margin-bottom:6px">${summaryParts}</div>` : ''}
-        <div class="order-row header" style="font-size:10px">
+        <div class="order-row header" style="font-size:10px;grid-template-columns:20px 1fr 1.5fr 0.8fr 0.7fr 0.8fr 0.8fr 0.8fr 1.2fr">
+          <span><input type="checkbox" id="bdChkAll_${bdId}" onchange="toggleAllBdChk('${bdId}',this.checked)" style="cursor:pointer"></span>
           <span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team</span><span>Channel</span><span>Sales Owner</span>
         </div>
         ${orderRows}
