@@ -4073,15 +4073,14 @@ async function previewAutoCommission() {
 
       if (staff) {
         if (!matchedByStaffId[staff.id]) matchedByStaffId[staff.id] = [];
-        // commission_algo resolution: explicit per-order manual assignment
-        // takes highest precedence. Then: if the order is tagged Outsider
-        // in the breakdown, always use outsider (full com) regardless of
-        // the staff's own channel. Otherwise fall back to staff.channel
-        // (DM/TM) — this is what lets e.g. Jess have TM orders + Outsider
-        // orders calculated with the right formula for each.
-        const algoFromManual = manualAssign?.commission_algo;
-        const algoFromTeam = po.team === 'Outsider' ? 'outsider' : null;
-        const algo = algoFromManual || algoFromTeam || (staff.channel || 'DM').toLowerCase();
+        // commission_algo resolution: an explicit per-order choice
+        // recorded on the assignment (set via the algo dropdown in the UI)
+        // takes precedence; otherwise fall back to the staff's own Channel
+        // (DM/TM) — Channel IS the commission algorithm for sales staff,
+        // not a separate concept, so there's no dedicated
+        // default_commission_algo field. This is what lets the same staff
+        // have a mix of e.g. mostly-DM orders + a few Outsider orders.
+        const algo = (manualAssign && manualAssign.commission_algo) || (staff.channel || 'DM').toLowerCase();
         matchedByStaffId[staff.id].push({ ...po, commission_algo: algo });
         matchedNormNamesUsed.add(po.norm_name);
       } else {
@@ -4272,12 +4271,8 @@ async function previewAutoCommission() {
 function updateOrphanAlgoDefault(i) {
   const sel = document.getElementById(`orphanAssign_${i}`);
   const algoSel = document.getElementById(`orphanAlgo_${i}`);
-  const teamSel = document.getElementById(`orphanTeam_${i}`);
   const selectedOption = sel?.options[sel.selectedIndex];
-  const staffDefaultAlgo = selectedOption?.dataset?.algo || 'dm';
-  // If this order is tagged Outsider, always use outsider regardless of staff channel
-  const orderTeam = teamSel?.value || '';
-  const defaultAlgo = orderTeam === 'Outsider' ? 'outsider' : staffDefaultAlgo;
+  const defaultAlgo = selectedOption?.dataset?.algo || 'dm';
   if (algoSel) algoSel.value = defaultAlgo;
 }
 
@@ -7863,6 +7858,11 @@ async function updateOrderChannel(breakdownId, orderNo, channel) {
 
 // Assign a staff member to a specific order from the Breakdown page.
 // Saves to nec_order_assignments so Auto Commission Matching picks it up.
+function handleBdStaffChange(sel) {
+  const { bdid, orderno, proxyid, year, month, cust } = sel.dataset;
+  assignBdOrderStaff(bdid, orderno, sel.value, proxyid, parseInt(year), parseInt(month), cust);
+}
+
 async function assignBdOrderStaff(breakdownId, orderNo, staffId, proxyId, year, month, customerNameEncoded) {
   const customerName = decodeURIComponent(customerNameEncoded);
   const staff = staffList.find(s => s.id === parseInt(staffId));
@@ -7967,7 +7967,7 @@ async function showBreakdown(id) {
           '<option value="' + s.id + '"' + (String(s.id) === String(assignedId) ? ' selected' : '') + '>' + s.name + '</option>'
         ).join('');
         const custEsc = (o.customer_name || '').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-        const staffCell = '<select style="font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--accent);cursor:pointer;width:100%" onchange="assignBdOrderStaff(\'' + bdId + '\',\'' + (o.order_no||'') + '\',this.value,\'' + bd.proxy_id + '\',' + bd.year + ',' + bd.month + ',\''+custEsc+'\')">'+soOpts+'</select>';
+        const staffCell = '<select class="bd-staff-sel" data-bdid="' + bdId + '" data-orderno="' + (o.order_no||'') + '" data-proxyid="' + bd.proxy_id + '" data-year="' + bd.year + '" data-month="' + bd.month + '" data-cust="' + custEsc + '" style="font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--accent);cursor:pointer;width:100%" onchange="handleBdStaffChange(this)">'+soOpts+'</select>';
         return '<div class="order-row" style="' + (o.team==='Outsider'?'opacity:0.7':'') + '">' +
           '<span style="color:var(--muted);font-family:var(--mono)">' + (o.order_no || '\u2014') + '</span>' +
           '<span>' + (o.customer_name || '\u2014') + '</span>' +
