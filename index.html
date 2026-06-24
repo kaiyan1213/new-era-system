@@ -4997,9 +4997,36 @@ async function openPayrollEntryModal() {
     return ka !== kb ? ka - kb : na.localeCompare(nb);
   });
 
+  // Group into optgroups
+  const groups = [
+    { key: 0, label: 'NE — Digital Marketing' },
+    { key: 1, label: 'NE — Telemarketing' },
+    { key: 2, label: 'NE — Admin' },
+    { key: 3, label: 'NE — Editor' },
+    { key: 4, label: 'NE — Content Creator' },
+    { key: 5, label: 'AC — Digital Marketing' },
+    { key: 6, label: 'AC — Telemarketing' },
+    { key: 7, label: 'AC — Admin' },
+    { key: 8, label: 'AC — Content Creator' },
+    { key: 9, label: 'Shared Staff' },
+    { key: 10, label: 'Outsider Staff' },
+    { key: 11, label: 'Manager' },
+  ];
+
+  const buckets = {};
+  sorted.forEach(s => {
+    const [k] = getStaffSortKey(s);
+    if (!buckets[k]) buckets[k] = [];
+    buckets[k].push(s);
+  });
+
   const sel = document.getElementById('prStaff');
   sel.innerHTML = '<option value="">Select staff...</option>' +
-    sorted.map(s => `<option value="${s.id}" data-type="${s.staff_type}" data-comm="${s.commission_per_order}" data-salary="${s.base_salary}" data-epf="${s.epf_applicable ? '1' : '0'}">${s.name} (${getStaffLabel(s)})</option>`).join('');
+    groups.filter(g => buckets[g.key]?.length).map(g =>
+      `<optgroup label="${g.label}">${buckets[g.key].map(s =>
+        `<option value="${s.id}" data-type="${s.staff_type}" data-comm="${s.commission_per_order}" data-salary="${s.base_salary}" data-epf="${s.epf_applicable ? '1' : '0'}">${s.name}</option>`
+      ).join('')}</optgroup>`
+    ).join('');
   openModal('modalPayrollEntry');
 }
 
