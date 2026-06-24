@@ -7904,11 +7904,11 @@ async function showBreakdown(id) {
   event?.target?.closest('.breakdown-proxy-item')?.classList.add('active');
 
   try {
-    const [b] = await sb('nec_payslip_breakdown', { filter: `id=eq.${id}` });
-    const proxy = proxyList.find(p => p.id === b.proxy_id) || { name: b.distributor_code };
-    const rawCats = JSON.parse(b.categories_json || '[]');
-    const allowances = JSON.parse(b.allowances_json || '[]');
-    const tbc = parseFloat(b.team_building_total || 0);
+    const [bd] = await sb('nec_payslip_breakdown', { filter: `id=eq.${id}` });
+    const proxy = proxyList.find(p => p.id === bd.proxy_id) || { name: bd.distributor_code };
+    const rawCats = JSON.parse(bd.categories_json || '[]');
+    const allowances = JSON.parse(bd.allowances_json || '[]');
+    const tbc = parseFloat(bd.team_building_total || 0);
 
     // categories_json is stored as a flat list of order objects
     // ({order_no, customer_name, product, total_com, ...}). Handle both
@@ -7936,13 +7936,13 @@ async function showBreakdown(id) {
 
     let catHTML = '';
     if (isFlat) {
-      const bdId = b.id;
+      const bdId = bd.id;
       // Fetch staff assignments for this proxy/period to show who owns each order
       if (!staffList.length) await loadStaff();
       let assignedStaffMap = {};
       try {
         const assignments = await sb('nec_order_assignments', {
-          filter: `proxy_id=eq.${b.proxy_id}&year=eq.${b.year}&month=eq.${b.month}`,
+          filter: `proxy_id=eq.${bd.proxy_id}&year=eq.${bd.year}&month=eq.${bd.month}`,
           select: 'order_no,staff_id,commission_algo'
         });
         console.log('[BD] assignments fetched:', assignments.length);
@@ -7958,11 +7958,11 @@ async function showBreakdown(id) {
       const orderRows = rawCats.map(o => {
         const assigned = assignedStaffMap[String(o.order_no)];
         const assignedId = assigned?.staff_id || (assigned ? (staffList.find(s => s.name === assigned.name) || {}).id || '' : '');
-        const soOpts = '<option value="">\u2014 assign \u2014</option>' + [...staffList].sort((a,b) => a.name.localeCompare(b.name)).map(s =>
+        const soOpts = '<option value="">\u2014 assign \u2014</option>' + [...staffList].sort((a,b) => a.name.localeCompare(bd.name)).map(s =>
           '<option value="' + s.id + '"' + (s.id === assignedId ? ' selected' : '') + '>' + s.name + '</option>'
         ).join('');
         const custEsc = (o.customer_name || '').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-        const staffCell = '<select style="font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--accent);cursor:pointer;width:100%" onchange="assignBdOrderStaff(\'' + bdId + '\',\'' + (o.order_no||'') + '\',this.value,\'' + b.proxy_id + '\',' + b.year + ',' + b.month + ',\''+custEsc+'\')">'+soOpts+'</select>';
+        const staffCell = '<select style="font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--accent);cursor:pointer;width:100%" onchange="assignBdOrderStaff(\'' + bdId + '\',\'' + (o.order_no||'') + '\',this.value,\'' + bd.proxy_id + '\',' + bd.year + ',' + bd.month + ',\''+custEsc+'\')">'+soOpts+'</select>';
         return '<div class="order-row" style="' + (o.team==='Outsider'?'opacity:0.7':'') + '">' +
           '<span style="color:var(--muted);font-family:var(--mono)">' + (o.order_no || '\u2014') + '</span>' +
           '<span>' + (o.customer_name || '\u2014') + '</span>' +
@@ -8020,7 +8020,7 @@ async function showBreakdown(id) {
             <span style="font-family:var(--mono)">${o.com_from_payslip != null ? fmtNum(o.com_from_payslip) : (o.pv ? o.pv.toLocaleString() : '—')}</span>
             <span style="font-family:var(--mono);color:var(--yellow)">${parseFloat(o.allowance_portion||0) > 0 ? fmtNum(o.allowance_portion) : '—'}</span>
             <span style="font-family:var(--mono);font-weight:600;color:var(--green)">${o.total_com != null ? fmtNum(o.total_com) : fmtNum(o.amount)}</span>
-            ${orderTeamSelect(o, b.id)}
+            ${orderTeamSelect(o, bd.id)}
           </div>`).join('');
         const trailingRow = cat.trailing_total > 0 ? `
           <div class="order-row" style="opacity:0.5">
@@ -8063,12 +8063,12 @@ async function showBreakdown(id) {
       <div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)">
         <div style="font-size:18px;font-weight:700">${proxy.name}</div>
         <div style="font-size:12px;color:var(--muted);margin-top:4px">
-          Code: ${b.distributor_code} · ${b.member_level || '—'} · ${MONTHS[b.month]} ${b.year}
+          Code: ${bd.distributor_code} · ${bd.member_level || '—'} · ${MONTHS[bd.month]} ${bd.year}
         </div>
         <div style="display:flex;gap:20px;margin-top:12px;font-size:13px">
-          <div><span style="color:var(--muted)">Gross (before deductions):</span> <span style="font-family:var(--mono);font-weight:700">RM ${fmtNum(parseFloat(b.total_net_payable) + parseFloat(b.withholding_tax||0))}</span></div>
-          ${parseFloat(b.withholding_tax||0) > 0 ? `<div><span style="color:var(--muted)">Deduction (WHT / advance):</span> <span style="font-family:var(--mono);color:var(--red)">-RM ${fmtNum(b.withholding_tax)}</span></div>` : ''}
-          <div><span style="color:var(--muted)">Net Payable:</span> <span style="font-family:var(--mono);font-weight:700;color:var(--green)">RM ${fmtNum(b.total_net_payable)}</span></div>
+          <div><span style="color:var(--muted)">Gross (before deductions):</span> <span style="font-family:var(--mono);font-weight:700">RM ${fmtNum(parseFloat(bd.total_net_payable) + parseFloat(bd.withholding_tax||0))}</span></div>
+          ${parseFloat(bd.withholding_tax||0) > 0 ? `<div><span style="color:var(--muted)">Deduction (WHT / advance):</span> <span style="font-family:var(--mono);color:var(--red)">-RM ${fmtNum(bd.withholding_tax)}</span></div>` : ''}
+          <div><span style="color:var(--muted)">Net Payable:</span> <span style="font-family:var(--mono);font-weight:700;color:var(--green)">RM ${fmtNum(bd.total_net_payable)}</span></div>
         </div>
       </div>
       ${catHTML}${tbcHTML}${allowHTML}`;
