@@ -2995,11 +2995,10 @@ async function syncStaffFromBankEntry(bankId, name, team) {
   try {
     const linked = await sb('nec_staff', { filter: `bank_directory_id=eq.${bankId}`, select: 'id,name' });
     if (linked.length) {
-      // Already synced before — keep the name current (Bank Details is
-      // the source of truth for identity) but leave staff_type/channel/
-      // base_salary alone, since those may have been deliberately tuned
-      // afterward in Payroll's own Edit Staff modal.
-      await sb('nec_staff', { method: 'PATCH', filter: `id=eq.${linked[0].id}`, body: { name } });
+      // Already synced — update name AND channel/company_team from Bank Details
+      // (Bank Details is the source of truth for team assignment)
+      const { staff_type, channel, company_team } = inferStaffTypeFromTeam(team);
+      await sb('nec_staff', { method: 'PATCH', filter: `id=eq.${linked[0].id}`, body: { name, channel: channel || null, company_team: company_team || 'New Era' } });
       return;
     }
     // Not linked yet — check for a pre-existing nec_staff row with the
@@ -3007,7 +3006,8 @@ async function syncStaffFromBankEntry(bankId, name, team) {
     // linkage existed) before creating a brand-new duplicate.
     const byName = await sb('nec_staff', { filter: `name=eq.${encodeURIComponent(name)}`, select: 'id' });
     if (byName.length) {
-      await sb('nec_staff', { method: 'PATCH', filter: `id=eq.${byName[0].id}`, body: { bank_directory_id: bankId } });
+      const { channel, company_team } = inferStaffTypeFromTeam(team);
+      await sb('nec_staff', { method: 'PATCH', filter: `id=eq.${byName[0].id}`, body: { bank_directory_id: bankId, channel: channel || null, company_team: company_team || 'New Era' } });
       return;
     }
     const { staff_type, channel } = inferStaffTypeFromTeam(team);
