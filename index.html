@@ -7878,7 +7878,7 @@ async function assignBdOrderStaff(breakdownId, orderNo, staffId, proxyId, year, 
     const commAlgo = (staff?.channel || 'DM').toLowerCase();
     await sb('nec_order_assignments', {
       method: 'POST',
-      body: { year: parseInt(year), month: parseInt(month), order_no: orderNo, customer_name: customerName, proxy_id: proxyId, staff_id: parseInt(staffId), source: 'breakdown', commission_algo: commAlgo }
+      body: { year: parseInt(year), month: parseInt(month), order_no: orderNo, customer_name: customerName, proxy_id: parseInt(proxyId) || proxyId, staff_id: parseInt(staffId), source: 'breakdown', commission_algo: commAlgo }
     });
     // Update the dropdown colour to accent so user sees it saved
     const sel = event?.target;
@@ -7910,13 +7910,13 @@ async function showBreakdown(id) {
 
   try {
     const [bd] = await sb('nec_payslip_breakdown', { filter: `id=eq.${id}` });
-    // bd.proxy_id may be an integer (old data) or UUID (new data).
-    // Resolve to the real proxy_accounts UUID via coway_id or name match.
-    const proxy = proxyList.find(p => p.id === bd.proxy_id)
+    // proxy_id in both nec_payslip_breakdown and nec_order_assignments is the
+    // same integer value (proxy_accounts.id is integer in the actual DB).
+    // Use bd.proxy_id directly — no UUID conversion needed.
+    const proxyUUID = bd.proxy_id; // same integer used across all tables
+    const proxy = proxyList.find(p => String(p.id) === String(bd.proxy_id))
       || proxyList.find(p => p.coway_id === String(bd.distributor_code))
-      || proxyList.find(p => String(p.id) === String(bd.proxy_id))
-      || { name: bd.distributor_code, id: null };
-    const proxyUUID = proxy.id; // real UUID for nec_order_assignments
+      || { name: bd.distributor_code, id: bd.proxy_id };
     const rawCats = JSON.parse(bd.categories_json || '[]');
     const allowances = JSON.parse(bd.allowances_json || '[]');
     const tbc = parseFloat(bd.team_building_total || 0);
@@ -7953,7 +7953,7 @@ async function showBreakdown(id) {
       let assignedStaffMap = {};
       try {
         const assignments = await sb('nec_order_assignments', {
-          filter: `proxy_id=eq.${proxyUUID || bd.proxy_id}&year=eq.${bd.year}&month=eq.${bd.month}`,
+          filter: `proxy_id=eq.${bd.proxy_id}&year=eq.${bd.year}&month=eq.${bd.month}`,
           select: 'order_no,staff_id,commission_algo'
         });
         console.log('[BD] assignments fetched:', assignments.length);
@@ -7973,7 +7973,7 @@ async function showBreakdown(id) {
           '<option value="' + s.id + '"' + (String(s.id) === String(assignedId) ? ' selected' : '') + '>' + s.name + '</option>'
         ).join('');
         const custEsc = (o.customer_name || '').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-        const staffCell = '<select class="bd-staff-sel" data-bdid="' + bdId + '" data-orderno="' + (o.order_no||'') + '" data-proxyid="' + (proxyUUID || bd.proxy_id) + '" data-year="' + bd.year + '" data-month="' + bd.month + '" data-cust="' + custEsc + '" style="font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--accent);cursor:pointer;width:100%" onchange="handleBdStaffChange(this)">'+soOpts+'</select>';
+        const staffCell = '<select class="bd-staff-sel" data-bdid="' + bdId + '" data-orderno="' + (o.order_no||'') + '" data-proxyid="' + bd.proxy_id + '" data-year="' + bd.year + '" data-month="' + bd.month + '" data-cust="' + custEsc + '" style="font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--accent);cursor:pointer;width:100%" onchange="handleBdStaffChange(this)">'+soOpts+'</select>';
         return '<div class="order-row" style="' + (o.team==='Outsider'?'opacity:0.7':'') + '">' +
           '<span style="color:var(--muted);font-family:var(--mono)">' + (o.order_no || '\u2014') + '</span>' +
           '<span>' + (o.customer_name || '\u2014') + '</span>' +
