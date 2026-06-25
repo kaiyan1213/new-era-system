@@ -3631,9 +3631,9 @@ async function loadPayroll() {
 
     const salesStaff = staffList.filter(s => s.staff_type === 'sales');
     const adminStaff = staffList.filter(s => s.staff_type === 'admin');
-    document.getElementById('statStaffCount').textContent = staffList.length;
-    document.getElementById('statSalesStaff').textContent = salesStaff.length;
-    document.getElementById('statAdminStaff').textContent = adminStaff.length;
+    
+    
+    
 
     // Net cash position across EVERYONE in nec_payroll for this period —
     // staff, admin, and managers (manager Totals pushed here via the
@@ -3642,19 +3642,7 @@ async function loadPayroll() {
     const toPay = records.filter(r => parseFloat(r.total_pay||0) > 0).reduce((s,r) => s + parseFloat(r.total_pay||0), 0);
     const toReceive = records.filter(r => parseFloat(r.total_pay||0) < 0).reduce((s,r) => s + Math.abs(parseFloat(r.total_pay||0)), 0);
     const net = toPay - toReceive;
-    const netLabelEl = document.getElementById('statPayrollNetLabel');
-    const netValEl = document.getElementById('statPayrollMonth');
-    const netSubEl = document.getElementById('statPayrollNetSub');
-    if (net >= 0) {
-      netLabelEl.textContent = 'Net This Month — Pay Out';
-      netValEl.textContent = fmt(net);
-      netValEl.style.color = 'var(--green)';
-    } else {
-      netLabelEl.textContent = 'Net This Month — Receivable';
-      netValEl.textContent = fmt(Math.abs(net));
-      netValEl.style.color = 'var(--red)';
-    }
-    netSubEl.textContent = `Pay RM ${fmtNum(toPay)} · Receive RM ${fmtNum(toReceive)}`;
+    // Stat cards removed — net figures shown in breakdown summary below
 
     // Build team+type breakdown summary
     const summaryEl = document.getElementById('payrollBreakdownSummary');
