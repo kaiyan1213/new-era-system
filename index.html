@@ -4826,6 +4826,7 @@ async function generateStaffPayslip(idx) {
     epf_employee: epfEmployee, epf_employer: epfEmployer, own_proxy_offset: ownProxyOffset,
     total_pay: totalPay, month, year, orders_count: orders.length, notes: null,
   };
+  console.log('[Calc] orders proxy_names:', orders.map(o=>o.proxy_name+'/'+o.customer_name));
   const calcHtml = buildCalculationHTML(staff, fakeRecord, orders);
   const win = window.open('', '_blank', 'width=760,height=900');
   win.document.write(`<html><head><title>Calculation - ${staff.name} - ${MONTHS[month]} ${year}</title>
