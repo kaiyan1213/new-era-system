@@ -4016,11 +4016,11 @@ function flattenBreakdownOrders(categoriesJson) {
     if (c && Array.isArray(c.new_orders)) {
       // nested shape: category -> new_orders[]
       for (const o of c.new_orders) {
-        if (o && (o.order_no || o.customer_name)) out.push({ order_no: o.order_no || null, customer_name: o.customer_name || '', total_com: parseFloat(o.total_com || 0), team: o.team || 'New Era', channel: o.channel || null });
+        if (o && (o.order_no || o.customer_name)) out.push({ order_no: o.order_no || null, customer_name: o.customer_name || '', total_com: parseFloat(o.total_com || 0), com_from_payslip: parseFloat(o.com_from_payslip || 0), allowance_portion: parseFloat(o.allowance_portion || 0), team: o.team || 'New Era', channel: o.channel || null, cost: parseFloat(o.cost || 0) });
       }
     } else if (c && (c.order_no || c.customer_name)) {
       // flat shape: c itself is an order
-      out.push({ order_no: c.order_no || null, customer_name: c.customer_name || '', total_com: parseFloat(c.total_com || 0), team: c.team || 'New Era', channel: c.channel || null });
+      out.push({ order_no: c.order_no || null, customer_name: c.customer_name || '', total_com: parseFloat(c.total_com || 0), com_from_payslip: parseFloat(c.com_from_payslip || 0), allowance_portion: parseFloat(c.allowance_portion || 0), team: c.team || 'New Era', channel: c.channel || null, cost: parseFloat(c.cost || 0) });
     }
   }
   return out;
