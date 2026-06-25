@@ -8536,7 +8536,7 @@ async function showBreakdown(id) {
         const assignedCost = assigned?.cost ?? '';
         // Simple button — no inline dropdown, avoids all proxy_id type issues
         const btnLabel = assignedName
-          ? '<span style="font-size:10px;color:var(--accent)">' + assignedName + '</span> <button style="font-size:10px;padding:1px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);cursor:pointer" onclick="openBdAssignModal(event)">✎</button>'
+          ? '<span style="font-size:10px;color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:90px;display:inline-block;vertical-align:middle" title="' + assignedName + '">' + assignedName + '</span><button style="font-size:10px;padding:1px 5px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);cursor:pointer;flex-shrink:0;margin-left:2px" onclick="openBdAssignModal(event)">✎</button>'
           : '<button style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid var(--accent);background:transparent;color:var(--accent);cursor:pointer" onclick="openBdAssignModal(event)">+ Assign</button>';
         // proxyUUID: look up real UUID from proxyList by matching int id or distributor code
         const staffCell = '<div class="bd-assign-cell"'
@@ -8548,9 +8548,9 @@ async function showBreakdown(id) {
           + ' data-assignedid="' + (assigned?.staff_id||'') + '"'
           + ' data-orderteam="' + (o.team||'New Era') + '"'
           + ' data-orderchannel="' + (o.channel||'DM') + '"'
-          + ' style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">'
+          + ' style="display:flex;align-items:center;gap:4px;overflow:hidden;min-width:0">'
           + btnLabel + '</div>';
-        return '<div class="order-row bd-order-row" data-bdid="' + bdId + '" data-orderno="' + (o.order_no||'') + '" style="grid-template-columns:20px 90px 160px 80px 70px 80px 90px 80px 130px;min-width:820px;' + (o.team==='Outsider'?'opacity:0.7':'') + '">' +
+        return '<div class="order-row bd-order-row" data-bdid="' + bdId + '" data-orderno="' + (o.order_no||'') + '" style="grid-template-columns:20px 100px 1fr 85px 75px 85px 100px 90px 160px;min-width:780px;' + (o.team==='Outsider'?'opacity:0.7':'') + '">' +
           '<span><input type="checkbox" class="bd-order-chk" data-bdid="' + bdId + '" data-orderno="' + (o.order_no||'') + '" style="cursor:pointer"></span>' +
           '<span style="color:var(--muted);font-family:var(--mono)">' + (o.order_no || '\u2014') + '</span>' +
           '<span>' + (o.customer_name || '\u2014') + '</span>' +
@@ -8598,7 +8598,7 @@ async function showBreakdown(id) {
         ${setAllBtns}
         ${summaryParts ? `<div style="font-size:11px;margin-bottom:6px">${summaryParts}</div>` : ''}
         <div style="overflow-x:auto">
-        <div class="order-row header" style="font-size:10px;grid-template-columns:20px 90px 160px 80px 70px 80px 90px 80px 130px 80px;min-width:900px">
+        <div class="order-row header" style="font-size:10px;grid-template-columns:20px 100px 1fr 85px 75px 85px 100px 90px 160px;min-width:780px">
           <span><input type="checkbox" id="bdChkAll_${bdId}" onchange="toggleAllBdChk('${bdId}',this.checked)" style="cursor:pointer"></span>
           <span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team</span><span>Channel</span><span>Sales Owner</span>
         </div>
