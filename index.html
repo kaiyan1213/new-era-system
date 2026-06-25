@@ -8361,7 +8361,20 @@ async function showBreakdown(id) {
     // categories_json is stored as a flat list of order objects
     // ({order_no, customer_name, product, total_com, ...}). Handle both
     // this current format and the old nested-category format gracefully.
+    // Normalize: flatten nested-category format into flat order list
     const isFlat = rawCats.length > 0 && rawCats[0].order_no !== undefined;
+    // Always work with a flat order list regardless of storage format
+    const flatOrders = isFlat ? rawCats : rawCats.flatMap(cat =>
+      (cat.new_orders || []).map(o => ({
+        ...o,
+        // carry over category-level fields if missing on the order
+        com_from_payslip: o.com_from_payslip ?? o.pv ?? null,
+        total_com: o.total_com ?? o.amount ?? 0,
+        allowance_portion: o.allowance_portion ?? 0,
+        team: o.team || 'New Era',
+        channel: o.channel || 'DM',
+      }))
+    );
     const teamOpts = (current) => ['New Era','Alpha C','Outsider'].map(t =>
       `<option value="${t}"${current===t?' selected':''}>${t}</option>`).join('');
     const chOpts = (current) => ['DM','TM','XHS'].map(ch =>
@@ -8383,7 +8396,8 @@ async function showBreakdown(id) {
     };
 
     let catHTML = '';
-    if (isFlat) {
+    if (true) { // Always use flat path (flatOrders normalizes both formats)
+      const rawCats = flatOrders; // shadow rawCats with normalized flat list
       const bdId = bd.id;
       // Fetch staff assignments for this proxy/period to show who owns each order
       if (!staffList.length) await loadStaff();
