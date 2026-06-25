@@ -4271,7 +4271,7 @@ async function previewAutoCommission() {
               <div style="display:flex;gap:4px;flex-wrap:wrap">
 
                 <button class="btn btn-primary btn-sm" onclick="saveAutoCommissionRow(${idx})">Save to Payroll</button>
-                ${row.staff.channel === 'TM' ? `<button class="btn btn-ghost btn-sm" style="color:var(--yellow);border-color:var(--yellow)" onclick="openTMCostModal(${idx})">💰 Fill Costs</button>` : ''}
+                ${(row.staff.channel === 'TM' || row.orders.some(o => (o.commission_algo||'').toLowerCase() === 'tm')) ? `<button class="btn btn-ghost btn-sm" style="color:var(--yellow);border-color:var(--yellow)" onclick="openTMCostModal(${idx})">💰 Fill Costs</button>` : ''}
                 <button class="btn btn-ghost btn-sm" onclick="generateStaffPayslip(${idx})">📋 Order Breakdown</button>
               </div>
             </td>
