@@ -5777,26 +5777,37 @@ async function deleteMgrAdjustment(id) {
 // outsider assignment, mirroring how Acc Below/Adjustments already
 // aggregate across the whole year in that case.
 async function getManagerOutsiderCommission(staffId, year, month) {
+  // Now handles both Outsider and TM orders for managers who do both
   if (!staffId) return 0;
   try {
-    let filter = `staff_id=eq.${staffId}&year=eq.${year}&commission_algo=eq.outsider`;
+    let filter = `staff_id=eq.${staffId}&year=eq.${year}`;
     if (month) filter += `&month=eq.${month}`;
-    const assignments = await sb('nec_order_assignments', { filter, select: 'order_no,customer_name,proxy_id,month' });
-    if (!assignments.length) return 0;
-    const months = [...new Set(assignments.map(a => a.month))];
+    const assignments = await sb('nec_order_assignments', { filter, select: 'order_no,customer_name,proxy_id,month,commission_algo,cost' });
+    const relevant = assignments.filter(a => ['outsider','tm'].includes((a.commission_algo||'').toLowerCase()));
+    if (!relevant.length) return 0;
+    const months = [...new Set(relevant.map(a => a.month))];
     let total = 0;
     for (const mo of months) {
       const bds = await sb('nec_payslip_breakdown', { filter: `year=eq.${year}&month=eq.${mo}`, select: '*' });
       const flatByProxy = {};
       bds.forEach(b => { flatByProxy[b.proxy_id] = flattenBreakdownOrders(b.categories_json); });
-      const monthAssignments = assignments.filter(a => a.month === mo);
-      const orders = [];
-      monthAssignments.forEach(a => {
+      const monthAssignments = relevant.filter(a => a.month === mo);
+      const outsiderOrds = [], tmOrds = [];
+      monthAssignments.forEach((a, idx) => {
         const flat = flatByProxy[a.proxy_id] || [];
         const match = flat.find(o => o.order_no === a.order_no && normName(o.customer_name) === normName(a.customer_name));
-        if (match) orders.push({ total_com: match.total_com || 0 });
+        if (match) {
+          const algo = (a.commission_algo || '').toLowerCase();
+          if (algo === 'outsider') outsiderOrds.push({ total_com: match.total_com || 0 });
+          else if (algo === 'tm') tmOrds.push({ total_com: match.total_com || 0, cost: parseFloat(a.cost || 0) });
+        }
       });
-      total += calcOutsiderCommission(orders).commission;
+      total += calcOutsiderCommission(outsiderOrds).commission;
+      // TM: (total_com - cost) × % (50% for orders 1-10, 70% 11-20, 90% 21+)
+      tmOrds.forEach((o, i) => {
+        const pct = (i+1) <= 10 ? 0.5 : (i+1) <= 20 ? 0.7 : 0.9;
+        total += r2((parseFloat(o.total_com||0) - parseFloat(o.cost||0)) * pct);
+      });
     }
     return r2(total);
   } catch(e) { return 0; }
