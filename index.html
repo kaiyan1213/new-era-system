@@ -3700,23 +3700,33 @@ async function loadPayroll() {
         'AC — DM','AC — TM','AC — Admin','AC — Content Creator','Shared','Outsider','Manager'];
       filtered.forEach(r => {
         const key = getGroupKey(r);
-        if (!groups[key]) groups[key] = { count: 0, total: 0 };
-        const pay = parseFloat(r.total_pay || 0);
+        if (!groups[key]) groups[key] = { count: 0, total: 0, commission: 0, claim: 0, salary: 0 };
+        // Total remuneration promised to staff = commission + salary + bonus + claim - deductions - epf
+        // (own_proxy_offset is NOT subtracted — that's just the settlement channel, not a reduction)
+        const comm = parseFloat(r.commission_earned || 0);
+        const sal = parseFloat(r.base_salary || 0);
+        const bon = parseFloat(r.bonus || 0);
+        const claim = parseFloat(r.claim_amount || 0);
+        const ded = parseFloat(r.deductions || 0);
+        const epf = parseFloat(r.epf_employee || 0);
+        const total = r2(comm + sal + bon + claim - ded - epf);
         groups[key].count++;
-        groups[key].total = r2(groups[key].total + pay);
+        groups[key].total = r2(groups[key].total + total);
+        groups[key].commission = r2(groups[key].commission + comm + sal + bon - ded - epf);
+        groups[key].claim = r2(groups[key].claim + claim);
       });
       const rows = GROUP_ORDER.filter(k => groups[k]).map(k => {
         const g = groups[k];
-        const color = g.total < 0 ? 'var(--red)' : 'var(--green)';
+        const claimPart = g.claim !== 0 ? `<span style="font-size:10px;color:var(--muted);margin-left:8px">Comm/Salary: RM ${fmtNum(g.commission)} · Claim: RM ${fmtNum(g.claim)}</span>` : `<span style="font-size:10px;color:var(--muted);margin-left:8px">RM ${fmtNum(g.commission)}</span>`;
         return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-bottom:1px solid var(--border)">
-          <div style="font-size:12px;font-weight:600">${k} <span style="font-size:11px;color:var(--muted);font-weight:400">(${g.count} staff)</span></div>
-          <div style="font-size:13px;font-weight:700;color:${color};font-family:var(--mono)">${g.total < 0 ? '−' : '+'}RM ${fmtNum(Math.abs(g.total))}</div>
+          <div style="font-size:12px;font-weight:600">${k} <span style="font-size:11px;color:var(--muted);font-weight:400">(${g.count} staff)</span>${claimPart}</div>
+          <div style="font-size:13px;font-weight:700;color:var(--green);font-family:var(--mono)">RM ${fmtNum(g.total)}</div>
         </div>`;
       }).join('');
       if (rows) {
         summaryEl.style.display = 'block';
         summaryEl.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
-          <div style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;border-bottom:1px solid var(--border);background:var(--surface2)">Payout Breakdown by Team & Role</div>
+          <div style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;border-bottom:1px solid var(--border);background:var(--surface2)">Company Total Outlay by Team & Role (incl. proxy-settled amounts)</div>
           ${rows}
         </div>`;
       } else {
