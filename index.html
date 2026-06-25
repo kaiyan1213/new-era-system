@@ -569,6 +569,8 @@
       </div>
     </div>
 
+    <div id="payrollBreakdownSummary" style="margin-bottom:16px;display:none"></div>
+
     <div class="table-wrap">
       <table>
         <thead>
@@ -3674,6 +3676,53 @@ async function loadPayroll() {
       netValEl.style.color = 'var(--red)';
     }
     netSubEl.textContent = `Pay RM ${fmtNum(toPay)} · Receive RM ${fmtNum(toReceive)}`;
+
+    // Build team+type breakdown summary
+    const summaryEl = document.getElementById('payrollBreakdownSummary');
+    if (summaryEl) {
+      // Groups: NE-DM, NE-TM, NE-Admin, NE-Editor, NE-Content Creator, AC-DM, AC-TM, AC-Admin, AC-Content Creator, Shared, Outsider, Manager
+      const groups = {};
+      const getGroupKey = (r) => {
+        if (r.record_type === 'manager' || managerList.some(m => m.staff_id === r.staff_id)) return 'Manager';
+        const s = staffList.find(x => x.id === r.staff_id) || {};
+        const isOs = r.commission_type === 'outsider' && s.staff_type !== 'sales';
+        if (isOs) return 'Outsider';
+        const team = s.company_team || 'New Era';
+        const ch = (s.channel || '').toUpperCase();
+        const pos = (s.position || s.role || s.staff_type || '').toLowerCase();
+        const teamLabel = team === 'Alpha C' ? 'AC' : team === 'Shared' ? 'Shared' : 'NE';
+        if (teamLabel === 'Shared') return 'Shared';
+        const roleLabel = ch === 'DM' ? 'DM' : ch === 'TM' ? 'TM' :
+          pos.includes('editor') ? 'Editor' : pos.includes('content') ? 'Content Creator' : 'Admin';
+        return `${teamLabel} — ${roleLabel}`;
+      };
+      const GROUP_ORDER = ['NE — DM','NE — TM','NE — Admin','NE — Editor','NE — Content Creator',
+        'AC — DM','AC — TM','AC — Admin','AC — Content Creator','Shared','Outsider','Manager'];
+      filtered.forEach(r => {
+        const key = getGroupKey(r);
+        if (!groups[key]) groups[key] = { count: 0, total: 0 };
+        const pay = parseFloat(r.total_pay || 0);
+        groups[key].count++;
+        groups[key].total = r2(groups[key].total + pay);
+      });
+      const rows = GROUP_ORDER.filter(k => groups[k]).map(k => {
+        const g = groups[k];
+        const color = g.total < 0 ? 'var(--red)' : 'var(--green)';
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-bottom:1px solid var(--border)">
+          <div style="font-size:12px;font-weight:600">${k} <span style="font-size:11px;color:var(--muted);font-weight:400">(${g.count} staff)</span></div>
+          <div style="font-size:13px;font-weight:700;color:${color};font-family:var(--mono)">${g.total < 0 ? '−' : '+'}RM ${fmtNum(Math.abs(g.total))}</div>
+        </div>`;
+      }).join('');
+      if (rows) {
+        summaryEl.style.display = 'block';
+        summaryEl.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+          <div style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;border-bottom:1px solid var(--border);background:var(--surface2)">Payout Breakdown by Team & Role</div>
+          ${rows}
+        </div>`;
+      } else {
+        summaryEl.style.display = 'none';
+      }
+    }
 
     const tbody = document.getElementById('payrollTableBody');
     if (filtered.length === 0) {
