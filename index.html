@@ -4048,8 +4048,11 @@ async function previewAutoCommission() {
         proxy_id: b.proxy_id,
         proxy_name: (proxyList.find(p => p.id === b.proxy_id) || {}).name || b.distributor_code || '—',
         total_com: o.total_com || 0,
+        com_from_payslip: o.com_from_payslip || 0,
+        allowance_portion: o.allowance_portion || 0,
         team: o.team || 'New Era',
-        channel: o.channel || null
+        channel: o.channel || null,
+        cost: parseFloat(o.cost || 0)  // admin-filled cost from Breakdown tab
       }));
     });
 
@@ -4127,7 +4130,13 @@ async function previewAutoCommission() {
         // default_commission_algo field. This is what lets the same staff
         // have a mix of e.g. mostly-DM orders + a few Outsider orders.
         const algo = (manualAssign && manualAssign.commission_algo) || (staff.channel || 'DM').toLowerCase();
-        matchedByStaffId[staff.id].push({ ...po, commission_algo: algo, cost: manualAssign?.cost ?? 0 });
+        // cost comes from the assignment record (admin fills this in Breakdown tab)
+        // regardless of whether it was auto-matched or manually assigned
+        // cost: from categories_json (admin fills in Breakdown tab) — this works
+        // for both auto-matched and manually-assigned orders since it lives on the
+        // payslip breakdown record, not the assignment record
+        const orderCost = parseFloat(po.cost || 0) || parseFloat(manualAssign?.cost || 0);
+        matchedByStaffId[staff.id].push({ ...po, commission_algo: algo, cost: orderCost });
         matchedNormNamesUsed.add(po.norm_name);
       } else {
         unmatchedPayslipOrders.push(po);
@@ -8099,10 +8108,21 @@ function orderCostInput(o, bdId, currentCost) {
 
 async function saveBdOrderCost(input) {
   const orderno = input.dataset.orderno;
+  const bdId = input.dataset.bdid;
   const cost = parseFloat(input.value) || 0;
   try {
-    // Update cost in nec_order_assignments for this order
-    const resp = await fetch(SUPABASE_URL + '/rest/v1/nec_order_assignments?order_no=eq.' + orderno, {
+    // Fetch the breakdown record, update cost on the matching order in categories_json
+    const [bd] = await sb('nec_payslip_breakdown', { filter: `id=eq.${bdId}` });
+    if (!bd) throw new Error('Breakdown not found');
+    const cats = JSON.parse(bd.categories_json || '[]');
+    const updated = cats.map(o => String(o.order_no) === String(orderno) ? { ...o, cost } : o);
+    const resp = await fetch(SUPABASE_URL + '/rest/v1/nec_payslip_breakdown?id=eq.' + bdId, {
+      method: 'PATCH',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ categories_json: JSON.stringify(updated) })
+    });
+    // Also update nec_order_assignments if a record exists for this order
+    await fetch(SUPABASE_URL + '/rest/v1/nec_order_assignments?order_no=eq.' + orderno, {
       method: 'PATCH',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
       body: JSON.stringify({ cost })
