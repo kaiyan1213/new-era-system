@@ -149,7 +149,11 @@ function parseCowayPayslip(text) {
   // Scope both scans to start at the "100% Payout" header so they don't pick up
   // unrelated 2-token "pv amount" rows from other sections (e.g. the "Outright
   // - PV" section handled above, which has its own such rows).
-  const scanLines = payout100Start >= 0 ? lines.slice(payout100Start) : lines;
+  // The 100% Payout rental amounts sometimes appear BEFORE the section header
+  // (e.g. lines 25-27 before "Sales Commission (Rental - 100% Payout)" at line 29).
+  // Scan from 20 lines before the header to catch those pre-header amounts.
+  const scanStart = Math.max(0, (payout100Start >= 0 ? payout100Start - 20 : 0));
+  const scanLines = lines.slice(scanStart);
   const prefixedOrderRows = [];
   for (const l of scanLines) {
     const pm = l.match(/^(\d{7,})\s*\([A-Za-z]+\)([A-Z].+?)(\d{1,2})\s*$/);
