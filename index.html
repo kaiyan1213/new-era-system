@@ -4747,32 +4747,49 @@ async function saveTMCosts() {
   // Fetch all breakdowns for this year/month to update categories_json
   const year = row.year, month = row.month;
   const breakdowns = await sb('nec_payslip_breakdown', { filter: `year=eq.${year}&month=eq.${month}`, select: '*' });
-  // Build order_no -> cost map from inputs
+  // Build order_no -> cost map from inputs (include all, even 0)
   const costMap = {};
   inputs.forEach(inp => { costMap[String(inp.dataset.orderno)] = parseFloat(inp.value) || 0; });
+  console.log('[TM Cost] costMap:', costMap);
   // Update each breakdown's categories_json
-  let updated = 0;
+  let updatedOrders = 0;
+  const errors = [];
   for (const bd of breakdowns) {
     const cats = JSON.parse(bd.categories_json || '[]');
     let changed = false;
     const newCats = cats.map(o => {
-      if (costMap.hasOwnProperty(String(o.order_no))) {
+      const key = String(o.order_no || '').trim();
+      if (costMap.hasOwnProperty(key)) {
+        console.log('[TM Cost] matching order', key, 'in bd', bd.id, '→ cost', costMap[key]);
         changed = true;
-        return { ...o, cost: costMap[String(o.order_no)] };
+        updatedOrders++;
+        return { ...o, cost: costMap[key] };
       }
       return o;
     });
     if (changed) {
-      await fetch(SUPABASE_URL + '/rest/v1/nec_payslip_breakdown?id=eq.' + bd.id, {
+      const resp = await fetch(SUPABASE_URL + '/rest/v1/nec_payslip_breakdown?id=eq.' + bd.id, {
         method: 'PATCH',
         headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
         body: JSON.stringify({ categories_json: JSON.stringify(newCats) })
       });
-      updated++;
+      if (!resp.ok) {
+        const err = await resp.text();
+        errors.push(err);
+        console.error('[TM Cost] PATCH error:', err);
+      }
     }
   }
   closeModal('modalTMCost');
-  showToast(`Costs saved (${Object.keys(costMap).length} orders). Refreshing...`);
+  if (errors.length) {
+    showToast('Save error: ' + errors[0], 'error');
+    return;
+  }
+  if (updatedOrders === 0) {
+    showToast('No matching orders found in DB — check Console for details', 'error');
+    return;
+  }
+  showToast(`✓ Costs saved (${updatedOrders} orders). Refreshing...`);
   // Refresh auto commission to pick up new costs
   await previewAutoCommission();
 }
