@@ -4145,7 +4145,23 @@ async function previewAutoCommission() {
       .filter(sid => !leadMatchedIds.has(sid))
       .map(sid => staffList.find(s => s.id === sid))
       .filter(Boolean);
-    const reportStaff = [...leadMatchedStaff, ...extraMatchedStaff];
+    // Sort: NE-DM → NE-TM → NE-Admin/Other → AC-DM → AC-TM → AC-Admin/Other → Outsider → Manager
+    const staffSortKey = (s) => {
+      const MANAGERS = ['Kai Yan','Chloe','Carine','Jess','Zehao'];
+      if (MANAGERS.some(m => s.name && s.name.toLowerCase().includes(m.toLowerCase()))) return [11, s.name];
+      const team = s.company_team || 'New Era';
+      const ch = (s.channel || '').toUpperCase();
+      const pos = (s.position || s.role || s.staff_type || '').toLowerCase();
+      const teamBase = team === 'Alpha C' ? 5 : team === 'Shared' ? 9 : 0;
+      const roleOff = ch === 'DM' ? 0 : ch === 'TM' ? 1 :
+        pos.includes('editor') ? 3 : pos.includes('content') ? 4 : 2;
+      return [teamBase + roleOff, s.name];
+    };
+    const reportStaff = [...leadMatchedStaff, ...extraMatchedStaff].sort((a, b) => {
+      const [ka, na] = staffSortKey(a);
+      const [kb, nb] = staffSortKey(b);
+      return ka !== kb ? ka - kb : na.localeCompare(nb);
+    });
 
     autoCommissionData = reportStaff
       .map(s => {
@@ -8419,7 +8435,7 @@ async function showBreakdown(id) {
           + ' data-orderchannel="' + (o.channel||'DM') + '"'
           + ' style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">'
           + btnLabel + '</div>';
-        return '<div class="order-row bd-order-row" data-bdid="' + bdId + '" data-orderno="' + (o.order_no||'') + '" style="grid-template-columns:20px 1fr 1.5fr 0.8fr 0.7fr 0.8fr 0.8fr 0.8fr 0.9fr 0.7fr;' + (o.team==='Outsider'?'opacity:0.7':'') + '">' +
+        return '<div class="order-row bd-order-row" data-bdid="' + bdId + '" data-orderno="' + (o.order_no||'') + '" style="grid-template-columns:20px 90px 160px 80px 70px 80px 90px 80px 130px 80px;min-width:900px;' + (o.team==='Outsider'?'opacity:0.7':'') + '">' +
           '<span><input type="checkbox" class="bd-order-chk" data-bdid="' + bdId + '" data-orderno="' + (o.order_no||'') + '" style="cursor:pointer"></span>' +
           '<span style="color:var(--muted);font-family:var(--mono)">' + (o.order_no || '\u2014') + '</span>' +
           '<span>' + (o.customer_name || '\u2014') + '</span>' +
@@ -8467,11 +8483,13 @@ async function showBreakdown(id) {
         </div>
         ${setAllBtns}
         ${summaryParts ? `<div style="font-size:11px;margin-bottom:6px">${summaryParts}</div>` : ''}
-        <div class="order-row header" style="font-size:10px;grid-template-columns:20px 1fr 1.5fr 0.8fr 0.7fr 0.8fr 0.8fr 0.8fr 0.9fr 0.7fr">
+        <div style="overflow-x:auto">
+        <div class="order-row header" style="font-size:10px;grid-template-columns:20px 90px 160px 80px 70px 80px 90px 80px 130px 80px;min-width:900px">
           <span><input type="checkbox" id="bdChkAll_${bdId}" onchange="toggleAllBdChk('${bdId}',this.checked)" style="cursor:pointer"></span>
           <span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team</span><span>Channel</span><span>Sales Owner</span><span>Cost (RM)</span>
         </div>
         ${orderRows}
+        </div>
       </div>` : '';
     } else {
       catHTML = rawCats.map(cat => {
