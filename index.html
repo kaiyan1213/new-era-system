@@ -4051,23 +4051,22 @@ async function previewAutoCommission() {
     // showing up as a false "failed to parse" warning.
     const breakdowns = (await sb('nec_payslip_breakdown', { filter: `year=eq.${year}&month=eq.${month}`, select: '*' }))
       .filter(b => !(proxyList.find(p => p.id === b.proxy_id) || {}).is_manager_account);
+    // Build a distributor_code -> proxy name map by fetching proxy_accounts
+    const proxyNameMap = {};
+    proxyList.forEach(p => {
+      if (p.coway_id) proxyNameMap[String(p.coway_id)] = p.name;
+      if (p.id) proxyNameMap[String(p.id)] = p.name;
+    });
     let payslipOrders = [];
     breakdowns.forEach(b => {
       const orders = flattenBreakdownOrders(b.categories_json);
+      const resolvedProxyName = proxyNameMap[String(b.distributor_code)] || proxyNameMap[String(b.proxy_id)] || b.distributor_code || '—';
       orders.forEach(o => payslipOrders.push({
         order_no: o.order_no,
         customer_name: o.customer_name,
         norm_name: normName(o.customer_name),
         proxy_id: b.proxy_id,
-        proxy_name: (() => {
-          const match = proxyList.find(p =>
-            p.id === b.proxy_id ||
-            String(p.coway_id) === String(b.distributor_code) ||
-            String(p.id) === String(b.proxy_id)
-          );
-          if (!match && b.distributor_code) console.log('[proxy_name] no match for proxy_id='+b.proxy_id+' distributor_code='+b.distributor_code+' sample proxyList coway_ids='+proxyList.slice(0,3).map(p=>p.coway_id+'/'+p.id).join(','));
-          return match ? match.name : (b.distributor_code || '—');
-        })(),
+        proxy_name: resolvedProxyName,
         total_com: o.total_com || 0,
         com_from_payslip: o.com_from_payslip || 0,
         allowance_portion: o.allowance_portion || 0,
@@ -4826,7 +4825,6 @@ async function generateStaffPayslip(idx) {
     epf_employee: epfEmployee, epf_employer: epfEmployer, own_proxy_offset: ownProxyOffset,
     total_pay: totalPay, month, year, orders_count: orders.length, notes: null,
   };
-  console.log('[Calc] orders proxy_names:', orders.map(o=>o.proxy_name+'/'+o.customer_name));
   const calcHtml = buildCalculationHTML(staff, fakeRecord, orders);
   const win = window.open('', '_blank', 'width=760,height=900');
   win.document.write(`<html><head><title>Calculation - ${staff.name} - ${MONTHS[month]} ${year}</title>
