@@ -3933,11 +3933,14 @@ function calcTMCommission(tmOrders) {
   let total = 0;
   const breakdownParts = [];
   tmOrders.forEach((o, idx) => {
-    const n = idx + 1; // 1-indexed position among this staff's TM orders this month
+    const n = idx + 1;
     const pct = n <= 10 ? 0.5 : (n <= 20 ? 0.7 : 0.9);
-    const amt = r2((o.total_com || 0) * pct);
+    const cost = parseFloat(o.cost || 0);
+    const profit = r2((parseFloat(o.total_com) || 0) - cost);
+    const amt = r2(profit * pct);
     total = r2(total + amt);
-    breakdownParts.push(`#${n} ${o.customer_name || o.order_no || '—'}: RM${(o.total_com||0).toFixed(2)} × ${(pct*100).toFixed(0)}% = RM${amt.toFixed(2)}`);
+    const costNote = cost > 0 ? ` - RM${cost.toFixed(2)} cost` : '';
+    breakdownParts.push(`#${n} ${o.customer_name || o.order_no || '—'}: RM${(o.total_com||0).toFixed(2)}${costNote} × ${(pct*100).toFixed(0)}% = RM${amt.toFixed(2)}`);
   });
   return { commission: total, breakdown: breakdownParts.join(' | ') };
 }
