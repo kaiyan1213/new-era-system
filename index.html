@@ -523,28 +523,7 @@
          never the full staff roster (that's the Staff List tab now). -->
     <div id="payrollPane-records">
 
-    <div class="stats-row">
-      <div class="stat-card">
-        <div class="stat-label">Total Staff</div>
-        <div class="stat-value blue" id="statStaffCount">—</div>
-        <div class="stat-sub">active members</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label" id="statPayrollNetLabel">Net This Month</div>
-        <div class="stat-value" id="statPayrollMonth">—</div>
-        <div class="stat-sub" id="statPayrollNetSub">total payout</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Sales Staff</div>
-        <div class="stat-value green" id="statSalesStaff">—</div>
-        <div class="stat-sub">commission-based</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Admin Staff</div>
-        <div class="stat-value yellow" id="statAdminStaff">—</div>
-        <div class="stat-sub">fixed salary</div>
-      </div>
-    </div>
+
 
     <div class="toolbar">
       <div class="toolbar-left">
@@ -3715,20 +3694,47 @@ async function loadPayroll() {
         groups[key].commission = r2(groups[key].commission + comm + sal + bon - ded - epf);
         groups[key].claim = r2(groups[key].claim + claim);
       });
-      const rows = GROUP_ORDER.filter(k => groups[k]).map(k => {
+      // Per-staff cost metrics for insight
+      Object.keys(groups).forEach(k => {
         const g = groups[k];
-        const claimPart = g.claim !== 0 ? `<span style="font-size:10px;color:var(--muted);margin-left:8px">Comm/Salary: RM ${fmtNum(g.commission)} · Claim: RM ${fmtNum(g.claim)}</span>` : `<span style="font-size:10px;color:var(--muted);margin-left:8px">RM ${fmtNum(g.commission)}</span>`;
-        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-bottom:1px solid var(--border)">
-          <div style="font-size:12px;font-weight:600">${k} <span style="font-size:11px;color:var(--muted);font-weight:400">(${g.count} staff)</span>${claimPart}</div>
-          <div style="font-size:13px;font-weight:700;color:var(--green);font-family:var(--mono)">RM ${fmtNum(g.total)}</div>
+        g.perHead = g.count > 0 ? r2(g.total / g.count) : 0;
+        g.claimPct = g.commission > 0 ? r2((g.claim / g.commission) * 100) : 0;
+      });
+
+      const teamColors = {
+        'NE — DM': '#2563eb', 'NE — TM': '#7c3aed', 'NE — Admin': '#0891b2',
+        'NE — Editor': '#0891b2', 'NE — Content Creator': '#0891b2',
+        'AC — DM': '#f97316', 'AC — TM': '#dc2626', 'AC — Admin': '#f97316',
+        'AC — Content Creator': '#f97316',
+        'Shared': '#6b7280', 'Outsider': '#6b7280', 'Manager': '#d97706'
+      };
+
+      const cards = GROUP_ORDER.filter(k => groups[k]).map(k => {
+        const g = groups[k];
+        const color = teamColors[k] || 'var(--accent)';
+        const commRow = `<div style="display:flex;justify-content:space-between;margin-bottom:3px"><span style="color:var(--muted);font-size:11px">Comm / Salary</span><span style="font-size:11px;font-family:var(--mono)">RM ${fmtNum(g.commission)}</span></div>`;
+        const claimRow = g.claim > 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:3px"><span style="color:var(--muted);font-size:11px">Claim / Bonus</span><span style="font-size:11px;font-family:var(--mono);color:var(--green)">+RM ${fmtNum(g.claim)}</span></div>` : '';
+        const perHeadRow = `<div style="display:flex;justify-content:space-between;margin-bottom:3px"><span style="color:var(--muted);font-size:11px">Per head avg</span><span style="font-size:11px;font-family:var(--mono)">RM ${fmtNum(g.perHead)}</span></div>`;
+        const claimPctRow = g.claim > 0 ? `<div style="display:flex;justify-content:space-between"><span style="color:var(--muted);font-size:11px">Claim % of comm</span><span style="font-size:11px;font-family:var(--mono);color:${g.claimPct > 20 ? 'var(--red)' : 'var(--muted)'}">${g.claimPct.toFixed(1)}%${g.claimPct > 20 ? ' ⚠' : ''}</span></div>` : '';
+        return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;min-width:180px;flex:1">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+            <div>
+              <div style="font-size:12px;font-weight:700;color:${color}">${k}</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:2px">${g.count} staff</div>
+            </div>
+            <div style="font-size:16px;font-weight:800;font-family:var(--mono);color:var(--text)">RM ${fmtNum(g.total)}</div>
+          </div>
+          <div style="border-top:1px solid var(--border);padding-top:8px">
+            ${commRow}${claimRow}${perHeadRow}${claimPctRow}
+          </div>
         </div>`;
       }).join('');
-      if (rows) {
+
+      if (cards) {
         summaryEl.style.display = 'block';
-        summaryEl.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
-          <div style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;border-bottom:1px solid var(--border);background:var(--surface2)">Company Total Outlay by Team & Role (incl. proxy-settled amounts)</div>
-          ${rows}
-        </div>`;
+        summaryEl.innerHTML = `
+          <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px">Company Payroll Outlay Breakdown</div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px">${cards}</div>`;
       } else {
         summaryEl.style.display = 'none';
       }
