@@ -5517,9 +5517,23 @@ async function confirmManagerToPayroll(managerId) {
     // the fully transparent Calculation view and the absorbed Payslip
     // view from the same source, on demand.
     const notes = JSON.stringify({ com: t.comTotal, claim: t.claimTotal, mistake: t.mistakeTotal, accBelow: t.accBelowAmt });
+    // Manager settlement: total already includes Com+Claim+Mistake-AccBelow
+    // from getManagerTotalForPeriod. own_proxy_offset must be 0 — managers
+    // are not proxy accounts, so nothing gets deducted here.
     await sb('nec_payroll', {
       method: 'POST',
-      body: { staff_id: m.staff_id, year, month, commission_earned: t.total, record_type: 'manager', notes }
+      body: {
+        staff_id: m.staff_id, year, month,
+        commission_earned: t.comTotal,
+        claim_amount: t.claimTotal,
+        bonus: t.mistakeTotal,
+        deductions: t.accBelowAmt,
+        own_proxy_offset: 0,
+        base_salary: 0,
+        epf_employee: 0,
+        record_type: 'manager',
+        notes
+      }
     });
     await logAudit('CREATE', 'nec_payroll', `Confirmed ${m.name}'s manager settlement for ${MONTHS[month]} ${year} into Payroll — Com ${fmt(t.comTotal)} (Manager Comm ${fmt(t.commTotal)} + Manager Invoice ${fmt(t.invoiceAmt)} + Outsider ${fmt(t.outsiderAmt)}) + Claim ${fmt(t.claimTotal)} + Mistake ${fmt(t.mistakeTotal)} − Acc Below ${fmt(t.accBelowAmt)} = Total RM${t.total.toFixed(2)}`);
     showToast(`${m.name} confirmed to Payroll ✓`);
