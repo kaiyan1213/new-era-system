@@ -4149,7 +4149,9 @@ async function previewAutoCommission() {
         // not a separate concept, so there's no dedicated
         // default_commission_algo field. This is what lets the same staff
         // have a mix of e.g. mostly-DM orders + a few Outsider orders.
-        const algo = (manualAssign && manualAssign.commission_algo) || (staff.channel || 'DM').toLowerCase();
+        // commission_algo: explicit assignment > order team (Outsider overrides staff channel) > staff channel
+        const algo = (manualAssign && manualAssign.commission_algo) ||
+          (po.team === 'Outsider' ? 'outsider' : (staff.channel || 'DM').toLowerCase());
         // cost comes from the assignment record (admin fills this in Breakdown tab)
         // regardless of whether it was auto-matched or manually assigned
         // cost: from categories_json (admin fills in Breakdown tab) — this works
