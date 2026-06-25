@@ -4124,7 +4124,7 @@ async function previewAutoCommission() {
         // default_commission_algo field. This is what lets the same staff
         // have a mix of e.g. mostly-DM orders + a few Outsider orders.
         const algo = (manualAssign && manualAssign.commission_algo) || (staff.channel || 'DM').toLowerCase();
-        matchedByStaffId[staff.id].push({ ...po, commission_algo: algo });
+        matchedByStaffId[staff.id].push({ ...po, commission_algo: algo, cost: manualAssign?.cost ?? 0 });
         matchedNormNamesUsed.add(po.norm_name);
       } else {
         unmatchedPayslipOrders.push(po);
@@ -4152,10 +4152,13 @@ async function previewAutoCommission() {
         const allOrders = (matchedByStaffId[s.id] || []).map(o => ({
           customer_name: o.customer_name,
           order_no: o.order_no,
-          product_model: o.proxy_name, // reused field for display in payslip/orders modal
+          product_model: o.proxy_name,
           install_date: '',
           total_com: o.total_com,
-          commission_algo: o.commission_algo
+          com_from_payslip: o.com_from_payslip,
+          allowance_portion: o.allowance_portion,
+          commission_algo: o.commission_algo,
+          cost: o.manualAssign?.cost ?? o.cost ?? 0
         }));
         // Split by per-order algorithm and compute each group with its own
         // formula, then sum into one commission total for this staff. DM
@@ -4919,7 +4922,13 @@ function buildCalculationHTML(staff, r, orders = []) {
   const renderOrdGroup = (list, label, color, getEarned, extraRows = []) => {
     if (!list.length) return '';
     const sub = r2(list.reduce((s,o,i) => s + getEarned(o,i), 0) + extraRows.reduce((s,r)=>s+r.amt,0));
-    const rows = list.map((o,i) => `<tr style="border-bottom:1px solid #f0f0f0"><td style="padding:3px 0">${o.customer_name||'—'}</td><td style="padding:3px 6px;color:#999;font-family:monospace;font-size:10px">${o.order_no||'—'}</td><td style="text-align:right;padding:3px 0;color:#888;font-size:10px">#${i+1}</td><td style="text-align:right;padding:3px 0 3px 8px;font-weight:600">RM ${fmtNum(getEarned(o,i))}</td></tr>`).join('');
+    const isTM = label.includes('TM');
+    const rows = list.map((o,i) => {
+      const cost = parseFloat(o.cost||0);
+      const earned = getEarned(o,i);
+      const costNote = isTM && cost > 0 ? ` <span style="color:#999;font-size:9px">(-RM${fmtNum(cost)})</span>` : '';
+      return `<tr style="border-bottom:1px solid #f0f0f0"><td style="padding:3px 0">${o.customer_name||'—'}</td><td style="padding:3px 6px;color:#999;font-family:monospace;font-size:10px">${o.order_no||'—'}</td><td style="text-align:right;padding:3px 0;color:#888;font-size:10px">#${i+1}</td><td style="text-align:right;padding:3px 0 3px 8px;font-weight:600">RM ${fmtNum(earned)}${costNote}</td></tr>`;
+    }).join('');
     const bonusRows = extraRows.map(r => `<tr style="border-bottom:1px solid #f0f0f0;background:#f0f8ff"><td colspan="2" style="padding:3px 0;color:#2563eb;font-weight:600">${r.label}</td><td></td><td style="text-align:right;padding:3px 0 3px 8px;font-weight:700;color:#2563eb">+RM ${fmtNum(r.amt)}</td></tr>`).join('');
     return `<div style="margin-top:12px"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px"><span style="font-weight:700;font-size:11px;color:${color};text-transform:uppercase">${label} (${list.length} orders)</span><span style="font-weight:700;font-size:11px">RM ${fmtNum(sub)}</span></div><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid #ddd;color:#888"><th style="text-align:left;padding:2px 0;font-weight:600">Customer</th><th style="text-align:left;padding:2px 6px;font-weight:600">Order</th><th style="text-align:right;padding:2px 0;font-weight:600">#</th><th style="text-align:right;padding:2px 0 2px 8px;font-weight:600">Earned</th></tr></thead><tbody>${rows}${bonusRows}</tbody></table></div>`;
   };
@@ -4928,7 +4937,21 @@ function buildCalculationHTML(staff, r, orders = []) {
   if (dmOrds.length >= 10) dmBonusRows.push({ label: '🎯 Milestone Bonus (10th order)', amt: 1000 });
   if (dmOrds.length >= 20) dmBonusRows.push({ label: '🎯 Milestone Bonus (20th order)', amt: 1000 });
 
-  const orderSection = orders.length ? `<div style="margin-top:14px;border-top:2px dashed #ccc;padding-top:12px"><div style="font-weight:800;font-size:13px;margin-bottom:6px">Order Breakdown</div>${renderOrdGroup(dmOrds,'DM — Digital Marketing','#2563eb',getDmEarned,dmBonusRows)}${renderOrdGroup(tmOrds,'TM — Telemarketing','#7c3aed',o=>r2(parseFloat(o.total_com||0)*0.5))}${renderOrdGroup(osOrds,'Outsider','#6b7280',o=>parseFloat(o.total_com||0))}</div>` : '';
+  // For TM: (total_com - cost) × pct
+  const getTmEarned = (o, i, list) => {
+    const n = i + 1;
+    const pct = n <= 10 ? 0.5 : (n <= 20 ? 0.7 : 0.9);
+    const cost = parseFloat(o.cost || 0);
+    return r2((parseFloat(o.total_com||0) - cost) * pct);
+  };
+  const orderSection = orders.length ? (() => {
+    const sections = [
+      renderOrdGroup(dmOrds, 'DM — Digital Marketing', '#2563eb', getDmEarned, dmBonusRows),
+      renderOrdGroup(tmOrds, 'TM — Telemarketing', '#7c3aed', getTmEarned),
+      renderOrdGroup(osOrds, 'Outsider', '#6b7280', o => parseFloat(o.total_com||0)),
+    ].join('');
+    return `<div style="margin-top:14px;border-top:2px dashed #ccc;padding-top:12px"><div style="font-weight:800;font-size:13px;margin-bottom:6px">Order Breakdown</div>${sections}</div>`;
+  })() : '';
   return `<div style="max-width:680px;margin:0 auto;font-family:Inter,sans-serif;color:#111;background:#fff;padding:32px;border-radius:8px;border:2px dashed #ccc"><div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:16px;margin-bottom:16px"><div><div style="font-size:18px;font-weight:800">Calculation Sheet</div><div style="font-size:12px;color:#666">Internal worksheet — not a billing document</div></div><div style="text-align:right;font-size:12px;color:#666"><div>${staff.name} — ${MONTH_FULL[r.month]} ${r.year}</div><div>Generated: ${new Date().toISOString().slice(0,10)}</div></div></div><div style="background:#f5f5f5;border-radius:6px;padding:12px;margin-bottom:12px;font-size:13px">${r.orders_count?`<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Orders</span><span>${r.orders_count}</span></div>`:''} ${rows.map(row=>`<div style="display:flex;justify-content:space-between;margin-bottom:4px${row.amount<0?';color:#c00':''}"><span>${row.label}</span><span>${row.amount===null?'—':(row.amount<0?'−RM ':'RM ')+fmtNum(Math.abs(row.amount))}</span></div>`).join('')}<div style="display:flex;justify-content:space-between;font-weight:800;font-size:15px;border-top:1px solid #ccc;margin-top:8px;padding-top:8px"><span>Total</span><span>${parseFloat(r.total_pay)<0?'−':''}RM ${fmtNum(Math.abs(parseFloat(r.total_pay||0)))}</span></div></div>${parseFloat(r.epf_employer||0)>0?`<div style="font-size:11px;color:#666;margin-bottom:6px">Employer EPF contribution (13%, company record only): RM ${fmtNum(r.epf_employer)}</div>`:''}${orderSection}</div>`;
 }
 
@@ -8396,7 +8419,7 @@ async function showBreakdown(id) {
           + ' data-orderchannel="' + (o.channel||'DM') + '"'
           + ' style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">'
           + btnLabel + '</div>';
-        return '<div class="order-row bd-order-row" data-bdid="' + bdId + '" data-orderno="' + (o.order_no||'') + '" style="grid-template-columns:20px 1fr 1.5fr 0.8fr 0.7fr 0.8fr 0.8fr 0.8fr 1.2fr;' + (o.team==='Outsider'?'opacity:0.7':'') + '">' +
+        return '<div class="order-row bd-order-row" data-bdid="' + bdId + '" data-orderno="' + (o.order_no||'') + '" style="grid-template-columns:20px 1fr 1.5fr 0.8fr 0.7fr 0.8fr 0.8fr 0.8fr 0.9fr 0.7fr;' + (o.team==='Outsider'?'opacity:0.7':'') + '">' +
           '<span><input type="checkbox" class="bd-order-chk" data-bdid="' + bdId + '" data-orderno="' + (o.order_no||'') + '" style="cursor:pointer"></span>' +
           '<span style="color:var(--muted);font-family:var(--mono)">' + (o.order_no || '\u2014') + '</span>' +
           '<span>' + (o.customer_name || '\u2014') + '</span>' +
