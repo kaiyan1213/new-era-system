@@ -4059,7 +4059,15 @@ async function previewAutoCommission() {
         customer_name: o.customer_name,
         norm_name: normName(o.customer_name),
         proxy_id: b.proxy_id,
-        proxy_name: (proxyList.find(p => p.id === b.proxy_id || String(p.coway_id) === String(b.distributor_code) || String(p.id) === String(b.proxy_id)) || {}).name || b.distributor_code || '—',
+        proxy_name: (() => {
+          const match = proxyList.find(p =>
+            p.id === b.proxy_id ||
+            String(p.coway_id) === String(b.distributor_code) ||
+            String(p.id) === String(b.proxy_id)
+          );
+          if (!match && b.distributor_code) console.log('[proxy_name] no match for proxy_id='+b.proxy_id+' distributor_code='+b.distributor_code+' sample proxyList coway_ids='+proxyList.slice(0,3).map(p=>p.coway_id+'/'+p.id).join(','));
+          return match ? match.name : (b.distributor_code || '—');
+        })(),
         total_com: o.total_com || 0,
         com_from_payslip: o.com_from_payslip || 0,
         allowance_portion: o.allowance_portion || 0,
