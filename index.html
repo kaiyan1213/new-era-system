@@ -4191,6 +4191,7 @@ async function previewAutoCommission() {
             <th>收单追踪 Name</th>
             <th>Verified Orders</th>
             <th>NE / AC</th>
+            <th>Channel</th>
             <th>Commission</th>
             <th>Breakdown</th>
             <th>Actions</th>
@@ -4210,6 +4211,7 @@ async function previewAutoCommission() {
             <td class="td-mono">${row.staff.lead_staff_name}</td>
             <td class="td-mono">${row.orders.length}</td>
             <td style="font-size:12px">${teamSummary}</td>
+            <td><span class="badge badge-${(row.staff.channel||'').toLowerCase()}">${row.staff.channel||'—'}</span></td>
             <td class="td-mono" style="color:var(--green);font-weight:600">${fmt(row.commission)}</td>
             <td class="td-muted" style="font-size:11px">${row.breakdown}</td>
             <td>
@@ -8043,6 +8045,33 @@ async function setAllBreakdownOwner(breakdownId, selectedOnly = false) {
   showBreakdown(breakdownId);
 }
 
+function orderCostInput(o, bdId, currentCost) {
+  const val = currentCost !== null && currentCost !== undefined && currentCost !== '' ? currentCost : '';
+  return '<div class="bd-cost-cell" style="display:flex;align-items:center">'
+    + '<input type="number" step="0.01" min="0" placeholder="0.00" value="' + val + '" '
+    + 'style="width:100%;font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:var(--mono)" '
+    + 'data-orderno="' + (o.order_no||'') + '" data-bdid="' + bdId + '" '
+    + 'onchange="saveBdOrderCost(this)">'
+    + '</div>';
+}
+
+async function saveBdOrderCost(input) {
+  const orderno = input.dataset.orderno;
+  const cost = parseFloat(input.value) || 0;
+  try {
+    // Update cost in nec_order_assignments for this order
+    const resp = await fetch(SUPABASE_URL + '/rest/v1/nec_order_assignments?order_no=eq.' + orderno, {
+      method: 'PATCH',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ cost })
+    });
+    if (resp.ok) {
+      input.style.borderColor = 'var(--green)';
+      setTimeout(() => { input.style.borderColor = ''; }, 1500);
+    }
+  } catch(e) { showToast('Cost save error: ' + e.message, 'error'); }
+}
+
 function toggleAllBdChk(bdId, checked) {
   document.querySelectorAll(`.bd-order-chk[data-bdid="${bdId}"]`).forEach(c => { c.checked = checked; });
 }
@@ -8327,7 +8356,7 @@ async function showBreakdown(id) {
         // Use high limit to avoid Supabase's default 1000-row cap
         const assignments = await sb('nec_order_assignments', {
           filter: `year=eq.${bd.year}&month=eq.${bd.month}`,
-          select: 'order_no,staff_id,staff_name,commission_algo,proxy_id',
+          select: 'order_no,staff_id,staff_name,commission_algo,proxy_id,cost',
           limit: 10000
         });
         const filtered = assignments.filter(a => 
@@ -8340,7 +8369,7 @@ async function showBreakdown(id) {
           const staff = staffList.find(s => String(s.id) === String(a.staff_id))
                      || (a.staff_name && staffList.find(s => s.name === a.staff_name));
           const displayName = staff?.name || a.staff_name || '';
-          if (displayName) assignedStaffMap[String(a.order_no)] = { name: displayName, algo: a.commission_algo, staff_id: staff?.id || a.staff_id };
+          if (displayName) assignedStaffMap[String(a.order_no)] = { name: displayName, algo: a.commission_algo, staff_id: staff?.id || a.staff_id, cost: a.cost };
         });
       } catch(e) { /* non-fatal */ }
       const neTotal = r2(rawCats.filter(o=>!o.team||o.team==='New Era').reduce((s,o)=>s+parseFloat(o.total_com||0),0));
@@ -8350,6 +8379,7 @@ async function showBreakdown(id) {
       const orderRows = rawCats.map(o => {
         const assigned = assignedStaffMap[String(o.order_no)];
         const assignedName = assigned?.name || '';
+        const assignedCost = assigned?.cost ?? '';
         // Simple button — no inline dropdown, avoids all proxy_id type issues
         const btnLabel = assignedName
           ? '<span style="font-size:10px;color:var(--accent)">' + assignedName + '</span> <button style="font-size:10px;padding:1px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);cursor:pointer" onclick="openBdAssignModal(event)">✎</button>'
@@ -8376,6 +8406,7 @@ async function showBreakdown(id) {
           orderTeamSelect(o, bdId) +
           orderChannelSelect(o, bdId) +
           staffCell +
+          orderCostInput(o, bdId, assignedCost) +
           '</div>';
       }).join('');
       const summaryParts = [
@@ -8413,9 +8444,9 @@ async function showBreakdown(id) {
         </div>
         ${setAllBtns}
         ${summaryParts ? `<div style="font-size:11px;margin-bottom:6px">${summaryParts}</div>` : ''}
-        <div class="order-row header" style="font-size:10px;grid-template-columns:20px 1fr 1.5fr 0.8fr 0.7fr 0.8fr 0.8fr 0.8fr 1.2fr">
+        <div class="order-row header" style="font-size:10px;grid-template-columns:20px 1fr 1.5fr 0.8fr 0.7fr 0.8fr 0.8fr 0.8fr 0.9fr 0.7fr">
           <span><input type="checkbox" id="bdChkAll_${bdId}" onchange="toggleAllBdChk('${bdId}',this.checked)" style="cursor:pointer"></span>
-          <span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team</span><span>Channel</span><span>Sales Owner</span>
+          <span>Order No</span><span>Customer</span><span>Payslip Com</span><span>Allowance</span><span>Total Com</span><span>Team</span><span>Channel</span><span>Sales Owner</span><span>Cost (RM)</span>
         </div>
         ${orderRows}
       </div>` : '';
