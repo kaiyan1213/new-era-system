@@ -6184,6 +6184,8 @@ async function loadPL() {
     const invoices = await sb('proxy_invoices', { filter: invFilter, select: 'proxy_id,year,month,coway_payslip_amount,company_team' });
     const proxies = await sb('proxy_accounts', { select: 'id,channel,company_team' });
     const costs = await sb('nec_pl_costs', { filter: invFilter });
+    // Ensure ccCards is loaded so we can determine which card belongs to NE vs AC
+    if (!ccCards.length) ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true', select: 'id,card_name,bank,owner_team' }).catch(() => []);
     const breakdowns = await sb('nec_payslip_breakdown', { filter: invFilter, select: 'proxy_id,year,month,categories_json' });
 
     // Build per-proxy team-split proportions — New Era / Alpha C / Outsider
@@ -6244,90 +6246,161 @@ async function loadPL() {
 
     const totalRev = r2(Object.values(revByBucket).reduce((s,v) => s+v, 0) + managerPoolRevenue);
 
-    // ── Payroll costs ──────────────────────────────────────────
-    // Every ringgit the company pays out is a cost — staff commission,
-    // admin salary, AND manager profit-share settlements (the matching
-    // manager pool money is counted as revenue above, so including the
-    // full settlement here keeps both sides of that flow visible).
+    // ── NEW P&L LOGIC ──────────────────────────────────────────
+    // Buckets: NE-DM, NE-TM, NE-Shared, AC-DM, AC-TM, AC-Shared, Outsider, Manager Pool
+    const BUCKETS8 = ['NE-DM','NE-TM','NE-Shared','AC-DM','AC-TM','AC-Shared','Outsider','Manager Pool'];
+    const costCat = {}; // bucket -> {category_label -> amount}
+    const revBucket = {}; // bucket -> amount
+    BUCKETS8.forEach(b => { costCat[b] = {}; revBucket[b] = 0; });
+
+    function addCost(bucket, label, amt) {
+      if (!bucket || amt === 0) return;
+      if (!costCat[bucket]) costCat[bucket] = {};
+      costCat[bucket][label] = (costCat[bucket][label] || 0) + amt;
+    }
+
+    // ── REVENUE by bucket (from breakdown orders total_com) ──
+    for (const bd of breakdowns) {
+      const key = `${bd.proxy_id}_${bd.year}_${bd.month}`;
+      const inv = invoices.find(i => i.proxy_id === bd.proxy_id && i.year === bd.year && i.month === bd.month);
+      if (!inv) continue;
+      const payslipTotal = parseFloat(inv.coway_payslip_amount || 0);
+      const shares = breakdownShares[key];
+      if (shares && Object.keys(shares).length) {
+        Object.entries(shares).forEach(([bucket, share]) => {
+          // bucket is "New Era|DM", "Alpha C|TM", "Outsider" etc
+          let b8;
+          if (bucket === 'Outsider') b8 = 'Outsider';
+          else if (bucket === 'New Era|DM') b8 = 'NE-DM';
+          else if (bucket === 'New Era|TM') b8 = 'NE-TM';
+          else if (bucket === 'Alpha C|DM') b8 = 'AC-DM';
+          else if (bucket === 'Alpha C|TM') b8 = 'AC-TM';
+          else if (bucket.startsWith('New Era')) b8 = 'NE-DM'; // fallback
+          else if (bucket.startsWith('Alpha C')) b8 = 'AC-DM'; // fallback
+          else b8 = 'NE-DM';
+          revBucket[b8] = r2((revBucket[b8] || 0) + payslipTotal * share);
+        });
+      }
+    }
+    // Manager pool revenue
+    revBucket['Manager Pool'] = r2((revBucket['Manager Pool'] || 0) + managerPoolRevenue);
+
+    // ── PAYROLL COSTS ──
     let payFilter = `year=eq.${year}`;
     if (month) payFilter += `&month=eq.${month}`;
-    const payrollRows = await sb('nec_payroll', { filter: payFilter, select: 'staff_id,month,total_pay,commission_type,record_type' });
-    const allStaff = await sb('nec_staff', { select: 'id,staff_type,channel,company_team,bank_directory_id' });
+    const payrollRows = await sb('nec_payroll', { filter: payFilter, select: 'staff_id,month,commission_earned,base_salary,bonus,claim_amount,deductions,epf_employee,commission_type,record_type,own_proxy_offset' });
+    const allStaff = await sb('nec_staff', { select: 'id,staff_type,channel,company_team,bank_directory_id,position' });
     const staffMap = {};
     allStaff.forEach(s => staffMap[s.id] = s);
-    // For Shared-team staff: load their salary split from bank directory
+    // Shared staff split
     const sharedStaffIds = allStaff.filter(s => s.company_team === 'Shared' && s.bank_directory_id).map(s => s.bank_directory_id);
-    const bankDirSplitMap = {}; // staff_id -> {salary_split_ne, salary_split_ac}
+    const bankDirSplitMap = {};
     if (sharedStaffIds.length) {
       try {
         const bdRows = await sb('nec_bank_directory', { filter: `id=in.(${sharedStaffIds.join(',')})`, select: 'id,salary_split_ne,salary_split_ac' });
         const bdById = {};
         bdRows.forEach(r => { bdById[r.id] = r; });
-        allStaff.filter(s => s.bank_directory_id && bdById[s.bank_directory_id]).forEach(s => {
-          bankDirSplitMap[s.id] = bdById[s.bank_directory_id];
-        });
-      } catch(e) { /* non-fatal */ }
+        allStaff.filter(s => s.bank_directory_id && bdById[s.bank_directory_id]).forEach(s => { bankDirSplitMap[s.id] = bdById[s.bank_directory_id]; });
+      } catch(e) {}
     }
 
-    const payrollCostLines = []; // {label, bucket, amount}
     payrollRows.forEach(p => {
-      const netPay = parseFloat(p.total_pay || 0);
-      if (netPay === 0) return;
+      // Company actual outlay per staff = commission + salary + bonus + claim - deductions - epf
+      const comm = parseFloat(p.commission_earned || 0);
+      const sal = parseFloat(p.base_salary || 0);
+      const bon = parseFloat(p.bonus || 0);
+      const claim = parseFloat(p.claim_amount || 0);
+      const ded = parseFloat(p.deductions || 0);
+      const epf = parseFloat(p.epf_employee || 0);
+      const outlay = r2(comm + sal + bon + claim - ded - epf);
+      if (outlay === 0) return;
+
       if (p.record_type === 'manager') {
-        payrollCostLines.push({ label: 'Manager Settlement', bucket: 'Manager Pool', amount: netPay });
+        addCost('Manager Pool', 'Manager Settlement', outlay);
         return;
       }
       const staff = staffMap[p.staff_id];
       if (p.commission_type === 'outsider') {
-        payrollCostLines.push({ label: 'Outsider Commission', bucket: 'Outsider', amount: netPay });
-      } else if (staff?.staff_type === 'sales') {
-        const chLabel = staff.channel === 'TM' ? 'TM' : 'DM';
-        payrollCostLines.push({ label: `Staff Commission (${chLabel})`, bucket: staff?.company_team || 'New Era', amount: netPay });
-      } else if (staff?.company_team === 'Shared') {
-        // Shared-team staff: split the cost proportionally between NE and AC
-        // using the salary_split_ne / salary_split_ac from their bank directory entry.
-        // Default 50/50 if not set.
-        const bankEntry = bankDirSplitMap[staff.id];
+        addCost('Outsider', 'Outsider Commission', outlay);
+        return;
+      }
+      const team = staff?.company_team || 'New Era';
+      const ch = (staff?.channel || 'DM').toUpperCase();
+      if (team === 'Shared') {
+        const bankEntry = bankDirSplitMap[staff?.id];
         const nePct = bankEntry?.salary_split_ne != null ? bankEntry.salary_split_ne / 100 : 0.5;
-        const acPct = bankEntry?.salary_split_ac != null ? bankEntry.salary_split_ac / 100 : (1 - nePct);
-        if (nePct > 0) payrollCostLines.push({ label: 'Admin Salary (Shared)', bucket: 'New Era', amount: r2(netPay * nePct) });
-        if (acPct > 0) payrollCostLines.push({ label: 'Admin Salary (Shared)', bucket: 'Alpha C', amount: r2(netPay * acPct) });
+        const acPct = 1 - nePct;
+        const pos = (staff?.position || staff?.staff_type || '').toLowerCase();
+        const roleLabel = pos.includes('editor') ? 'Editor Salary' : pos.includes('content') ? 'Content Creator Salary' : 'Admin Salary';
+        if (nePct > 0) addCost('NE-Shared', roleLabel + ' (Shared)', r2(outlay * nePct));
+        if (acPct > 0) addCost('AC-Shared', roleLabel + ' (Shared)', r2(outlay * acPct));
+        return;
+      }
+      if (staff?.staff_type === 'sales') {
+        const bucket = team === 'Alpha C' ? (ch === 'TM' ? 'AC-TM' : 'AC-DM') : (ch === 'TM' ? 'NE-TM' : 'NE-DM');
+        addCost(bucket, `Staff Commission (${ch})`, comm);
+        if (claim > 0) addCost(bucket, 'Staff Claim', claim);
       } else {
-        payrollCostLines.push({ label: 'Admin Salary', bucket: staff?.company_team || 'New Era', amount: netPay });
+        // Admin, Editor, Content Creator → Shared bucket for their team
+        const sharedBucket = team === 'Alpha C' ? 'AC-Shared' : 'NE-Shared';
+        const pos = (staff?.position || staff?.staff_type || '').toLowerCase();
+        const roleLabel = pos.includes('editor') ? 'Editor Salary' : pos.includes('content') ? 'Content Creator Salary' : 'Admin Salary';
+        addCost(sharedBucket, roleLabel, outlay);
       }
     });
 
-    // Costs by channel (manual/CC-statement entries only — channel here
-    // means acquisition channel, a separate dimension from team/bucket)
-    const costByChannel = { DM:0, TM:0, XHS:0, OTHER:0, SHARED:0 };
-    costs.forEach(c => { costByChannel[c.channel] = (costByChannel[c.channel]||0) + parseFloat(c.amount||0); });
-
-    // Cost category breakdown PER BUCKET (New Era / Alpha C / Outsider /
-    // Manager Pool) — merges manual costs with payroll-derived lines, so
-    // each card can show exactly what makes up its costs.
-    const BUCKETS = ['New Era', 'Alpha C', 'Outsider', 'Manager Pool'];
-    const costCategoryByBucket = {}; BUCKETS.forEach(b => costCategoryByBucket[b] = {});
-    function addCat(bucket, label, amt) {
-      if (!costCategoryByBucket[bucket]) costCategoryByBucket[bucket] = {};
-      costCategoryByBucket[bucket][label] = (costCategoryByBucket[bucket][label] || 0) + amt;
-    }
+    // ── CC/MANUAL COSTS ──
+    // Determine which CC card belongs to AC (Jenny CIMB = KY Alliance)
+    // All others = NE
     costs.forEach(c => {
       const amt = parseFloat(c.amount || 0);
+      if (amt === 0) return;
       const label = categoryLabel(c.category);
-      const t = c.company_team || null; // manual costs can only be New Era/Alpha C/shared — never Outsider/Manager Pool
-      if (t === 'New Era' || t === 'Alpha C') addCat(t, label, amt);
-      else { addCat('New Era', label, amt/2); addCat('Alpha C', label, amt/2); } // shared cost split equally
+      const cat = (c.category || '').toLowerCase();
+      // Find which card this came from
+      const card = ccCards?.find(cc => cc.id === c.credit_card_id);
+      const cardTeam = card?.owner_team || c.company_team || null;
+      const isAC = cardTeam && (cardTeam.toLowerCase().includes('ky alliance') || cardTeam.toLowerCase().includes('alpha c'));
+      const isNE = !isAC;
+
+      if (cat === 'ad_spend') {
+        // Facebook ads: NE-DM or AC-DM
+        addCost(isAC ? 'AC-DM' : 'NE-DM', 'Ads (Facebook)', amt);
+      } else if (cat === 'gift') {
+        // Gift: always DM only — TM gift cost is already embedded in (total_com - cost) × %
+        // so there's no separate gift cost for TM
+        addCost(isAC ? 'AC-DM' : 'NE-DM', 'Gift', amt);
+      } else if (cat === 'ai_tools' || cat === 'anthropic' || label.toLowerCase().includes('ai')) {
+        // AI Tools: 50/50 NE-Shared / AC-Shared
+        addCost('NE-Shared', 'AI Tools', r2(amt * 0.5));
+        addCost('AC-Shared', 'AI Tools', r2(amt * 0.5));
+      } else if (cat === 'manychat' || label.toLowerCase().includes('manychat')) {
+        // Manychat: DM only
+        addCost(isAC ? 'AC-DM' : 'NE-DM', 'Manychat', amt);
+      } else if (cat === 'admin' || cat === 'rental' || cat === 'wifi' || cat === 'utilities' || cat === 'cleaning' || cat === 'team_building') {
+        // Shared operational costs
+        addCost(isAC ? 'AC-Shared' : 'NE-Shared', label, amt);
+      } else {
+        // Default: split by team
+        if (isAC) addCost('AC-Shared', label, amt);
+        else if (c.company_team === 'New Era') addCost('NE-Shared', label, amt);
+        else { addCost('NE-Shared', label, r2(amt * 0.5)); addCost('AC-Shared', label, r2(amt * 0.5)); }
+      }
     });
-    payrollCostLines.forEach(p => addCat(p.bucket, p.label, p.amount));
 
-    const costByBucket = {};
-    BUCKETS.forEach(b => { costByBucket[b] = r2(Object.values(costCategoryByBucket[b] || {}).reduce((s,v) => s+v, 0)); });
-    const totalCost = r2(BUCKETS.reduce((s,b) => s + costByBucket[b], 0));
+    // Compute totals
+    const costByBucket8 = {};
+    BUCKETS8.forEach(b => { costByBucket8[b] = r2(Object.values(costCat[b] || {}).reduce((s,v) => s+v, 0)); });
+    const totalCost = r2(BUCKETS8.reduce((s,b) => s + costByBucket8[b], 0));
+    // Total revenue
+    const totalRevFinal = r2(Object.values(revBucket).reduce((s,v) => s+v, 0));
+    const netProfit = r2(totalRevFinal - totalCost);
+    const margin = totalRevFinal > 0 ? (netProfit / totalRevFinal * 100) : 0;
 
-    const netProfit = r2(totalRev - totalCost);
-    const margin = totalRev > 0 ? (netProfit / totalRev * 100) : 0;
+    // For backward compat with stat cards
+    const totalRev2 = totalRevFinal;
 
-    document.getElementById('plTotalRev').textContent = fmt(totalRev);
+        document.getElementById('plTotalRev').textContent = fmt(totalRevFinal);
     document.getElementById('plTotalCost').textContent = fmt(totalCost);
     const npEl = document.getElementById('plNetProfit');
     npEl.textContent = fmt(netProfit);
@@ -6336,64 +6409,97 @@ async function loadPL() {
     mgEl.textContent = margin.toFixed(1) + '%';
     mgEl.style.color = margin >= 20 ? 'var(--green)' : margin >= 0 ? 'var(--yellow)' : 'var(--red)';
 
-    // By Team+Channel cards — show each non-zero bucket (NE-DM, NE-TM, NE-XHS,
-    // AC-DM, AC-TM, AC-XHS, Outsider, Manager Pool), plus fallback buckets
-    // from old data that was saved before channel was tracked (plain "New Era"/"Alpha C").
-    // Only show the 6 meaningful buckets: NE-DM, NE-TM, XHS (shared), AC-DM, AC-TM, Outsider
-    const BUCKET_ORDER = ['New Era|DM','New Era|TM','New Era|XHS','Alpha C|DM','Alpha C|TM','Outsider'];
-    const bucketColors = {
-      'New Era|DM':'#2563eb','New Era|TM':'#7c3aed','New Era|XHS':'#dc2626',
-      'Alpha C|DM':'#f97316','Alpha C|TM':'#fb923c','Alpha C|XHS':'#d97706',
-      'New Era':'#2563eb','Alpha C':'#f97316','Outsider':'#b45309','Manager Pool':'#a855f7'
+    // ── RENDER new 8-bucket cards ──
+    const BUCKET_COLORS = {
+      'NE-DM':'#2563eb','NE-TM':'#7c3aed','NE-Shared':'#0891b2',
+      'AC-DM':'#f97316','AC-TM':'#dc2626','AC-Shared':'#d97706',
+      'Outsider':'#6b7280','Manager Pool':'#a855f7'
     };
-    const bucketLabel = (b) => {
-      if (['Outsider','Manager Pool','New Era','Alpha C'].includes(b)) return b;
-      const [team, channel] = b.split('|');
-      return `${team === 'New Era' ? 'NE' : 'AC'} — ${channel}`;
-    };
-    // Cost cost bucketing: map "New Era|DM" costs to the "New Era" bucket from manual costs,
-    // then split proportionally to sub-buckets. For now, manual costs stay at team level.
-    // Always show all 6 defined buckets (even if 0) — no extras, no Manager Pool card
-    const activeBuckets = BUCKET_ORDER;
-    const bucketRev = { ...revByBucket };
-
-    // For cost assignment: aggregate all "New Era|*" sub-buckets under "New Era" for cost lookup,
-    // similarly for "Alpha C|*". Outsider and Manager Pool costs stay their own bucket.
-    const costForBucket = (bucket) => {
-      if (bucket === 'Manager Pool') return costByBucket['Manager Pool'] || 0;
-      if (bucket === 'Outsider' || bucket === 'New Era' || bucket === 'Alpha C') return costByBucket[bucket] || 0;
-      const [team] = bucket.split('|');
-      const teamRev = Object.keys(revByBucket).filter(b => b.startsWith(team+'|')).reduce((s,b) => s+(revByBucket[b]||0), 0);
-      const thisRev = revByBucket[bucket] || 0;
-      const teamCost = costByBucket[team] || 0;
-      return teamRev > 0 ? r2(teamCost * thisRev / teamRev) : 0;
+    const BUCKET_LABELS = {
+      'NE-DM':'NE — DM','NE-TM':'NE — TM','NE-Shared':'NE — Shared Cost',
+      'AC-DM':'AC — DM','AC-TM':'AC — TM','AC-Shared':'AC — Shared Cost',
+      'Outsider':'Outsider','Manager Pool':'Manager Pool'
     };
 
-    document.getElementById('plTeams').style.gridTemplateColumns = 'repeat(3,1fr)';
-    document.getElementById('plTeams').innerHTML = activeBuckets.map(b => {
-      const rev = bucketRev[b] || 0;
-      const cost = costForBucket(b);
-      const net = rev - cost;
-      const pct = totalRev > 0 ? (rev / totalRev * 100).toFixed(1) : '0.0';
-      const catEntries = Object.entries(costCategoryByBucket[b] || costCategoryByBucket[b.split('|')[0]] || {}).filter(([,v]) => v > 0.005).sort((a,b2) => b2[1]-a[1]);
-      const catHtml = catEntries.length ? catEntries.map(([label, amt]) => `
-          <div style="display:flex;justify-content:space-between;font-size:11px;padding-left:8px">
-            <span style="color:var(--muted)">${label}</span>
-            <span style="font-family:var(--mono);color:var(--red)">${fmt(amt)}</span>
-          </div>`).join('') : `<div style="font-size:11px;color:var(--muted);padding-left:8px">No costs this period</div>`;
-      return `<div class="stat-card">
-        <div class="stat-label" style="color:${bucketColors[b]||'var(--muted)'};font-weight:700">${bucketLabel(b)}</div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">${pct}% of revenue</div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span style="color:var(--muted)">Revenue</span><span style="font-family:var(--mono);color:var(--green)">${fmt(rev)}</span></div>
-        <div style="font-size:12px;color:var(--muted);margin:6px 0 4px">Costs</div>
-        <div style="display:grid;gap:3px;margin-bottom:6px">${catHtml}</div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600;padding-left:8px;border-top:1px solid var(--border);padding-top:4px"><span style="color:var(--muted)">Subtotal</span><span style="font-family:var(--mono);color:var(--red)">${fmt(cost)}</span></div>
-        <div style="height:1px;background:var(--border);margin:8px 0"></div>
-        <div style="display:flex;justify-content:space-between;font-size:12px"><span style="font-weight:600">Net</span><span style="font-family:var(--mono);font-weight:700;color:${net>=0?'var(--green)':'var(--red)'}">${fmt(net)}</span></div>
+    // Order: NE-DM, NE-TM, NE-Shared, AC-DM, AC-TM, AC-Shared, Outsider, Manager Pool
+    const DISPLAY_ORDER = ['NE-DM','NE-TM','NE-Shared','AC-DM','AC-TM','AC-Shared','Outsider','Manager Pool'];
+
+    // Count orders per bucket (for "X units" display)
+    const orderCountByBucket = {};
+    for (const bd of breakdowns) {
+      try {
+        const orders = JSON.parse(bd.categories_json || '[]');
+        orders.forEach(o => {
+          const t = o.team || 'New Era';
+          const ch = o.channel || 'DM';
+          let bk = t === 'Outsider' ? 'Outsider' : (t === 'Alpha C' ? 'AC' : 'NE') + '-' + ch;
+          if (!['NE-DM','NE-TM','AC-DM','AC-TM','Outsider'].includes(bk)) bk = 'NE-DM';
+          orderCountByBucket[bk] = (orderCountByBucket[bk] || 0) + 1;
+        });
+      } catch(e) {}
+    }
+
+    const makeTooltipRows = (catObj) => {
+      const entries = Object.entries(catObj || {}).filter(([,v]) => v > 0.005).sort((a,b2) => b2[1]-a[1]);
+      if (!entries.length) return `<div style="font-size:11px;color:var(--muted);padding:4px 0">No costs this period</div>`;
+      return entries.map(([label, amt]) => `
+        <div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0;border-bottom:1px solid var(--border)">
+          <span style="color:var(--muted)">${label}</span>
+          <span style="font-family:var(--mono);color:var(--red)">RM ${fmtNum(amt)}</span>
+        </div>`).join('');
+    };
+
+    document.getElementById('plTeams').style.gridTemplateColumns = 'repeat(4,1fr)';
+    document.getElementById('plTeams').innerHTML = DISPLAY_ORDER.map(b => {
+      const rev = revBucket[b] || 0;
+      const cost = costByBucket8[b] || 0;
+      const net = r2(rev - cost);
+      const pct = totalRevFinal > 0 ? (rev / totalRevFinal * 100).toFixed(1) : '0.0';
+      const color = BUCKET_COLORS[b] || 'var(--muted)';
+      const label = BUCKET_LABELS[b] || b;
+      const isShared = b.includes('Shared');
+      const isOutsider = b === 'Outsider';
+      const isManager = b === 'Manager Pool';
+      const orderCount = orderCountByBucket[b] || 0;
+      const perOrder = (orderCount > 0 && rev > 0) ? r2(rev / orderCount) : 0;
+
+      // Cost breakdown rows with tooltip effect via title attr
+      const catEntries = Object.entries(costCat[b] || {}).filter(([,v]) => v > 0.005).sort((a,b2) => b2[1]-a[1]);
+      const costRows = catEntries.length
+        ? catEntries.map(([lbl, amt]) => `<div style="display:flex;justify-content:space-between;font-size:10px;padding:1px 0" title="${lbl}: RM ${fmtNum(amt)}"><span style="color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:110px">${lbl}</span><span style="font-family:var(--mono);color:var(--red);flex-shrink:0;margin-left:4px">RM ${fmtNum(amt)}</span></div>`).join('')
+        : `<div style="font-size:10px;color:var(--muted)">No costs this period</div>`;
+
+      const revSection = (!isShared && !isManager) ? `
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px">
+          <span style="color:var(--muted)">Revenue</span>
+          <span style="font-family:var(--mono);color:var(--green);font-weight:600">RM ${fmtNum(rev)}</span>
+        </div>
+        ${orderCount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:6px">
+          <span style="color:var(--muted)">${orderCount} orders · avg/order</span>
+          <span style="font-family:var(--mono);color:var(--muted)">RM ${fmtNum(perOrder)}</span>
+        </div>` : ''}` : '';
+
+      const netSection = (!isShared) ? `
+        <div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px;display:flex;justify-content:space-between;font-size:12px;font-weight:700">
+          <span>Net</span>
+          <span style="font-family:var(--mono);color:${net>=0?'var(--green)':'var(--red)'}">RM ${fmtNum(net)}</span>
+        </div>` : '';
+
+      return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;border-top:3px solid ${color}">
+        <div style="font-size:12px;font-weight:700;color:${color};margin-bottom:2px">${label}</div>
+        ${!isShared && !isManager ? `<div style="font-size:10px;color:var(--muted);margin-bottom:8px">${pct}% of total revenue</div>` : '<div style="margin-bottom:8px"></div>'}
+        ${revSection}
+        <div style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Costs</div>
+        <div style="display:flex;flex-direction:column;gap:1px;margin-bottom:4px">${costRows}</div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;border-top:1px solid var(--border);padding-top:4px;margin-top:4px">
+          <span style="color:var(--muted)">Total Cost</span>
+          <span style="font-family:var(--mono);color:var(--red);font-weight:600">RM ${fmtNum(cost)}</span>
+        </div>
+        ${netSection}
       </div>`;
     }).join('');
 
-    document.getElementById('plChannels').innerHTML = ''; // Channel section removed
+    document.getElementById('plChannels').innerHTML = ''; // Channel section replaced by 8-bucket cards
 
     // Cost table — grouped card-by-card (mirrors the Inv page's
     // manager-grouping pattern) instead of one flat chronological list.
