@@ -151,12 +151,30 @@ ${trimmedText}`;
       return res.status(502).json({ error: 'Claude did not return a JSON array.' });
     }
 
+    // Build a set of amounts that appear as "CR" (credit/refund) in the raw PDF text.
+    // This is a regex-based safety net — Claude sometimes returns CR transactions as
+    // normal entries, so we cross-check against the raw text to catch them.
+    const crAmountSet = new Set();
+    const crRegex = /([\d,]+\.\d{2})\s*CR\b/gi;
+    let crMatch;
+    while ((crMatch = crRegex.exec(text)) !== null) {
+      const amt = parseFloat(crMatch[1].replace(/,/g, ''));
+      if (!isNaN(amt)) crAmountSet.add(Math.round(amt * 100)); // store as cents to avoid float issues
+    }
+
     // Sanity-clean each row — never trust external input blindly. Unknown/
     // invalid category slugs fall back to "other" if it exists, otherwise
     // the first category in the active list.
     const fallbackCategory = hasOther ? 'other' : categorySlugs[0];
     const cleaned = transactions
-      .filter(t => t && typeof t.amount === 'number' && t.amount > 0 && t.description && !t.is_credit)
+      .filter(t => {
+        if (!t || typeof t.amount !== 'number' || t.amount <= 0 || !t.description) return false;
+        if (t.is_credit) return false; // Claude flagged it
+        // Cross-check: if this amount appears as a CR in the raw PDF, skip it
+        const amtCents = Math.round(t.amount * 100);
+        if (crAmountSet.has(amtCents)) return false;
+        return true;
+      })
       .map(t => ({
         date: String(t.date || '').slice(0, 20),
         description: String(t.description || '').slice(0, 200),
