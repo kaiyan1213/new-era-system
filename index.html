@@ -2158,14 +2158,14 @@
         </div>
       </div>
       <div class="form-group">
-        <label class="form-label">Default Gift/Shopping Team</label>
+        <label class="form-label">Default Team (for all transactions)</label>
         <select id="ecGiftTeam" class="form-input">
-          <option value="">— Not set —</option>
+          <option value="">— Not set (use category rules) —</option>
           <option value="New Era">New Era</option>
           <option value="Alpha C">Alpha C</option>
         </select>
       </div>
-      <div style="font-size:11px;color:var(--muted)">Gift/Shopping category (Shopee etc) will default to this team when uploading statements from this card. Ads always go to New Era. AI Tools always Shared.</div>
+      <div style="font-size:11px;color:var(--muted)">If set, ALL transactions from this card will default to this team. AI Tools always remain Shared regardless.</div>
     </div>
     <div class="form-actions">
       <button class="btn btn-ghost" onclick="closeModal('modalEditCard')">Cancel</button>
@@ -6862,15 +6862,17 @@ async function processCCFile(file) {
         const sel = document.getElementById('ccStatementCard');
         const selCardId = sel ? sel.value : '';
         const selCard = ccCards.find(c => c.id === selCardId);
-        // gift_team: per-card setting for Shopee/gift category
-        const cardGiftTeam = selCard?.gift_team || selCard?.owner_team || null;
+        // default_team: per-card setting — if set, applies to ALL categories except AI tools
+        const cardDefaultTeam = selCard?.gift_team || null;
         let team = t.company_team;
-        if (t.category === 'gift') {
-          team = cardGiftTeam || 'New Era';
+        if (t.category === 'ai_tools') {
+          team = null; // AI tools always Shared
+        } else if (cardDefaultTeam) {
+          team = cardDefaultTeam; // card-level override for everything else
         } else if (t.category === 'ad_spend' || t.category === 'manychat') {
-          team = 'New Era'; // Ads/Manychat always NE
-        } else if (t.category === 'ai_tools') {
-          team = null; // AI tools = shared
+          team = 'New Era'; // default: Ads/Manychat = NE
+        } else if (t.category === 'gift') {
+          team = 'New Era'; // default: gift = NE
         }
         return { ...t, company_team: team, year: defaultYear, month: defaultMonth };
       });
