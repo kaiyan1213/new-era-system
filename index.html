@@ -2037,6 +2037,11 @@
       </select>
     </div>
 
+    <div style="margin-bottom:12px">
+      <label class="form-label">PDF Password (if protected)</label>
+      <input type="password" id="ccPdfPassword" class="form-input" placeholder="Leave blank if no password" style="max-width:260px">
+    </div>
+
     <div id="ccUploadZone" class="upload-zone" style="margin-bottom:16px"
          ondrop="handleCCDrop(event)" ondragover="event.preventDefault()"
          onclick="document.getElementById('ccFileInput').click()">
@@ -6825,7 +6830,7 @@ async function processCCFile(file) {
     const response = await fetch('/api/parse-cc-statement', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ base64, categories: costCategories })
+      body: JSON.stringify({ base64, categories: costCategories, pdfPassword: document.getElementById('ccPdfPassword')?.value || '' })
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Failed to parse statement');
