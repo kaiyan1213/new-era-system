@@ -6811,31 +6811,25 @@ async function processCCFile(file) {
         const excessCents = txnTotalCents - targetCents;
         // 0/1 knapsack: find subset of transactions summing to excessCents
         const cands = allTxns.map((t,i) => [Math.round(t.amount * 100), i]).filter(([c]) => c <= excessCents);
-        const N = cands.length;
-        // dp[i][s] = true if first i items can sum to s
-        // Use 1D rolling array
-        const dp = new Uint8Array(excessCents + 1);
-        const prev = new Int16Array(excessCents + 1).fill(-1); // which item index was added
-        const from = new Int32Array(excessCents + 1).fill(-1); // previous sum
-        dp[0] = 1;
-        for (let k = 0; k < N; k++) {
-          const [c, origIdx] = cands[k];
+        // 0/1 knapsack with backtracking — plain JS arrays
+        const dp = Array(excessCents + 1).fill(false);
+        const parent = Array(excessCents + 1).fill(null); // {k, prevSum}
+        dp[0] = true;
+        for (let k = 0; k < cands.length; k++) {
+          const c = cands[k][0];
           for (let s = excessCents; s >= c; s--) {
             if (!dp[s] && dp[s - c]) {
-              dp[s] = 1;
-              prev[s] = k;
-              from[s] = s - c;
+              dp[s] = true;
+              parent[s] = { k, prevSum: s - c };
             }
           }
         }
         if (dp[excessCents]) {
-          // Backtrack to find which items to remove
           const removeOrigIndices = new Set();
           let s = excessCents;
-          while (s > 0) {
-            const k = prev[s];
-            removeOrigIndices.add(cands[k][1]);
-            s = from[s];
+          while (s > 0 && parent[s]) {
+            removeOrigIndices.add(cands[parent[s].k][1]);
+            s = parent[s].prevSum;
           }
           allTxns = allTxns.filter((_,i) => !removeOrigIndices.has(i));
         }
