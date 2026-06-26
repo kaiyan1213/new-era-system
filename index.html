@@ -6289,7 +6289,7 @@ async function loadPL() {
     let payFilter = `year=eq.${year}`;
     if (month) payFilter += `&month=eq.${month}`;
     const payrollRows = await sb('nec_payroll', { filter: payFilter, select: 'staff_id,month,commission_earned,base_salary,bonus,claim_amount,deductions,epf_employee,commission_type,record_type,own_proxy_offset' });
-    const allStaff = await sb('nec_staff', { select: 'id,staff_type,channel,company_team,bank_directory_id,position' });
+    const allStaff = await sb('nec_staff', { select: 'id,name,staff_type,channel,company_team,bank_directory_id,position' });
     const staffMap = {};
     allStaff.forEach(s => staffMap[s.id] = s);
     // Shared staff split
@@ -6324,7 +6324,8 @@ async function loadPL() {
       if (outlay === 0) return;
 
       const staff = staffMap[p.staff_id];
-      const staffName = staffList.find(s => s.id === p.staff_id)?.name || p.staff_id;
+      const staffRec = allStaff.find(s => s.id === p.staff_id) || {};
+      const staffName = staffRec.name || 'Unknown';
 
       if (p.record_type === 'manager') {
         addCost('Manager Pool', 'Manager Settlement', outlay);
