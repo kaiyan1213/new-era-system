@@ -2110,6 +2110,15 @@
           <input type="number" id="acDueDay" class="form-input" min="1" max="31" placeholder="17">
         </div>
       </div>
+      <div class="form-group" style="margin-top:4px">
+        <label class="form-label">Owner Team</label>
+        <select id="acOwnerTeam" class="form-input">
+          <option value="">— Not assigned —</option>
+          <option value="New Era">New Era</option>
+          <option value="Alpha C">Alpha C</option>
+          <option value="Shared">Shared</option>
+        </select>
+      </div>
       <div style="font-size:11px;color:var(--muted)">Statement/Due Day are used to auto-fill each month's dates — you can still adjust them per statement afterwards.</div>
     </div>
     <div class="form-actions">
@@ -6798,19 +6807,21 @@ async function processCCFile(file) {
         return true;
       })
       .map(t => {
-        // Override company_team based on selected card
+        // Override company_team based on selected card's owner_team
         const sel = document.getElementById('ccStatementCard');
         const selCardId = sel ? sel.value : '';
         const selCard = ccCards.find(c => c.id === selCardId);
-        const cName = selCard ? (selCard.card_name || '') : '';
-        const isKY = cName.toUpperCase().includes('KY') || cName.toUpperCase().includes('JENNY');
+        const cardOwnerTeam = selCard?.owner_team || null;
+        const isAC = cardOwnerTeam === 'Alpha C';
         let team = t.company_team;
-        if (isKY && t.category === 'gift') {
-          team = 'Alpha C'; // KY Alliance gift = AC
+        if (t.category === 'gift') {
+          team = isAC ? 'Alpha C' : 'New Era';
         } else if (t.category === 'ad_spend' || t.category === 'manychat') {
-          team = 'New Era'; // Ads/Manychat always NE regardless of card
-        } else if (!isKY && t.category === 'gift') {
-          team = 'New Era';
+          team = 'New Era'; // Ads always NE
+        } else if (t.category === 'ai_tools') {
+          team = null; // AI tools = shared
+        } else if (cardOwnerTeam) {
+          team = cardOwnerTeam; // other categories follow card's team
         }
         return { ...t, company_team: team, year: defaultYear, month: defaultMonth };
       });
@@ -7231,11 +7242,13 @@ function openAddCardModal() {
 async function saveNewCard() {
   const card_name = document.getElementById('acCardName').value.trim();
   if (!card_name) return showToast('Enter a card name', 'error');
+  const ownerTeam = document.getElementById('acOwnerTeam').value || null;
   const body = {
     card_name,
     bank: document.getElementById('acBank').value.trim() || null,
     statement_day: parseInt(document.getElementById('acStatementDay').value) || null,
-    due_day: parseInt(document.getElementById('acDueDay').value) || null
+    due_day: parseInt(document.getElementById('acDueDay').value) || null,
+    owner_team: ownerTeam
   };
   try {
     await sb('nec_credit_cards', { method: 'POST', body });
