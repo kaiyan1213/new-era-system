@@ -6805,13 +6805,13 @@ async function processCCFile(file) {
     // Strategy: sort by amount desc, greedily remove transactions whose amount matches
     // the excess until the total equals the statement balance.
     const stmtBal = (typeof data.statement_balance === 'number') ? data.statement_balance : null;
+    console.log('[CR-reconcile] stmtBal=', stmtBal, 'allTxns total=', allTxns.reduce((s,t)=>s+t.amount,0).toFixed(2), 'count=', allTxns.length);
     if (stmtBal !== null) {
       let currentTotal = Math.round(allTxns.reduce((s,t) => s + t.amount, 0) * 100);
       const targetTotal = Math.round(stmtBal * 100);
+      console.log('[CR-reconcile] currentTotal cents=', currentTotal, 'targetTotal cents=', targetTotal, 'excess=', currentTotal - targetTotal);
       if (currentTotal > targetTotal) {
         const excess = currentTotal - targetTotal;
-        // Greedily find transactions (smallest first) that sum to the excess
-        // Use array (not Set) to allow duplicate amounts
         const toRemoveCentsList = [];
         let remaining = excess;
         const candidates = [...allTxns].sort((a,b) => a.amount - b.amount);
@@ -6823,6 +6823,7 @@ async function processCCFile(file) {
             if (remaining === 0) break;
           }
         }
+        console.log('[CR-reconcile] toRemove=', toRemoveCentsList, 'remaining=', remaining);
         if (remaining === 0) {
           const removeList = [...toRemoveCentsList];
           allTxns = allTxns.filter(t => {
@@ -6831,6 +6832,7 @@ async function processCCFile(file) {
             if (idx !== -1) { removeList.splice(idx, 1); return false; }
             return true;
           });
+          console.log('[CR-reconcile] after filter count=', allTxns.length, 'total=', allTxns.reduce((s,t)=>s+t.amount,0).toFixed(2));
         }
       }
     }
