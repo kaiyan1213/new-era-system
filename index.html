@@ -6811,29 +6811,26 @@ async function processCCFile(file) {
       const targetTotal = Math.round(stmtBal * 100);
       if (currentTotal > targetTotal) {
         const excess = currentTotal - targetTotal;
-        // Use subset-sum DP to find exact set of transactions matching the excess
-        // Only consider transactions smaller than excess (potential refund candidates)
-        // No slice limit — we need to check all candidates
+        // Find transactions that sum exactly to the excess (CR refunds)
+        // Use proper subset-sum: build dp array indexed by sum value
         const candidates = allTxns
           .map((t,i) => ({ cents: Math.round(t.amount * 100), i }))
-          .filter(c => c.cents < excess); // strictly less than excess
-        // DP: dp[s] = list of candidate indices that sum to s
-        const dp = new Map();
-        dp.set(0, []);
+          .filter(c => c.cents < excess);
+        // dp[s] = array of original indices whose amounts sum to s, or null if unreachable
+        const dp = new Array(excess + 1).fill(null);
+        dp[0] = [];
         for (const c of candidates) {
-          for (const [sum, indices] of [...dp.entries()]) {
-            const newSum = sum + c.cents;
-            if (newSum <= excess && !dp.has(newSum)) {
-              dp.set(newSum, [...indices, c.i]);
+          // iterate backwards to avoid using same item twice
+          for (let s = excess; s >= c.cents; s--) {
+            if (dp[s] === null && dp[s - c.cents] !== null) {
+              dp[s] = [...dp[s - c.cents], c.i];
             }
           }
         }
-        console.log('[DP] excess=', excess, 'candidates count=', candidates.length, 'dp size=', dp.size, 'found=', dp.has(excess));
-        if (dp.has(excess)) {
-          console.log('[DP] removing indices=', dp.get(excess));
-          const removeIndices = new Set(dp.get(excess));
+        console.log('[DP2] excess=', excess, 'candidates=', candidates.length, 'found=', dp[excess] !== null, dp[excess]);
+        if (dp[excess] !== null) {
+          const removeIndices = new Set(dp[excess]);
           allTxns = allTxns.filter((t, i) => !removeIndices.has(i));
-          console.log('[DP] after filter count=', allTxns.length, 'total=', allTxns.reduce((s,t)=>s+t.amount,0).toFixed(2));
         }
       }
     }
