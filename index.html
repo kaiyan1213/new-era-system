@@ -6786,7 +6786,7 @@ async function processCCFile(file) {
     // Build CR amount set from parser's _cr_filtered list AND from description-based heuristics
     const crAmountCents = new Set((data._cr_filtered || []).map(a => Math.round(a * 100)));
 
-    ccTransactions = data.transactions
+    let allTxns = data.transactions
       .filter(t => {
         const amt = parseFloat(t.amount || 0);
         if (amt <= 0) return false;
@@ -6799,6 +6799,45 @@ async function processCCFile(file) {
         return true;
       })
       .map(t => ({ ...t, year: defaultYear, month: defaultMonth }));
+
+    // If parser provided a statement balance, use it to auto-drop any transactions
+    // that appear to be refunds/credits (i.e. the total exceeds the statement balance).
+    // Strategy: sort by amount desc, greedily remove transactions whose amount matches
+    // the excess until the total equals the statement balance.
+    const stmtBal = (typeof data.statement_balance === 'number') ? data.statement_balance : null;
+    if (stmtBal !== null) {
+      let currentTotal = Math.round(allTxns.reduce((s,t) => s + t.amount, 0) * 100);
+      const targetTotal = Math.round(stmtBal * 100);
+      if (currentTotal > targetTotal) {
+        const excess = currentTotal - targetTotal;
+        // Try to find transactions whose amounts sum exactly to the excess
+        // Simple approach: find individual transactions matching the excess or subsets
+        const toRemoveCents = new Set();
+        let remaining = excess;
+        // Sort candidates by amount asc to find refund-sized amounts first
+        const candidates = [...allTxns].sort((a,b) => a.amount - b.amount);
+        for (const t of candidates) {
+          const cents = Math.round(t.amount * 100);
+          if (cents <= remaining) {
+            toRemoveCents.add(cents);
+            remaining -= cents;
+            if (remaining === 0) break;
+          }
+        }
+        if (remaining === 0) {
+          // Successfully found transactions that account for the excess — remove them
+          const removeCentsList = [...toRemoveCents];
+          allTxns = allTxns.filter(t => {
+            const cents = Math.round(t.amount * 100);
+            const idx = removeCentsList.indexOf(cents);
+            if (idx !== -1) { removeCentsList.splice(idx, 1); return false; }
+            return true;
+          });
+        }
+      }
+    }
+
+    ccTransactions = allTxns;
     ccStatementBalance = (typeof data.statement_balance === 'number') ? data.statement_balance : null;
 
     document.getElementById('ccProgress').classList.add('hidden');
