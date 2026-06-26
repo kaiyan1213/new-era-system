@@ -6775,7 +6775,7 @@ async function processCCFile(file) {
     const response = await fetch('/api/parse-cc-statement', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ base64, categories: costCategories })
+      body: JSON.stringify({ base64, categories: costCategories, cardName: (() => { const sel = document.getElementById('ccCardSelect'); return sel ? (sel.options[sel.selectedIndex]?.text || '') : ''; })() })
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Failed to parse statement');
