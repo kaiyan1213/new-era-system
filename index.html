@@ -6787,8 +6787,9 @@ async function processCCFile(file) {
       .filter(t => {
         const amt = parseFloat(t.amount || 0);
         if (amt <= 0) return false;
+        if (t.is_credit) return false; // parser flagged as credit/refund/payment
         const desc = (t.description || '').toUpperCase();
-        // Skip payment/refund/credit transactions
+        // Skip payment/refund/credit transactions by description
         if (desc.includes('PAYMENT') || desc.includes('DUITNOW TO') || desc.includes('REFUND') || desc.includes('CREDIT')) return false;
         return true;
       })
