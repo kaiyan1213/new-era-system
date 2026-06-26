@@ -69,13 +69,18 @@ export default async function handler(req, res) {
 
   try {
     const buffer = Buffer.from(base64, 'base64');
-    const pdfData = await pdfParse(buffer);
-    const text = pdfData.text;
+    // Try pdf-parse first; if text extraction is poor (< 500 chars of useful content),
+    // fall back to sending the PDF directly as a document to Claude (vision mode)
+    let text = '';
+    try {
+      const pdfData = await pdfParse(buffer);
+      text = pdfData.text || '';
+    } catch(e) { text = ''; }
     if (debug) return res.status(200).json({ success: true, raw_text: text.substring(0, 12000) });
 
-    // Cap the text we send — most statements are 1-3 pages of transactions;
-    // this is generous headroom while keeping the request fast and cheap.
     const trimmedText = text.length > 18000 ? text.slice(0, 18000) : text;
+    // Check if text extraction looks useful (has amounts/dates)
+    const hasUsefulText = /\d{2}\/\d{2}\/\d{2}/.test(text) && /\d+\.\d{2}/.test(text) && text.length > 500;
 
     const categoryGuidance = activeCategories
       .map(c => `  - "${c.slug}" (${c.label}) = ${CATEGORY_HINTS[c.slug] || `transactions matching "${c.label}"`}`)
@@ -133,7 +138,13 @@ ${trimmedText}`;
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
         max_tokens: 16000,
-        messages: [{ role: 'user', content: prompt }]
+        messages: [{ role: 'user', content: hasUsefulText ? prompt : [
+          {
+            type: 'document',
+            source: { type: 'base64', media_type: 'application/pdf', data: base64 }
+          },
+          { type: 'text', text: prompt.split('Statement text:')[0] + 'The PDF statement is attached above as a document. Extract all transactions from it.' }
+        ]}]
       })
     });
 
