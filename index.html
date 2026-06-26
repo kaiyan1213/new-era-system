@@ -2133,6 +2133,24 @@
   </div>
 </div>
 
+<!-- Mark CC Paid Modal -->
+<div class="modal-bg hidden" id="modalCCMarkPaid">
+  <div class="modal" style="max-width:360px">
+    <div class="modal-title">Mark as Paid</div>
+    <input type="hidden" id="ccPaidCardId">
+    <input type="hidden" id="ccPaidYear">
+    <input type="hidden" id="ccPaidMonth">
+    <div class="form-group" style="margin-bottom:20px">
+      <label class="form-label">Payment Date</label>
+      <input type="date" id="ccPaidDate" class="form-input">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="document.getElementById('modalCCMarkPaid').classList.add('hidden')">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmCCPaid()">Confirm Paid</button>
+    </div>
+  </div>
+</div>
+
 <!-- Edit Credit Card Modal -->
 <div class="modal-bg hidden" id="modalEditCard">
   <div class="modal">
@@ -7282,12 +7300,30 @@ async function upsertCCStatement(cardId, year, month, patch) {
 }
 
 async function toggleCCPaid(cardId, year, month, currentlyPaid) {
-  const patch = currentlyPaid
-    ? { is_paid: false }
-    : { is_paid: true, payment_date: new Date().toISOString().slice(0,10) };
-  await upsertCCStatement(cardId, year, month, patch);
-  await logAudit('UPDATE', 'nec_cc_statements', `${cardName(cardId)} ${MONTHS[month]} ${year} marked as ${currentlyPaid ? 'unpaid' : 'paid'}`);
-  showToast(currentlyPaid ? 'Marked as unpaid' : 'Marked as paid ✓');
+  if (currentlyPaid) {
+    await upsertCCStatement(cardId, year, month, { is_paid: false, payment_date: null });
+    await logAudit('UPDATE', 'nec_cc_statements', `${cardName(cardId)} ${MONTHS[month]} ${year} marked as unpaid`);
+    showToast('Marked as unpaid');
+    return;
+  }
+  // Show date picker modal
+  const today = new Date().toISOString().slice(0,10);
+  document.getElementById('ccPaidCardId').value = cardId;
+  document.getElementById('ccPaidYear').value = year;
+  document.getElementById('ccPaidMonth').value = month;
+  document.getElementById('ccPaidDate').value = today;
+  document.getElementById('modalCCMarkPaid').classList.remove('hidden');
+}
+
+async function confirmCCPaid() {
+  const cardId = document.getElementById('ccPaidCardId').value;
+  const year = parseInt(document.getElementById('ccPaidYear').value);
+  const month = parseInt(document.getElementById('ccPaidMonth').value);
+  const date = document.getElementById('ccPaidDate').value || new Date().toISOString().slice(0,10);
+  await upsertCCStatement(cardId, year, month, { is_paid: true, payment_date: date });
+  await logAudit('UPDATE', 'nec_cc_statements', `${cardName(cardId)} ${MONTHS[month]} ${year} marked as paid on ${date}`);
+  showToast('Marked as paid ✓');
+  document.getElementById('modalCCMarkPaid').classList.add('hidden');
 }
 
 function openAddCardModal() {
