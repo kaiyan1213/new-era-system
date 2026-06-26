@@ -110,10 +110,12 @@ ${hasOther ? '' : '  (if truly nothing fits, pick whichever category is the clos
   * Facebook Ads → "New Era" UNLESS card is Carine CIMB or KY Alliance
   * Otherwise → null
 
+IMPORTANT: Extract ALL charge/purchase transactions from ALL sections of the statement (including sections labeled "VISA INFINITE", "TAN KAI YAN", or any cardholder name). Do NOT skip any section.
+
 Respond with ONLY a raw JSON object (no markdown, no code fences), with three keys:
-1. "transactions": array of charge transactions (EXCLUDE all CR/refund/payment lines entirely — do NOT include them)
-2. "cr_amounts": array of numeric amounts (MYR) that appeared with "CR" suffix in the statement (e.g. "56.45 CR" → include 56.45)
-3. "statement_balance": the final total balance number from the statement (e.g. "SUB TOTAL", "TOTAL BALANCE", "Current Balance" — as a number, MYR)
+1. "transactions": array of ALL charge transactions found (EXCLUDE only: lines with "CR" suffix, PAYMENT lines, PREVIOUS BALANCE lines, MINIMUM PAYMENT lines, CURRENT BALANCE lines)
+2. "cr_amounts": array of numeric amounts (MYR) that appeared with "CR" suffix (refunds/credits/payments)
+3. "statement_balance": the CHARGES THIS MONTH or CURRENT BALANCE total from the statement (as a number, MYR)
 
 Format:
 {"transactions":[{"date":"15/06","description":"FACEBK *ADS8X7Y2Z","amount":450.00,"is_credit":false,"category":"${categorySlugs[0]}","channel":"SHARED","company_team":null}],"cr_amounts":[56.45,3.15],"statement_balance":17047.71}
