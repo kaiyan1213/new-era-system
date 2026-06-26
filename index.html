@@ -6304,6 +6304,14 @@ async function loadPL() {
       } catch(e) {}
     }
 
+    // tooltip detail maps: bucket -> label -> [{name, amount}]
+    const tooltipDetails = {};
+    function addTooltipDetail(bucket, label, name, amt) {
+      if (!tooltipDetails[bucket]) tooltipDetails[bucket] = {};
+      if (!tooltipDetails[bucket][label]) tooltipDetails[bucket][label] = [];
+      tooltipDetails[bucket][label].push({ name, amount: amt });
+    }
+
     payrollRows.forEach(p => {
       // Company actual outlay per staff = commission + salary + bonus + claim - deductions - epf
       const comm = parseFloat(p.commission_earned || 0);
@@ -6315,13 +6323,17 @@ async function loadPL() {
       const outlay = r2(comm + sal + bon + claim - ded - epf);
       if (outlay === 0) return;
 
+      const staff = staffMap[p.staff_id];
+      const staffName = staffList.find(s => s.id === p.staff_id)?.name || p.staff_id;
+
       if (p.record_type === 'manager') {
         addCost('Manager Pool', 'Manager Settlement', outlay);
+        addTooltipDetail('Manager Pool', 'Manager Settlement', staffName, outlay);
         return;
       }
-      const staff = staffMap[p.staff_id];
       if (p.commission_type === 'outsider') {
         addCost('Outsider', 'Outsider Commission', outlay);
+        addTooltipDetail('Outsider', 'Outsider Commission', staffName, outlay);
         return;
       }
       const team = staff?.company_team || 'New Era';
@@ -6332,20 +6344,21 @@ async function loadPL() {
         const acPct = 1 - nePct;
         const pos = (staff?.position || staff?.staff_type || '').toLowerCase();
         const roleLabel = pos.includes('editor') ? 'Editor Salary' : pos.includes('content') ? 'Content Creator Salary' : 'Admin Salary';
-        if (nePct > 0) addCost('NE-Shared', roleLabel + ' (Shared)', r2(outlay * nePct));
-        if (acPct > 0) addCost('AC-Shared', roleLabel + ' (Shared)', r2(outlay * acPct));
+        if (nePct > 0) { addCost('NE-Shared', roleLabel + ' (Shared)', r2(outlay * nePct)); addTooltipDetail('NE-Shared', roleLabel + ' (Shared)', staffName, r2(outlay * nePct)); }
+        if (acPct > 0) { addCost('AC-Shared', roleLabel + ' (Shared)', r2(outlay * acPct)); addTooltipDetail('AC-Shared', roleLabel + ' (Shared)', staffName, r2(outlay * acPct)); }
         return;
       }
       if (staff?.staff_type === 'sales') {
         const bucket = team === 'Alpha C' ? (ch === 'TM' ? 'AC-TM' : 'AC-DM') : (ch === 'TM' ? 'NE-TM' : 'NE-DM');
         addCost(bucket, `Staff Commission (${ch})`, comm);
-        if (claim > 0) addCost(bucket, 'Staff Claim', claim);
+        addTooltipDetail(bucket, `Staff Commission (${ch})`, staffName, comm);
+        if (claim > 0) { addCost(bucket, 'Staff Claim', claim); addTooltipDetail(bucket, 'Staff Claim', staffName, claim); }
       } else {
-        // Admin, Editor, Content Creator → Shared bucket for their team
         const sharedBucket = team === 'Alpha C' ? 'AC-Shared' : 'NE-Shared';
         const pos = (staff?.position || staff?.staff_type || '').toLowerCase();
         const roleLabel = pos.includes('editor') ? 'Editor Salary' : pos.includes('content') ? 'Content Creator Salary' : 'Admin Salary';
         addCost(sharedBucket, roleLabel, outlay);
+        addTooltipDetail(sharedBucket, roleLabel, staffName, outlay);
       }
     });
 
@@ -6363,28 +6376,35 @@ async function loadPL() {
       const isAC = cardTeam && (cardTeam.toLowerCase().includes('ky alliance') || cardTeam.toLowerCase().includes('alpha c'));
       const isNE = !isAC;
 
+      const txDesc = c.description || label;
       if (cat === 'ad_spend') {
-        // Facebook ads: NE-DM or AC-DM
-        addCost(isAC ? 'AC-DM' : 'NE-DM', 'Ads (Facebook)', amt);
+        const b = isAC ? 'AC-DM' : 'NE-DM';
+        addCost(b, 'Ads (Facebook)', amt);
+        addTooltipDetail(b, 'Ads (Facebook)', txDesc, amt);
       } else if (cat === 'gift') {
-        // Gift: always DM only — TM gift cost is already embedded in (total_com - cost) × %
-        // so there's no separate gift cost for TM
-        addCost(isAC ? 'AC-DM' : 'NE-DM', 'Gift', amt);
+        const b = isAC ? 'AC-DM' : 'NE-DM';
+        addCost(b, 'Gift', amt);
+        addTooltipDetail(b, 'Gift', txDesc, amt);
       } else if (cat === 'ai_tools' || cat === 'anthropic' || label.toLowerCase().includes('ai')) {
-        // AI Tools: 50/50 NE-Shared / AC-Shared
         addCost('NE-Shared', 'AI Tools', r2(amt * 0.5));
+        addTooltipDetail('NE-Shared', 'AI Tools', txDesc, r2(amt * 0.5));
         addCost('AC-Shared', 'AI Tools', r2(amt * 0.5));
+        addTooltipDetail('AC-Shared', 'AI Tools', txDesc, r2(amt * 0.5));
       } else if (cat === 'manychat' || label.toLowerCase().includes('manychat')) {
-        // Manychat: DM only
-        addCost(isAC ? 'AC-DM' : 'NE-DM', 'Manychat', amt);
+        const b = isAC ? 'AC-DM' : 'NE-DM';
+        addCost(b, 'Manychat', amt);
+        addTooltipDetail(b, 'Manychat', txDesc, amt);
       } else if (cat === 'admin' || cat === 'rental' || cat === 'wifi' || cat === 'utilities' || cat === 'cleaning' || cat === 'team_building') {
-        // Shared operational costs
-        addCost(isAC ? 'AC-Shared' : 'NE-Shared', label, amt);
+        const b = isAC ? 'AC-Shared' : 'NE-Shared';
+        addCost(b, label, amt);
+        addTooltipDetail(b, label, txDesc, amt);
       } else {
-        // Default: split by team
-        if (isAC) addCost('AC-Shared', label, amt);
-        else if (c.company_team === 'New Era') addCost('NE-Shared', label, amt);
-        else { addCost('NE-Shared', label, r2(amt * 0.5)); addCost('AC-Shared', label, r2(amt * 0.5)); }
+        if (isAC) { addCost('AC-Shared', label, amt); addTooltipDetail('AC-Shared', label, txDesc, amt); }
+        else if (c.company_team === 'New Era') { addCost('NE-Shared', label, amt); addTooltipDetail('NE-Shared', label, txDesc, amt); }
+        else {
+          addCost('NE-Shared', label, r2(amt * 0.5)); addTooltipDetail('NE-Shared', label, txDesc, r2(amt * 0.5));
+          addCost('AC-Shared', label, r2(amt * 0.5)); addTooltipDetail('AC-Shared', label, txDesc, r2(amt * 0.5));
+        }
       }
     });
 
@@ -6463,10 +6483,19 @@ async function loadPL() {
       const orderCount = orderCountByBucket[b] || 0;
       const perOrder = (orderCount > 0 && rev > 0) ? r2(rev / orderCount) : 0;
 
-      // Cost breakdown rows with tooltip effect via title attr
+      // Cost breakdown rows with hover tooltip showing per-item details
       const catEntries = Object.entries(costCat[b] || {}).filter(([,v]) => v > 0.005).sort((a,b2) => b2[1]-a[1]);
       const costRows = catEntries.length
-        ? catEntries.map(([lbl, amt]) => `<div style="display:flex;justify-content:space-between;font-size:10px;padding:1px 0" title="${lbl}: RM ${fmtNum(amt)}"><span style="color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:110px">${lbl}</span><span style="font-family:var(--mono);color:var(--red);flex-shrink:0;margin-left:4px">RM ${fmtNum(amt)}</span></div>`).join('')
+        ? catEntries.map(([lbl, amt]) => {
+            const details = (tooltipDetails[b] || {})[lbl] || [];
+            const ttLines = details.map(d => `${d.name}: RM ${fmtNum(d.amount)}`).join('&#10;');
+            const count = details.length;
+            const countBadge = count > 0 ? `<span style="font-size:9px;color:var(--muted);margin-left:3px">(${count})</span>` : '';
+            return `<div style="display:flex;justify-content:space-between;font-size:10px;padding:2px 0;cursor:help;border-radius:3px" title="${ttLines}">
+              <span style="color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px">${lbl}${countBadge}</span>
+              <span style="font-family:var(--mono);color:var(--red);flex-shrink:0;margin-left:4px">RM ${fmtNum(amt)}</span>
+            </div>`;
+          }).join('')
         : `<div style="font-size:10px;color:var(--muted)">No costs this period</div>`;
 
       const revSection = (!isShared && !isManager) ? `
