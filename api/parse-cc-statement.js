@@ -144,6 +144,14 @@ ${trimmedText}`;
     let raw = (claudeData.content || []).map(b => b.text || '').join('').trim();
     // Strip markdown code fences if Claude added them despite instructions
     raw = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+    // If Claude prepended text before the JSON, extract the JSON object/array
+    const jsonObjMatch = raw.match(/\{[\s\S]*\}/);
+    const jsonArrMatch = raw.match(/\[[\s\S]*\]/);
+    if (jsonObjMatch && (!jsonArrMatch || jsonObjMatch.index <= jsonArrMatch.index)) {
+      raw = jsonObjMatch[0];
+    } else if (jsonArrMatch) {
+      raw = jsonArrMatch[0];
+    }
 
     let transactions;
     let claudeCrAmounts = [];
