@@ -6828,9 +6828,12 @@ async function processCCFile(file) {
             }
           }
         }
+        console.log('[DP] excess=', excess, 'candidates count=', candidates.length, 'dp size=', dp.size, 'found=', dp.has(excess));
         if (dp.has(excess)) {
+          console.log('[DP] removing indices=', dp.get(excess));
           const removeIndices = new Set(dp.get(excess));
           allTxns = allTxns.filter((t, i) => !removeIndices.has(i));
+          console.log('[DP] after filter count=', allTxns.length, 'total=', allTxns.reduce((s,t)=>s+t.amount,0).toFixed(2));
         }
       }
     }
