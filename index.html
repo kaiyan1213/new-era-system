@@ -6270,7 +6270,7 @@ async function loadPL() {
     if (!ccCards.length) ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true', select: 'id,card_name,bank,owner_team,gift_team,ads_team' }).catch(() => []);
     const breakdowns = await sb('nec_payslip_breakdown', { filter: invFilter, select: 'proxy_id,year,month,categories_json' });
     // Fetch order assignments + staff to correctly bucket Outsider/TM orders
-    const plAssignments = await sb('nec_order_assignments', { filter: invFilter, select: 'proxy_id,order_no,commission_algo,staff_id' }).catch(() => []);
+    const plAssignments = await sb('nec_order_assignments', { filter: invFilter, select: 'proxy_id,order_no,commission_algo,staff_id,staff_name' }).catch(() => []);
     console.log('[PL] assignments fetched:', plAssignments.length, 'filter:', invFilter);
     const outsiderAssigns = plAssignments.filter(a => a.commission_algo === 'outsider');
     console.log('[PL] outsider assigns:', outsiderAssigns.length, outsiderAssigns.slice(0,3));
@@ -6340,31 +6340,54 @@ async function loadPL() {
       costCat[bucket][label] = (costCat[bucket][label] || 0) + amt;
     }
 
-    // ── REVENUE by bucket: iterate every order, use assignment to determine bucket ──
-    // Revenue = total_com per order (what Coway paid for that order on the payslip)
+    // ── REVENUE + COMMISSION COST: per-proxy, split by order bucket proportions ──
+    // Revenue = coway_payslip_amount (actual money received), split proportionally by total_com per bucket
     // Commission cost = com_from_payslip per order (what staff actually earned)
-    // These are tracked per-bucket and used later to add per-staff commission costs
     const perOrderCommCost = {}; // bucket -> {staff_name -> total com_from_payslip}
 
     for (const bd of breakdowns) {
       try {
         const orders = JSON.parse(bd.categories_json || '[]');
+        const inv = invoices.find(i => i.proxy_id === bd.proxy_id && i.year === bd.year && i.month === bd.month);
+        const payslipTotal = parseFloat(inv?.coway_payslip_amount || 0);
+
+        // Step 1: sum total_com per bucket for this proxy-month
+        const bucketComTotals = {};
+        let grandTotal = 0;
         orders.forEach(o => {
           if (!o.order_no) return;
           const assignKey = `${String(bd.proxy_id)}|${String(o.order_no)}`;
           const assign = plAssignMap[assignKey];
-          const algo = assign?.commission_algo || null;
-          const team = assign?.team || 'New Era';
-          const channel = assign?.channel || 'DM';
-          const bucket = assignToBucket(algo, team, channel);
-          const totalCom = parseFloat(o.total_com || 0);
+          const bucket = assignToBucket(assign?.commission_algo, assign?.team, assign?.channel);
+          const com = parseFloat(o.total_com || 0);
+          bucketComTotals[bucket] = (bucketComTotals[bucket] || 0) + com;
+          grandTotal += com;
+        });
+
+        // Step 2: split payslip amount by proportion, add to revBucket
+        if (grandTotal > 0 && payslipTotal > 0) {
+          Object.entries(bucketComTotals).forEach(([bucket, com]) => {
+            revBucket[bucket] = r2((revBucket[bucket] || 0) + payslipTotal * (com / grandTotal));
+          });
+        } else if (payslipTotal > 0) {
+          // No order data: fall back to proxy's team
+          const proxy = proxies.find(p => p.id === bd.proxy_id);
+          const fb = (proxy?.company_team === 'Alpha C') ? 'AC-DM' : 'NE-DM';
+          revBucket[fb] = r2((revBucket[fb] || 0) + payslipTotal);
+        }
+
+        // Step 3: commission cost = com_from_payslip per order → correct bucket
+        orders.forEach(o => {
+          if (!o.order_no) return;
           const earnedCom = parseFloat(o.com_from_payslip || 0);
-          if (totalCom > 0) revBucket[bucket] = r2((revBucket[bucket] || 0) + totalCom);
-          if (earnedCom > 0 && assign?.staff_name) {
-            if (!perOrderCommCost[bucket]) perOrderCommCost[bucket] = {};
-            const sn = assign.staff_name;
-            perOrderCommCost[bucket][sn] = r2((perOrderCommCost[bucket][sn] || 0) + earnedCom);
-          }
+          if (earnedCom <= 0) return;
+          const assignKey = `${String(bd.proxy_id)}|${String(o.order_no)}`;
+          const assign = plAssignMap[assignKey];
+          if (!assign) return;
+          const bucket = assignToBucket(assign.commission_algo, assign.team, assign.channel);
+          if (!perOrderCommCost[bucket]) perOrderCommCost[bucket] = {};
+          const sn = assign.staff_name || assign.staff_id || 'Unknown';
+          perOrderCommCost[bucket][sn] = r2((perOrderCommCost[bucket][sn] || 0) + earnedCom);
         });
       } catch(e) {}
     }
