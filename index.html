@@ -6294,6 +6294,8 @@ async function loadPL() {
       } catch(e) {}
     }
 
+    // totalCommByStaff: total commission revenue across all orders for ratio calc
+    const totalCommByStaff = {};
     plAssignments.forEach(a => {
       const staff = plStaffMap[a.staff_id] || {};
       plAssignMap[`${String(a.proxy_id)}|${String(a.order_no)}`] = {
@@ -6301,12 +6303,14 @@ async function loadPL() {
         team: staff.company_team || 'New Era',
         channel: staff.channel || 'DM'
       };
-      // Accumulate outsider/TM commission per staff
+      // Accumulate per-algo commission totals per staff (from breakdown total_com)
       const com = orderComMap[String(a.order_no)] || 0;
-      if (a.commission_algo === 'outsider' && a.staff_id && com > 0) {
+      if (!a.staff_id) return;
+      totalCommByStaff[a.staff_id] = (totalCommByStaff[a.staff_id] || 0) + com;
+      if (a.commission_algo === 'outsider' && com > 0) {
         outsiderCommByStaff[a.staff_id] = (outsiderCommByStaff[a.staff_id] || 0) + com;
       }
-      if (a.commission_algo === 'tm' && a.staff_id && com > 0) {
+      if (a.commission_algo === 'tm' && com > 0) {
         tmCommByStaff[a.staff_id] = (tmCommByStaff[a.staff_id] || 0) + com;
       }
     });
@@ -6463,9 +6467,13 @@ async function loadPL() {
       const staffName = staffRec.name || 'Unknown';
 
       if (p.record_type === 'manager') {
-        // Split out outsider/TM portions from manager payroll too
-        const mgrOutsiderCom = r2(outsiderCommByStaff[p.staff_id] || 0);
-        const mgrTmCom = r2(tmCommByStaff[p.staff_id] || 0);
+        // Managers: only split out outsider/TM from their commission_earned portion using ratios
+        const mgrTotalRev = totalCommByStaff[p.staff_id] || 0;
+        const mgrCommEarned = parseFloat(p.commission_earned || 0);
+        const mgrOutsiderRatio = mgrTotalRev > 0 ? (outsiderCommByStaff[p.staff_id] || 0) / mgrTotalRev : 0;
+        const mgrTmRatio = mgrTotalRev > 0 ? (tmCommByStaff[p.staff_id] || 0) / mgrTotalRev : 0;
+        const mgrOutsiderCom = r2(mgrCommEarned * mgrOutsiderRatio);
+        const mgrTmCom = r2(mgrCommEarned * mgrTmRatio);
         if (mgrOutsiderCom > 0) {
           addCost('Outsider', 'Outsider Commission', mgrOutsiderCom);
           addTooltipDetail('Outsider', 'Outsider Commission', staffName, mgrOutsiderCom);
@@ -6499,10 +6507,14 @@ async function loadPL() {
       }
       if (staff?.staff_type === 'sales') {
         const bucket = team === 'Alpha C' ? (ch === 'TM' ? 'AC-TM' : 'AC-DM') : (ch === 'TM' ? 'NE-TM' : 'NE-DM');
-        // Split out outsider commission from total
-        const outsiderCom = r2(outsiderCommByStaff[p.staff_id] || 0);
-        const tmCom = ch !== 'TM' ? r2(tmCommByStaff[p.staff_id] || 0) : 0; // TM staff already in TM bucket
-        const mainCom = r2(Math.max(0, (outlay - claim) - outsiderCom - tmCom));
+        const totalRev = totalCommByStaff[p.staff_id] || 0;
+        const commEarned = parseFloat(p.commission_earned || 0);
+        // Use revenue ratios to split actual commission_earned
+        const outsiderRatio = totalRev > 0 ? (outsiderCommByStaff[p.staff_id] || 0) / totalRev : 0;
+        const tmRatio = (ch !== 'TM' && totalRev > 0) ? (tmCommByStaff[p.staff_id] || 0) / totalRev : 0;
+        const outsiderCom = r2(commEarned * outsiderRatio);
+        const tmCom = r2(commEarned * tmRatio);
+        const mainCom = r2(Math.max(0, commEarned - outsiderCom - tmCom));
         if (outsiderCom > 0) {
           addCost('Outsider', 'Outsider Commission', outsiderCom);
           addTooltipDetail('Outsider', 'Outsider Commission', staffName, outsiderCom);
@@ -6512,9 +6524,10 @@ async function loadPL() {
           addCost(tmBucket, 'Staff Commission (TM)', tmCom);
           addTooltipDetail(tmBucket, 'Staff Commission (TM)', staffName, tmCom);
         }
-        if (mainCom > 0) {
-          addCost(bucket, `Staff Commission (${ch})`, mainCom);
-          addTooltipDetail(bucket, `Staff Commission (${ch})`, staffName, mainCom);
+        const netMainCom = r2(Math.max(0, mainCom - claim));
+        if (netMainCom > 0) {
+          addCost(bucket, `Staff Commission (${ch})`, netMainCom);
+          addTooltipDetail(bucket, `Staff Commission (${ch})`, staffName, netMainCom);
         }
         if (claim > 0) { addCost(bucket, 'Staff Claim', claim); addTooltipDetail(bucket, 'Staff Claim', staffName, claim); }
       } else {
