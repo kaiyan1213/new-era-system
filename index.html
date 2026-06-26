@@ -6839,7 +6839,7 @@ async function processCCFile(file) {
     ccTransactions = allTxns;
 
     document.getElementById('ccProgress').classList.add('hidden');
-    console.log('[CC] allTxns count:', allTxns.length, 'raw data.transactions count:', (data.transactions||[]).length, 'error:', data.error);
+    console.log('[CC] allTxns count:', allTxns.length, 'raw data.transactions count:', (data.transactions||[]).length, 'error:', data.error, '_debug_raw_count:', data._debug_raw_count, 'full data:', JSON.stringify(data).slice(0,500));
     if (!ccTransactions.length) {
       showToast('No transactions found in this PDF', 'error');
       document.getElementById('ccUploadZone').classList.remove('hidden');
