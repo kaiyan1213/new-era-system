@@ -6600,8 +6600,6 @@ async function loadPL() {
       const pct = totalRevFinal > 0 ? (rev / totalRevFinal * 100).toFixed(1) : '0.0';
       const color = BUCKET_COLORS[b] || 'var(--muted)';
       const label = BUCKET_LABELS[b] || b;
-      const isOutsider = b === 'Outsider';
-      const isManager = b === 'Manager Pool';
       const orderCount = orderCountByBucket[b] || 0;
       const perOrder = (orderCount > 0 && rev > 0) ? r2(rev / orderCount) : 0;
 
