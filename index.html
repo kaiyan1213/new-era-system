@@ -903,6 +903,7 @@
         <div class="stat-label">Total Revenue</div>
         <div class="stat-value green" id="plTotalRev">—</div>
         <div class="stat-sub">Coway payslip total (actual money paid out)</div>
+        <div style="margin-top:4px;font-size:12px;color:var(--muted)">Passive: <span id="plPassiveAmt" style="color:var(--yellow);font-weight:600">—</span></div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Total Costs</div>
@@ -6262,12 +6263,19 @@ async function loadPL() {
     // Coway payslip, full stop — regardless of category/team/channel.
     // (Not invoice_amount: proxies don't reliably pay the invoiced amount
     // at face value, so that's not real collected revenue.)
-    const invoices = await sb('proxy_invoices', { filter: invFilter, select: 'proxy_id,year,month,coway_payslip_amount,company_team' });
+    const invoices = await sb('proxy_invoices', { filter: invFilter, select: 'proxy_id,year,month,coway_payslip_amount,company_team,passive_income' });
     const proxies = await sb('proxy_accounts', { select: 'id,channel,company_team' });
     const costs = await sb('nec_pl_costs', { filter: invFilter });
     // Ensure ccCards is loaded so we can determine which card belongs to NE vs AC
     if (!ccCards.length) ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true', select: 'id,card_name,bank,owner_team,gift_team,ads_team' }).catch(() => []);
     const breakdowns = await sb('nec_payslip_breakdown', { filter: invFilter, select: 'proxy_id,year,month,categories_json' });
+    // Fetch order assignments so we can correctly bucket Outsider/TM orders
+    const plAssignments = await sb('nec_order_assignments', { filter: invFilter, select: 'proxy_id,order_no,customer_name,commission_algo,team,channel' }).catch(() => []);
+    const plAssignMap = {};
+    plAssignments.forEach(a => {
+      const k = `${a.proxy_id}|${a.order_no}`;
+      plAssignMap[k] = a;
+    });
 
     // Build per-proxy team-split proportions — New Era / Alpha C / Outsider
     // ALL counted (nothing excluded). This only decides which bucket each
@@ -6280,10 +6288,19 @@ async function loadPL() {
         const bucketTotals = {};
         let grand = 0;
         orders.forEach(o => {
-          const t = o.team || 'New Era';
-          const ch = o.channel || (t === 'Outsider' ? null : 'DM');
-          // Bucket key: "New Era|DM", "Alpha C|TM", "Outsider", etc.
-          const bucket = t === 'Outsider' ? 'Outsider' : `${t}|${ch || 'DM'}`;
+          // Check assignment for this order — assignments have accurate team/channel/algo
+          const assignKey = `${bd.proxy_id}|${o.order_no}`;
+          const assign = plAssignMap[assignKey];
+          const algo = assign?.commission_algo || o.commission_algo || null;
+          // If algo is 'outsider' → Outsider bucket regardless of team
+          let bucket;
+          if (algo === 'outsider' || o.team === 'Outsider') {
+            bucket = 'Outsider';
+          } else {
+            const t = assign?.team || o.team || 'New Era';
+            const ch = assign?.channel || o.channel || 'DM';
+            bucket = `${t}|${ch}`;
+          }
           const com = parseFloat(o.total_com || 0);
           grand += com;
           bucketTotals[bucket] = (bucketTotals[bucket] || 0) + com;
@@ -6504,6 +6521,10 @@ async function loadPL() {
     const totalRev2 = totalRevFinal;
 
         document.getElementById('plTotalRev').textContent = fmt(totalRevFinal);
+        // Passive income total from proxy_invoices
+        const passiveTotal = r2(invoices.reduce((s,i) => s + parseFloat(i.passive_income || 0), 0));
+        const plPassiveEl = document.getElementById('plPassiveAmt');
+        if (plPassiveEl) plPassiveEl.textContent = 'RM ' + fmt(passiveTotal);
     document.getElementById('plTotalCost').textContent = fmt(totalCost);
     const npEl = document.getElementById('plNetProfit');
     npEl.textContent = fmt(netProfit);
@@ -8436,7 +8457,8 @@ async function confirmBulkSave() {
           status: prevStatus,
           payment_date: prevPaymentDate,
           company_team: proxyTeam,
-          notes: `Auto-imported from PDF: ${p.filename} (${adjLabel})`
+          notes: `Auto-imported from PDF: ${p.filename} (${adjLabel})`,
+          passive_income: p.passive_and_tbc_total || 0
         }
       });
 
@@ -8453,6 +8475,7 @@ async function confirmBulkSave() {
           categories_json: JSON.stringify(ordersWithTeam),
           allowances_json: JSON.stringify(p.allowances || []),
           team_building_total: p.tbc_total || 0,
+          passive_income: p.passive_and_tbc_total || 0,
           raw_filename: p.filename
         }
       });
