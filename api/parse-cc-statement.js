@@ -235,7 +235,8 @@ ${trimmedText}`;
     claudeCrAmounts.forEach(a => crAmountSet.add(Math.round(a * 100)));
     const crAmounts = [...crAmountSet].map(c => c/100);
 
-    return res.status(200).json({ success: true, transactions: cleaned, total, count: cleaned.length, _cr_filtered: crAmounts, statement_balance: claudeStatementBalance });
+    console.log('[Parser] cleaned count:', cleaned.length, 'raw transactions count:', transactions.length, 'cr_amounts:', claudeCrAmounts, 'stmt_bal:', claudeStatementBalance);
+    return res.status(200).json({ success: true, transactions: cleaned, total, count: cleaned.length, _cr_filtered: crAmounts, statement_balance: claudeStatementBalance, _debug_raw_count: transactions.length });
   } catch(e) {
     return res.status(500).json({ error: e.message });
   }
