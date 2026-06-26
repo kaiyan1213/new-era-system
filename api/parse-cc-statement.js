@@ -52,7 +52,9 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { base64, debug, categories } = req.body;
+  const { base64, debug, categories, cardName } = req.body;
+  const cardNameUpper = (cardName || '').toUpperCase();
+  const isKYAlliance = cardNameUpper.includes('KY') || cardNameUpper.includes('JENNY');
   if (!base64) return res.status(400).json({ error: 'No PDF data' });
 
   // Use the caller's live category list if provided (array of {slug,label}),
@@ -107,12 +109,10 @@ ${hasOther ? '' : '  (if truly nothing fits, pick whichever category is the clos
   * AI tools (ANTHROPIC, OPENAI, PADDLE, APPLE.COM/BILL) → "SHARED"
   * Otherwise → "SHARED"
 - company_team: pick from ${JSON.stringify(TEAMS)} using these STRICT rules based on which card this statement is from (card owner info is in the statement header):
-  * If card name/owner contains "KY ALLIANCE" or "JENNY" → all gift transactions = "Alpha C", all ads = "Alpha C"
-  * All other cards (including Carine CIMB, Kai Yan Alliance, Chloe etc) → "New Era" for ads and gift
-  * "MANYCHAT" → always "New Era" UNLESS card is KY Alliance
+  * This statement is from card: "${cardName || 'unknown'}" — isKYAlliance: ${isKYAlliance}
+  * If isKYAlliance is true → gift (Shopee) = "Alpha C", ads (Facebook) = "Alpha C", Manychat = "Alpha C"
+  * If isKYAlliance is false → gift = "New Era", ads = "New Era", Manychat = "New Era"
   * AI tools (ANTHROPIC, OPENAI, APPLE, PADDLE) → always null (shared, split 50/50)
-  * Gift (Shopee) → "New Era" UNLESS card is KY Alliance
-  * Facebook Ads → "New Era" UNLESS card is Carine CIMB or KY Alliance
   * Otherwise → null
 
 IMPORTANT: Extract ALL charge/purchase transactions from ALL sections of the statement (including sections labeled "VISA INFINITE", "TAN KAI YAN", or any cardholder name). Do NOT skip any section.
