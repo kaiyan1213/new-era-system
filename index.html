@@ -6277,13 +6277,7 @@ async function loadPL() {
     const plStaffList = await sb('nec_staff', { select: 'id,company_team,channel' }).catch(() => []);
     const plStaffMap = {};
     plStaffList.forEach(s => { plStaffMap[s.id] = s; });
-    const plAssignMap = {};
-    // outsiderCommByStaff: staff_id -> total outsider commission from breakdowns
-    const outsiderCommByStaff = {};
-    // tmCommByStaff: staff_id -> total TM commission from breakdowns
-    const tmCommByStaff = {};
-
-    // Build a map of order_no -> {total_com, com_from_payslip} from breakdowns
+    // Build order map: order_no -> {total_com, com_from_payslip} from breakdown
     const orderComMap = {};
     for (const bd of breakdowns) {
       try {
@@ -6297,88 +6291,29 @@ async function loadPL() {
       } catch(e) {}
     }
 
-    // totalCommByStaff: total commission revenue across all orders for ratio calc
-    const totalCommByStaff = {};
+    // Build assignment map: proxy_id|order_no -> {commission_algo, team, channel, staff_id, staff_name}
+    const plAssignMap = {};
     plAssignments.forEach(a => {
       const staff = plStaffMap[a.staff_id] || {};
       plAssignMap[`${String(a.proxy_id)}|${String(a.order_no)}`] = {
         commission_algo: a.commission_algo,
         team: staff.company_team || 'New Era',
-        channel: staff.channel || 'DM'
+        channel: (staff.channel || 'DM').toUpperCase(),
+        staff_id: a.staff_id,
+        staff_name: a.staff_name || ''
       };
-      // Use total_com for outsider (full pass-through), com_from_payslip for TM (earned amount)
-      const orderData = orderComMap[String(a.order_no)] || { total_com: 0, com_from_payslip: 0 };
-      const totalCom = orderData.total_com;
-      const earnedCom = orderData.com_from_payslip || totalCom;
-      if (!a.staff_id) return;
-      totalCommByStaff[a.staff_id] = (totalCommByStaff[a.staff_id] || 0) + totalCom;
-      if (a.commission_algo === 'outsider' && totalCom > 0) {
-        // Outsider: cost = full total_com (pass-through)
-        outsiderCommByStaff[a.staff_id] = (outsiderCommByStaff[a.staff_id] || 0) + totalCom;
-      }
-      if (a.commission_algo === 'tm' && earnedCom > 0) {
-        // TM: cost = com_from_payslip (what staff actually earned after cost deduction)
-        tmCommByStaff[a.staff_id] = (tmCommByStaff[a.staff_id] || 0) + earnedCom;
-      }
     });
 
-    // Build per-proxy team-split proportions — New Era / Alpha C / Outsider
-    // ALL counted (nothing excluded). This only decides which bucket each
-    // ringgit of revenue lands in, not whether it counts at all.
-    const breakdownShares = {};
-    for (const bd of breakdowns) {
-      const key = `${bd.proxy_id}_${bd.year}_${bd.month}`;
-      try {
-        const orders = JSON.parse(bd.categories_json || '[]');
-        const bucketTotals = {};
-        let grand = 0;
-        // Use order count as weight if total_com is missing/zero for all orders
-        const hasComData = orders.some(o => parseFloat(o.total_com || 0) > 0);
-        orders.forEach(o => {
-          // Check assignment for this order — assignments have accurate team/channel/algo
-          const assignKey = `${String(bd.proxy_id)}|${String(o.order_no)}`;
-          const assign = plAssignMap[assignKey];
-          const algo = assign?.commission_algo || o.commission_algo || null;
-          // If algo is 'outsider' → Outsider bucket regardless of team
-          let bucket;
-          if (algo === 'outsider' || o.team === 'Outsider') {
-            bucket = 'Outsider';
-          } else {
-            const t = assign?.team || o.team || 'New Era';
-            const ch = assign?.channel || o.channel || 'DM';
-            bucket = `${t}|${ch}`;
-          }
-          // Use total_com if available, else use 1 per order as equal weight
-          const com = hasComData ? parseFloat(o.total_com || 0) : 1;
-          grand += com;
-          bucketTotals[bucket] = (bucketTotals[bucket] || 0) + com;
-        });
-        if (grand > 0) breakdownShares[key] = Object.fromEntries(Object.entries(bucketTotals).map(([b,v]) => [b, v/grand]));
-        else breakdownShares[key] = {};
-      } catch(e) { /* malformed json */ }
+    // Helper: map assignment to 8-bucket label
+    function assignToBucket(algo, team, channel) {
+      if (algo === 'outsider') return 'Outsider';
+      const t = team || 'New Era';
+      const ch = (channel || 'DM').toUpperCase();
+      if (t === 'Alpha C') return ch === 'TM' ? 'AC-TM' : 'AC-DM';
+      return ch === 'TM' ? 'NE-TM' : 'NE-DM';
     }
 
-    // Revenue by channel AND by team+channel bucket (6-way split)
-    const revByChannel = { DM:0, TM:0, XHS:0, OTHER:0 };
-    const revByBucket = {};
-    for (const inv of invoices) {
-      const proxy = proxies.find(p => p.id === inv.proxy_id);
-      const ch = proxy?.channel || 'OTHER';
-      const amount = parseFloat(inv.coway_payslip_amount || 0);
-      revByChannel[ch] = (revByChannel[ch] || 0) + amount;
-
-      const key = `${inv.proxy_id}_${inv.year}_${inv.month}`;
-      const shares = breakdownShares[key];
-      if (shares && Object.keys(shares).length) {
-        Object.entries(shares).forEach(([bucket, share]) => {
-          revByBucket[bucket] = (revByBucket[bucket] || 0) + amount * share;
-        });
-      } else {
-        // Fall back to invoice-level company_team (no channel breakdown available)
-        const tm = inv.company_team || proxy?.company_team || 'New Era';
-        revByBucket[tm] = (revByBucket[tm] || 0) + amount;
-      }
-    }
+    // revByBucket replaced by per-order revBucket below
 
     // Manager Pool revenue — the 4 profit-sharing managers' own Coway
     // payslip income (Overriding 1st Install + Allowance) that gets pooled
@@ -6390,7 +6325,7 @@ async function loadPL() {
     const mgrPayslips = await sb('nec_manager_payslips', { filter: mgrPayslipFilter, select: 'pool_contribution' });
     const managerPoolRevenue = r2(mgrPayslips.reduce((s,m) => s + parseFloat(m.pool_contribution || 0), 0));
 
-    const totalRev = r2(Object.values(revByBucket).reduce((s,v) => s+v, 0) + managerPoolRevenue);
+    // totalRev computed after revBucket is populated below
 
     // ── NEW P&L LOGIC ──────────────────────────────────────────
     // Buckets: NE-DM, NE-TM, NE-Shared, AC-DM, AC-TM, AC-Shared, Outsider, Manager Pool
@@ -6405,28 +6340,33 @@ async function loadPL() {
       costCat[bucket][label] = (costCat[bucket][label] || 0) + amt;
     }
 
-    // ── REVENUE by bucket (from breakdown orders total_com) ──
+    // ── REVENUE by bucket: iterate every order, use assignment to determine bucket ──
+    // Revenue = total_com per order (what Coway paid for that order on the payslip)
+    // Commission cost = com_from_payslip per order (what staff actually earned)
+    // These are tracked per-bucket and used later to add per-staff commission costs
+    const perOrderCommCost = {}; // bucket -> {staff_name -> total com_from_payslip}
+
     for (const bd of breakdowns) {
-      const key = `${bd.proxy_id}_${bd.year}_${bd.month}`;
-      const inv = invoices.find(i => i.proxy_id === bd.proxy_id && i.year === bd.year && i.month === bd.month);
-      if (!inv) continue;
-      const payslipTotal = parseFloat(inv.coway_payslip_amount || 0);
-      const shares = breakdownShares[key];
-      if (shares && Object.keys(shares).length) {
-        Object.entries(shares).forEach(([bucket, share]) => {
-          // bucket is "New Era|DM", "Alpha C|TM", "Outsider" etc
-          let b8;
-          if (bucket === 'Outsider') b8 = 'Outsider';
-          else if (bucket === 'New Era|DM') b8 = 'NE-DM';
-          else if (bucket === 'New Era|TM') b8 = 'NE-TM';
-          else if (bucket === 'Alpha C|DM') b8 = 'AC-DM';
-          else if (bucket === 'Alpha C|TM') b8 = 'AC-TM';
-          else if (bucket.startsWith('New Era')) b8 = 'NE-DM'; // fallback
-          else if (bucket.startsWith('Alpha C')) b8 = 'AC-DM'; // fallback
-          else b8 = 'NE-DM';
-          revBucket[b8] = r2((revBucket[b8] || 0) + payslipTotal * share);
+      try {
+        const orders = JSON.parse(bd.categories_json || '[]');
+        orders.forEach(o => {
+          if (!o.order_no) return;
+          const assignKey = `${String(bd.proxy_id)}|${String(o.order_no)}`;
+          const assign = plAssignMap[assignKey];
+          const algo = assign?.commission_algo || null;
+          const team = assign?.team || 'New Era';
+          const channel = assign?.channel || 'DM';
+          const bucket = assignToBucket(algo, team, channel);
+          const totalCom = parseFloat(o.total_com || 0);
+          const earnedCom = parseFloat(o.com_from_payslip || 0);
+          if (totalCom > 0) revBucket[bucket] = r2((revBucket[bucket] || 0) + totalCom);
+          if (earnedCom > 0 && assign?.staff_name) {
+            if (!perOrderCommCost[bucket]) perOrderCommCost[bucket] = {};
+            const sn = assign.staff_name;
+            perOrderCommCost[bucket][sn] = r2((perOrderCommCost[bucket][sn] || 0) + earnedCom);
+          }
         });
-      }
+      } catch(e) {}
     }
     // Manager pool revenue
     revBucket['Manager Pool'] = r2((revBucket['Manager Pool'] || 0) + managerPoolRevenue);
@@ -6458,47 +6398,59 @@ async function loadPL() {
       tooltipDetails[bucket][label].push({ name, amount: amt });
     }
 
+    // ── COMMISSION COSTS from per-order breakdown (com_from_payslip per bucket per staff) ──
+    // This is the most accurate: each order's earned amount goes to the exact bucket
+    // determined by that order's commission_algo + staff's team/channel
+    Object.entries(perOrderCommCost).forEach(([bucket, staffMap2]) => {
+      Object.entries(staffMap2).forEach(([sName, amt]) => {
+        if (amt <= 0) return;
+        if (bucket === 'Outsider') {
+          addCost('Outsider', 'Outsider Commission', amt);
+          addTooltipDetail('Outsider', 'Outsider Commission', sName, amt);
+        } else if (bucket === 'NE-TM' || bucket === 'AC-TM') {
+          addCost(bucket, 'Staff Commission (TM)', amt);
+          addTooltipDetail(bucket, 'Staff Commission (TM)', sName, amt);
+        } else {
+          addCost(bucket, 'Staff Commission (DM)', amt);
+          addTooltipDetail(bucket, 'Staff Commission (DM)', sName, amt);
+        }
+      });
+    });
+
+    // ── OTHER PAYROLL COSTS (salary, bonus, claim, EPF — NOT commission) ──
     payrollRows.forEach(p => {
-      // Company actual outlay per staff = commission + salary + bonus + claim - deductions - epf
-      const comm = parseFloat(p.commission_earned || 0);
       const sal = parseFloat(p.base_salary || 0);
       const bon = parseFloat(p.bonus || 0);
       const claim = parseFloat(p.claim_amount || 0);
       const ded = parseFloat(p.deductions || 0);
       const epf = parseFloat(p.epf_employee || 0);
-      const outlay = r2(comm + sal + bon + claim - ded - epf);
-      if (outlay === 0) return;
+      // For managers: outlay = commission_earned + sal + bon + claim - ded - epf
+      // (manager commission is paid via Manager Settlement which includes their commission)
+      // For sales: outlay = sal + bon + claim - ded - epf only (commission handled above)
+      // For non-sales: outlay = sal + bon + claim - ded - epf
 
       const staff = staffMap[p.staff_id];
       const staffRec = allStaff.find(s => s.id === p.staff_id) || {};
       const staffName = staffRec.name || 'Unknown';
 
       if (p.record_type === 'manager') {
-        // Managers: outsider cost = direct total_com of outsider orders (pass-through)
-        // TM cost = from payroll commission_earned proportionally (TM is % based)
-        const mgrTotalRev = totalCommByStaff[p.staff_id] || 0;
-        const mgrCommEarned = parseFloat(p.commission_earned || 0);
-        // Outsider: direct from breakdown total_com (not ratio-based)
-        const mgrOutsiderCom = r2(outsiderCommByStaff[p.staff_id] || 0);
-        // TM: use direct sum of com_from_payslip for TM orders (actual earned)
-        const mgrTmCom = r2(tmCommByStaff[p.staff_id] || 0);
-        if (mgrOutsiderCom > 0) {
-          addCost('Outsider', 'Outsider Commission', mgrOutsiderCom);
-          addTooltipDetail('Outsider', 'Outsider Commission', staffName, mgrOutsiderCom);
+        // Manager settlement = full outlay (comm + sal + bon + claim - ded - epf)
+        const comm = parseFloat(p.commission_earned || 0);
+        const outlay = r2(comm + sal + bon + claim - ded - epf);
+        if (outlay !== 0) {
+          addCost('Manager Pool', 'Manager Settlement', outlay);
+          addTooltipDetail('Manager Pool', 'Manager Settlement', staffName, outlay);
         }
-        if (mgrTmCom > 0) {
-          const mgrTeam = allStaff.find(s => s.id === p.staff_id)?.company_team || 'New Era';
-          const tmBucket = mgrTeam === 'Alpha C' ? 'AC-TM' : 'NE-TM';
-          addCost(tmBucket, 'Staff Commission (TM)', mgrTmCom);
-          addTooltipDetail(tmBucket, 'Staff Commission (TM)', staffName, mgrTmCom);
-        }
-        addCost('Manager Pool', 'Manager Settlement', outlay);
-        addTooltipDetail('Manager Pool', 'Manager Settlement', staffName, outlay);
         return;
       }
       if (p.commission_type === 'outsider') {
-        addCost('Outsider', 'Outsider Commission', outlay);
-        addTooltipDetail('Outsider', 'Outsider Commission', staffName, outlay);
+        // Legacy outsider payroll record — outlay goes to Outsider bucket
+        const comm = parseFloat(p.commission_earned || 0);
+        const outlay = r2(comm + sal + bon + claim - ded - epf);
+        if (outlay !== 0) {
+          addCost('Outsider', 'Outsider Commission', outlay);
+          addTooltipDetail('Outsider', 'Outsider Commission', staffName, outlay);
+        }
         return;
       }
       const team = staff?.company_team || 'New Era';
@@ -6509,40 +6461,27 @@ async function loadPL() {
         const acPct = 1 - nePct;
         const pos = (staff?.position || staff?.staff_type || '').toLowerCase();
         const roleLabel = pos.includes('editor') ? 'Editor Salary' : pos.includes('content') ? 'Content Creator Salary' : 'Admin Salary';
-        if (nePct > 0) { addCost('NE-Shared', roleLabel + ' (Shared)', r2(outlay * nePct)); addTooltipDetail('NE-Shared', roleLabel + ' (Shared)', staffName, r2(outlay * nePct)); }
-        if (acPct > 0) { addCost('AC-Shared', roleLabel + ' (Shared)', r2(outlay * acPct)); addTooltipDetail('AC-Shared', roleLabel + ' (Shared)', staffName, r2(outlay * acPct)); }
+        const nonCommOutlay = r2(sal + bon + claim - ded - epf);
+        if (nonCommOutlay !== 0) {
+          if (nePct > 0) { addCost('NE-Shared', roleLabel + ' (Shared)', r2(nonCommOutlay * nePct)); addTooltipDetail('NE-Shared', roleLabel + ' (Shared)', staffName, r2(nonCommOutlay * nePct)); }
+          if (acPct > 0) { addCost('AC-Shared', roleLabel + ' (Shared)', r2(nonCommOutlay * acPct)); addTooltipDetail('AC-Shared', roleLabel + ' (Shared)', staffName, r2(nonCommOutlay * acPct)); }
+        }
         return;
       }
       if (staff?.staff_type === 'sales') {
+        // Sales staff: only claim goes to cost here (commission handled by perOrderCommCost)
         const bucket = team === 'Alpha C' ? (ch === 'TM' ? 'AC-TM' : 'AC-DM') : (ch === 'TM' ? 'NE-TM' : 'NE-DM');
-        const totalRev = totalCommByStaff[p.staff_id] || 0;
-        const commEarned = parseFloat(p.commission_earned || 0);
-        // Outsider: direct from breakdown total_com (pass-through, not ratio)
-        const outsiderCom = r2(outsiderCommByStaff[p.staff_id] || 0);
-        // TM: direct sum of com_from_payslip for TM orders (actual earned)
-        const tmCom = (ch !== 'TM') ? r2(tmCommByStaff[p.staff_id] || 0) : 0;
-        const mainCom = r2(Math.max(0, commEarned - outsiderCom - tmCom));
-        if (outsiderCom > 0) {
-          addCost('Outsider', 'Outsider Commission', outsiderCom);
-          addTooltipDetail('Outsider', 'Outsider Commission', staffName, outsiderCom);
-        }
-        if (tmCom > 0) {
-          const tmBucket = team === 'Alpha C' ? 'AC-TM' : 'NE-TM';
-          addCost(tmBucket, 'Staff Commission (TM)', tmCom);
-          addTooltipDetail(tmBucket, 'Staff Commission (TM)', staffName, tmCom);
-        }
-        const netMainCom = r2(Math.max(0, mainCom - claim));
-        if (netMainCom > 0) {
-          addCost(bucket, `Staff Commission (${ch})`, netMainCom);
-          addTooltipDetail(bucket, `Staff Commission (${ch})`, staffName, netMainCom);
-        }
         if (claim > 0) { addCost(bucket, 'Staff Claim', claim); addTooltipDetail(bucket, 'Staff Claim', staffName, claim); }
       } else {
+        // Admin/non-sales: full outlay = sal + bon + claim - ded - epf
         const sharedBucket = team === 'Alpha C' ? 'AC-Shared' : 'NE-Shared';
-        const pos = (staff?.position || staff?.staff_type || '').toLowerCase();
-        const roleLabel = pos.includes('editor') ? 'Editor Salary' : pos.includes('content') ? 'Content Creator Salary' : 'Admin Salary';
-        addCost(sharedBucket, roleLabel, outlay);
-        addTooltipDetail(sharedBucket, roleLabel, staffName, outlay);
+        const nonCommOutlay = r2(sal + bon + claim - ded - epf);
+        if (nonCommOutlay !== 0) {
+          const pos = (staff?.position || staff?.staff_type || '').toLowerCase();
+          const roleLabel = pos.includes('editor') ? 'Editor Salary' : pos.includes('content') ? 'Content Creator Salary' : 'Admin Salary';
+          addCost(sharedBucket, roleLabel, nonCommOutlay);
+          addTooltipDetail(sharedBucket, roleLabel, staffName, nonCommOutlay);
+        }
       }
     });
 
