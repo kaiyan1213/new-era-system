@@ -154,12 +154,34 @@ ${trimmedText}`;
     // Build a set of amounts that appear as "CR" (credit/refund) in the raw PDF text.
     // This is a regex-based safety net — Claude sometimes returns CR transactions as
     // normal entries, so we cross-check against the raw text to catch them.
+    // Note: pdf-parse may put the amount and "CR" on separate lines, so we check both
+    // inline ("56.45 CR") and next-line ("56.45\nCR") patterns.
     const crAmountSet = new Set();
-    const crRegex = /([\d,]+\.\d{2})\s*CR\b/gi;
+    // Match "amount CR" on same line
+    const crRegexInline = /([\d,]+\.\d{2})\s*CR\b/gi;
     let crMatch;
-    while ((crMatch = crRegex.exec(text)) !== null) {
+    while ((crMatch = crRegexInline.exec(text)) !== null) {
       const amt = parseFloat(crMatch[1].replace(/,/g, ''));
-      if (!isNaN(amt)) crAmountSet.add(Math.round(amt * 100)); // store as cents to avoid float issues
+      if (!isNaN(amt)) crAmountSet.add(Math.round(amt * 100));
+    }
+    // Match amount on one line, CR alone on the next line
+    const lines = text.split(/\r?\n/);
+    for (let i = 0; i < lines.length - 1; i++) {
+      const cur = lines[i].trim();
+      const next = lines[i + 1].trim();
+      if (/^CR$/i.test(next)) {
+        const amtMatch = cur.match(/([\d,]+\.\d{2})$/);
+        if (amtMatch) {
+          const amt = parseFloat(amtMatch[1].replace(/,/g, ''));
+          if (!isNaN(amt)) crAmountSet.add(Math.round(amt * 100));
+        }
+      }
+      // Also handle "56.45 CR" as the entire line content
+      const lineMatch = cur.match(/^([\d,]+\.\d{2})\s+CR$/i);
+      if (lineMatch) {
+        const amt = parseFloat(lineMatch[1].replace(/,/g, ''));
+        if (!isNaN(amt)) crAmountSet.add(Math.round(amt * 100));
+      }
     }
 
     // Sanity-clean each row — never trust external input blindly. Unknown/
@@ -185,8 +207,9 @@ ${trimmedText}`;
       }));
 
     const total = Math.round(cleaned.reduce((s,t) => s + t.amount, 0) * 100) / 100;
+    const crAmounts = [...crAmountSet].map(c => c/100);
 
-    return res.status(200).json({ success: true, transactions: cleaned, total, count: cleaned.length });
+    return res.status(200).json({ success: true, transactions: cleaned, total, count: cleaned.length, _cr_filtered: crAmounts });
   } catch(e) {
     return res.status(500).json({ error: e.message });
   }
