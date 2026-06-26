@@ -6805,9 +6805,11 @@ async function processCCFile(file) {
         const cName = selCard ? (selCard.card_name || '') : '';
         const isKY = cName.toUpperCase().includes('KY') || cName.toUpperCase().includes('JENNY');
         let team = t.company_team;
-        if (isKY && (t.category === 'gift' || t.category === 'ad_spend' || t.category === 'manychat')) {
-          team = 'Alpha C';
-        } else if (!isKY && team === null && (t.category === 'gift' || t.category === 'ad_spend' || t.category === 'manychat')) {
+        if (isKY && t.category === 'gift') {
+          team = 'Alpha C'; // KY Alliance gift = AC
+        } else if (t.category === 'ad_spend' || t.category === 'manychat') {
+          team = 'New Era'; // Ads/Manychat always NE regardless of card
+        } else if (!isKY && t.category === 'gift') {
           team = 'New Era';
         }
         return { ...t, company_team: team, year: defaultYear, month: defaultMonth };
