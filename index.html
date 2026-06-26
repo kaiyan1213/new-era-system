@@ -6812,11 +6812,11 @@ async function processCCFile(file) {
       if (currentTotal > targetTotal) {
         const excess = currentTotal - targetTotal;
         // Use subset-sum DP to find exact set of transactions matching the excess
-        // Only consider transactions up to excess size, cap at 20 candidates to keep it fast
+        // Only consider transactions smaller than excess (potential refund candidates)
+        // No slice limit — we need to check all candidates
         const candidates = allTxns
           .map((t,i) => ({ cents: Math.round(t.amount * 100), i }))
-          .filter(c => c.cents <= excess)
-          .slice(0, 20);
+          .filter(c => c.cents < excess); // strictly less than excess
         // DP: dp[s] = list of candidate indices that sum to s
         const dp = new Map();
         dp.set(0, []);
