@@ -6782,7 +6782,17 @@ async function processCCFile(file) {
 
     const defaultYear = parseInt(document.getElementById('ccBulkYear')?.value || '2026');
     const defaultMonth = new Date().getMonth() + 1;
-    ccTransactions = data.transactions.map(t => ({ ...t, year: defaultYear, month: defaultMonth }));
+    // Filter out CR (credit/refund/payment) transactions and zero/negative amounts
+    ccTransactions = data.transactions
+      .filter(t => {
+        const amt = parseFloat(t.amount || 0);
+        if (amt <= 0) return false;
+        const desc = (t.description || '').toUpperCase();
+        // Skip payment/refund/credit transactions
+        if (desc.includes('PAYMENT') || desc.includes('DUITNOW TO') || desc.includes('REFUND') || desc.includes('CREDIT')) return false;
+        return true;
+      })
+      .map(t => ({ ...t, year: defaultYear, month: defaultMonth }));
     ccStatementBalance = (typeof data.statement_balance === 'number') ? data.statement_balance : null;
 
     document.getElementById('ccProgress').classList.add('hidden');
