@@ -118,7 +118,7 @@ ${hasOther ? '' : '  (if truly nothing fits, pick whichever category is the clos
 IMPORTANT: Extract ALL charge/purchase transactions from ALL sections of the statement (including sections labeled "VISA INFINITE", "TAN KAI YAN", or any cardholder name). Do NOT skip any section.
 
 Respond with ONLY a raw JSON object (no markdown, no code fences), with three keys:
-1. "transactions": array of ALL charge transactions found (EXCLUDE only: lines with "CR" suffix, PAYMENT lines, PREVIOUS BALANCE lines, MINIMUM PAYMENT lines, CURRENT BALANCE lines)
+1. "transactions": array of ALL charge transactions found (EXCLUDE only: lines with "CR" suffix, PAYMENT/DUITNOW TO lines, PREVIOUS BALANCE lines, MINIMUM PAYMENT lines, CURRENT BALANCE/STATEMENT BALANCE lines. DO INCLUDE: insurance fees like "CREDIT PROTECTOR", subscription fees like "Ezypay", interest charges, service tax, and any other charges)
 2. "cr_amounts": array of numeric amounts (MYR) that appeared with "CR" suffix (refunds/credits/payments)
 3. "statement_balance": the CHARGES THIS MONTH or CURRENT BALANCE total from the statement (as a number, MYR)
 
