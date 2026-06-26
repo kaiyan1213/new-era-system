@@ -110,8 +110,12 @@ ${hasOther ? '' : '  (if truly nothing fits, pick whichever category is the clos
   * Facebook Ads → "New Era" UNLESS card is Carine CIMB or KY Alliance
   * Otherwise → null
 
-Respond with ONLY a raw JSON array, no markdown code fences, no commentary, no leading/trailing text. Format:
-[{"date":"15/06","description":"FACEBK *ADS8X7Y2Z","amount":450.00,"is_credit":false,"category":"${categorySlugs[0]}","channel":"SHARED","company_team":null}]
+Respond with ONLY a raw JSON object (no markdown, no code fences), with two keys:
+1. "transactions": array of charge transactions (exclude CR/refund/payment lines entirely)
+2. "cr_amounts": array of numeric amounts (MYR) that had "CR" suffix in the statement (refunds/credits)
+
+Format:
+{"transactions":[{"date":"15/06","description":"FACEBK *ADS8X7Y2Z","amount":450.00,"is_credit":false,"category":"${categorySlugs[0]}","channel":"SHARED","company_team":null}],"cr_amounts":[81.80,3.15]}
 
 Statement text:
 ${trimmedText}`;
@@ -141,10 +145,19 @@ ${trimmedText}`;
     raw = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
 
     let transactions;
+    let claudeCrAmounts = [];
     try {
-      transactions = JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.transactions)) {
+        transactions = parsed.transactions;
+        claudeCrAmounts = Array.isArray(parsed.cr_amounts) ? parsed.cr_amounts.map(Number).filter(n => !isNaN(n)) : [];
+      } else if (Array.isArray(parsed)) {
+        transactions = parsed; // old format fallback
+      } else {
+        return res.status(502).json({ error: 'Claude did not return expected JSON. Raw: ' + raw.slice(0, 500) });
+      }
     } catch(parseErr) {
-      return res.status(502).json({ error: 'Could not parse Claude\'s response as JSON. Raw response: ' + raw.slice(0, 500) });
+      return res.status(502).json({ error: 'Could not parse Claude response as JSON. Raw: ' + raw.slice(0, 500) });
     }
 
     if (!Array.isArray(transactions)) {
@@ -207,6 +220,8 @@ ${trimmedText}`;
       }));
 
     const total = Math.round(cleaned.reduce((s,t) => s + t.amount, 0) * 100) / 100;
+    // Merge Claude's cr_amounts with regex-detected ones
+    claudeCrAmounts.forEach(a => crAmountSet.add(Math.round(a * 100)));
     const crAmounts = [...crAmountSet].map(c => c/100);
 
     return res.status(200).json({ success: true, transactions: cleaned, total, count: cleaned.length, _cr_filtered: crAmounts });
