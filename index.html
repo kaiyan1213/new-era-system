@@ -6783,11 +6783,16 @@ async function processCCFile(file) {
     const defaultYear = parseInt(document.getElementById('ccBulkYear')?.value || '2026');
     const defaultMonth = new Date().getMonth() + 1;
     // Filter out CR (credit/refund/payment) transactions and zero/negative amounts
+    // Build CR amount set from parser's _cr_filtered list AND from description-based heuristics
+    const crAmountCents = new Set((data._cr_filtered || []).map(a => Math.round(a * 100)));
+
     ccTransactions = data.transactions
       .filter(t => {
         const amt = parseFloat(t.amount || 0);
         if (amt <= 0) return false;
         if (t.is_credit) return false; // parser flagged as credit/refund/payment
+        // Check against CR amounts detected from raw PDF text
+        if (crAmountCents.has(Math.round(amt * 100))) return false;
         const desc = (t.description || '').toUpperCase();
         // Skip payment/refund/credit transactions by description
         if (desc.includes('PAYMENT') || desc.includes('DUITNOW TO') || desc.includes('REFUND') || desc.includes('CREDIT')) return false;
