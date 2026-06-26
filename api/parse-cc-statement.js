@@ -92,8 +92,20 @@ Then classify each transaction:
 - category: pick the SINGLE best match slug from this exact list: ${JSON.stringify(categorySlugs)}
 ${categoryGuidance}
 ${hasOther ? '' : '  (if truly nothing fits, pick whichever category is the closest semantic match)'}
-- channel: pick from ${JSON.stringify(CHANNELS)} — only guess DM/TM/XHS if the merchant description clearly hints at one specific sales channel (rare); otherwise default "SHARED"
-- company_team: pick from ${JSON.stringify(TEAMS)} (use JSON null, not the string "null") — only guess "New Era" or "Alpha C" if the description clearly hints at one specific team; otherwise null (shared/unknown, the user will assign it manually)
+- channel: pick from ${JSON.stringify(CHANNELS)} using these STRICT rules:
+  * "MANYCHAT" in description → always "DM"
+  * "FACEBK", "FACEBOOK", "FB.ME/ADS" in description → always "DM"
+  * Shopee/gift transactions → always "DM"
+  * AI tools (ANTHROPIC, OPENAI, PADDLE, APPLE.COM/BILL) → "SHARED"
+  * Otherwise → "SHARED"
+- company_team: pick from ${JSON.stringify(TEAMS)} using these STRICT rules based on which card this statement is from (card owner info is in the statement header):
+  * If card belongs to CARINE LEE WEI YING (CIMB card) AND category is "ad_spend" (Facebook ads) → "Alpha C"
+  * If card name/owner contains "KY ALLIANCE" or "JENNY" → all gift transactions = "Alpha C", all ads = "Alpha C"
+  * "MANYCHAT" → always "New Era" UNLESS card is KY Alliance
+  * AI tools (ANTHROPIC, OPENAI, APPLE, PADDLE) → always null (shared, split 50/50)
+  * Gift (Shopee) → "New Era" UNLESS card is KY Alliance
+  * Facebook Ads → "New Era" UNLESS card is Carine CIMB or KY Alliance
+  * Otherwise → null
 
 Respond with ONLY a raw JSON array, no markdown code fences, no commentary, no leading/trailing text. Format:
 [{"date":"15/06","description":"FACEBK *ADS8X7Y2Z","amount":450.00,"category":"${categorySlugs[0]}","channel":"SHARED","company_team":null}]
