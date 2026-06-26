@@ -6832,7 +6832,7 @@ async function processCCFile(file) {
     const pdfPassword = document.getElementById('ccPdfPassword')?.value || '';
     const base64 = rawBase64;
 
-    const response = await fetch('/api/parse-cc-statement', {
+    const response = await fetch('/api/parse-cc-statement2', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ base64, categories: costCategories, pdfPassword: document.getElementById('ccPdfPassword')?.value || '' })
