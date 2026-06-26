@@ -2157,15 +2157,23 @@
           <input type="number" id="ecDueDay" class="form-input" min="1" max="31">
         </div>
       </div>
-      <div class="form-group">
-        <label class="form-label">Default Team (for all transactions)</label>
-        <select id="ecGiftTeam" class="form-input">
-          <option value="">— Not set (use category rules) —</option>
-          <option value="New Era">New Era</option>
-          <option value="Alpha C">Alpha C</option>
-        </select>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Ads / Manychat Team</label>
+          <select id="ecAdsTeam" class="form-input">
+            <option value="New Era">New Era</option>
+            <option value="Alpha C">Alpha C</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Gift / Shopping Team</label>
+          <select id="ecGiftTeam" class="form-input">
+            <option value="New Era">New Era</option>
+            <option value="Alpha C">Alpha C</option>
+          </select>
+        </div>
       </div>
-      <div style="font-size:11px;color:var(--muted)">If set, ALL transactions from this card will default to this team. AI Tools always remain Shared regardless.</div>
+      <div style="font-size:11px;color:var(--muted)">AI Tools always Shared regardless of card.</div>
     </div>
     <div class="form-actions">
       <button class="btn btn-ghost" onclick="closeModal('modalEditCard')">Cancel</button>
@@ -6240,7 +6248,7 @@ async function loadPL() {
     const proxies = await sb('proxy_accounts', { select: 'id,channel,company_team' });
     const costs = await sb('nec_pl_costs', { filter: invFilter });
     // Ensure ccCards is loaded so we can determine which card belongs to NE vs AC
-    if (!ccCards.length) ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true', select: 'id,card_name,bank,owner_team,gift_team' }).catch(() => []);
+    if (!ccCards.length) ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true', select: 'id,card_name,bank,owner_team,gift_team,ads_team' }).catch(() => []);
     const breakdowns = await sb('nec_payslip_breakdown', { filter: invFilter, select: 'proxy_id,year,month,categories_json' });
 
     // Build per-proxy team-split proportions — New Era / Alpha C / Outsider
@@ -6702,7 +6710,7 @@ let ccCardsLoaded = false;
 async function loadCreditCards(force = false) {
   if (ccCardsLoaded && !force) return;
   try {
-    ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true&order=card_name.asc', select: 'id,card_name,bank,statement_day,due_day,owner_team,gift_team' });
+    ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true&order=card_name.asc', select: 'id,card_name,bank,statement_day,due_day,owner_team,gift_team,ads_team' });
     ccCardsLoaded = true;
   } catch(e) { ccCards = []; } // table not set up yet — features degrade gracefully
 }
@@ -6862,17 +6870,17 @@ async function processCCFile(file) {
         const sel = document.getElementById('ccStatementCard');
         const selCardId = sel ? sel.value : '';
         const selCard = ccCards.find(c => c.id === selCardId);
-        // default_team: per-card setting — if set, applies to ALL categories except AI tools
-        const cardDefaultTeam = selCard?.gift_team || null;
+        const cardAdsTeam = selCard?.ads_team || 'New Era';
+        const cardGiftTeam = selCard?.gift_team || 'New Era';
         let team = t.company_team;
         if (t.category === 'ai_tools') {
           team = null; // AI tools always Shared
-        } else if (cardDefaultTeam) {
-          team = cardDefaultTeam; // card-level override for everything else
         } else if (t.category === 'ad_spend' || t.category === 'manychat') {
-          team = 'New Era'; // default: Ads/Manychat = NE
+          team = cardAdsTeam;
         } else if (t.category === 'gift') {
-          team = 'New Era'; // default: gift = NE
+          team = cardGiftTeam;
+        } else {
+          team = cardAdsTeam; // default to ads_team for other categories
         }
         return { ...t, company_team: team, year: defaultYear, month: defaultMonth };
       });
@@ -7298,7 +7306,8 @@ function openEditCard(cardId) {
   document.getElementById('ecBank').value = card.bank || '';
   document.getElementById('ecStatementDay').value = card.statement_day || '';
   document.getElementById('ecDueDay').value = card.due_day || '';
-  document.getElementById('ecGiftTeam').value = card.gift_team || card.owner_team || '';
+  document.getElementById('ecAdsTeam').value = card.ads_team || 'New Era';
+  document.getElementById('ecGiftTeam').value = card.gift_team || 'New Era';
   document.getElementById('modalEditCard').classList.remove('hidden');
 }
 
@@ -7311,7 +7320,8 @@ async function saveEditCard() {
     bank: document.getElementById('ecBank').value.trim() || null,
     statement_day: parseInt(document.getElementById('ecStatementDay').value) || null,
     due_day: parseInt(document.getElementById('ecDueDay').value) || null,
-    gift_team: document.getElementById('ecGiftTeam').value || null
+    ads_team: document.getElementById('ecAdsTeam').value || 'New Era',
+    gift_team: document.getElementById('ecGiftTeam').value || 'New Era'
   };
   try {
     await sb('nec_credit_cards', { method: 'PATCH', filter: `id=eq.${cardId}`, body });
