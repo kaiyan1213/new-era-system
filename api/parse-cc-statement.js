@@ -85,10 +85,11 @@ export default async function handler(req, res) {
 
 For EVERY individual purchase/charge transaction (skip "PAYMENT RECEIVED", "TOTAL DUE", "STATEMENT BALANCE", opening/closing balance lines, statement boilerplate, any transaction marked "CR" at the end of the amount which means credit/refund/payment, and any DuitNow/bank transfer lines — but DO include interest/late fees as a normal transaction), extract:
 
-IMPORTANT: If an amount has "CR" after it (e.g. "81.80 CR"), it is a REFUND — SKIP IT entirely, do not include it in the output.
+CRITICAL: If an amount has "CR" after it (e.g. "81.80 CR"), it is a REFUND/CREDIT — set is_credit: true. Payment lines (PAYMENT RECEIVED, DUITNOW TO, etc.) also set is_credit: true.
 - date: as written in the statement (e.g. "15/06" or "15 JUN")
 - description: the merchant name, cleaned up (strip card masking digits, trailing reference numbers)
 - amount: positive number, MYR, no currency symbol or commas
+- is_credit: true if this is a refund/credit/payment (amount had "CR" suffix or is a payment line), false otherwise
 
 Then classify each transaction:
 - category: pick the SINGLE best match slug from this exact list: ${JSON.stringify(categorySlugs)}
@@ -110,7 +111,7 @@ ${hasOther ? '' : '  (if truly nothing fits, pick whichever category is the clos
   * Otherwise → null
 
 Respond with ONLY a raw JSON array, no markdown code fences, no commentary, no leading/trailing text. Format:
-[{"date":"15/06","description":"FACEBK *ADS8X7Y2Z","amount":450.00,"category":"${categorySlugs[0]}","channel":"SHARED","company_team":null}]
+[{"date":"15/06","description":"FACEBK *ADS8X7Y2Z","amount":450.00,"is_credit":false,"category":"${categorySlugs[0]}","channel":"SHARED","company_team":null}]
 
 Statement text:
 ${trimmedText}`;
@@ -155,7 +156,7 @@ ${trimmedText}`;
     // the first category in the active list.
     const fallbackCategory = hasOther ? 'other' : categorySlugs[0];
     const cleaned = transactions
-      .filter(t => t && typeof t.amount === 'number' && t.amount > 0 && t.description)
+      .filter(t => t && typeof t.amount === 'number' && t.amount > 0 && t.description && !t.is_credit)
       .map(t => ({
         date: String(t.date || '').slice(0, 20),
         description: String(t.description || '').slice(0, 200),
