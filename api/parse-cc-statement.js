@@ -52,7 +52,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { base64, debug, categories, cardName } = req.body;
+  const { base64, debug, categories, cardName, pdfPassword } = req.body;
   const cardNameUpper = (cardName || '').toUpperCase();
   const isKYAlliance = cardNameUpper.includes('KY') || cardNameUpper.includes('JENNY');
   if (!base64) return res.status(400).json({ error: 'No PDF data' });
@@ -75,7 +75,8 @@ export default async function handler(req, res) {
     // fall back to sending the PDF directly as a document to Claude (vision mode)
     let text = '';
     try {
-      const pdfData = await pdfParse(buffer);
+      const pdfOptions = pdfPassword ? { password: pdfPassword } : {};
+      const pdfData = await pdfParse(buffer, pdfOptions);
       text = pdfData.text || '';
     } catch(e) { text = ''; }
     if (debug) return res.status(200).json({ success: true, raw_text: text.substring(0, 12000) });
@@ -138,13 +139,18 @@ ${trimmedText}`;
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
         max_tokens: 16000,
-        messages: [{ role: 'user', content: [
-          {
-            type: 'document',
-            source: { type: 'base64', media_type: 'application/pdf', data: base64 }
-          },
-          { type: 'text', text: prompt.split('Statement text:')[0] + 'The PDF statement is attached above. Extract all transactions from it.' }
-        ]}]
+        messages: [{ role: 'user', content: pdfPassword && text.length > 200
+          // If password-protected, pdf-parse decrypted it — use text mode
+          ? prompt.replace('Statement text:', 'Statement text (decrypted):')
+          // Otherwise send PDF directly for best accuracy
+          : [
+            {
+              type: 'document',
+              source: { type: 'base64', media_type: 'application/pdf', data: base64 }
+            },
+            { type: 'text', text: prompt.split('Statement text:')[0] + 'The PDF statement is attached above. Extract all transactions from it.' }
+          ]
+        }]
       })
     });
 
