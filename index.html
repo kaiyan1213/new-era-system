@@ -6917,7 +6917,10 @@ async function handleCCBulkCategoryChange(selectEl) {
 // (possibly user-edited) categorization, not just Claude's first guess.
 function updateCCSummary() {
   document.getElementById('ccCount').textContent = ccTransactions.length;
-  const total = r2(ccTransactions.reduce((s,t) => s + t.amount, 0));
+  const rawTotal = r2(ccTransactions.reduce((s,t) => s + t.amount, 0));
+  // If statement balance exists and is less than our total, use statement balance as the
+  // display total — the difference is CR refunds that the bank already netted off
+  const total = (ccStatementBalance !== null && ccStatementBalance < rawTotal) ? ccStatementBalance : rawTotal;
   document.getElementById('ccTotal').textContent = `RM ${fmtNum(total)}`;
 
   const balanceWrap = document.getElementById('ccBalanceWrap');
@@ -6925,7 +6928,7 @@ function updateCCSummary() {
   if (ccStatementBalance !== null) {
     document.getElementById('ccBalance').textContent = `RM ${fmtNum(ccStatementBalance)}`;
     balanceWrap.classList.remove('hidden');
-    balanceNote.classList.toggle('hidden', Math.abs(ccStatementBalance - total) < 0.01);
+    balanceNote.classList.toggle('hidden', Math.abs(ccStatementBalance - rawTotal) < 0.01);
   } else {
     balanceWrap.classList.add('hidden');
     balanceNote.classList.add('hidden');
