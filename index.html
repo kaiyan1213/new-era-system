@@ -6775,7 +6775,7 @@ async function processCCFile(file) {
     const response = await fetch('/api/parse-cc-statement', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ base64, categories: costCategories, cardName: (() => { const sel = document.getElementById('ccCardSelect'); return sel ? (sel.options[sel.selectedIndex]?.text || '') : ''; })() })
+      body: JSON.stringify({ base64, categories: costCategories })
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Failed to parse statement');
@@ -6797,7 +6797,19 @@ async function processCCFile(file) {
         if (desc.includes('PAYMENT') || desc.includes('DUITNOW TO') || desc.includes('REFUND') || desc.includes('CREDIT')) return false;
         return true;
       })
-      .map(t => ({ ...t, year: defaultYear, month: defaultMonth }));
+      .map(t => {
+        // Override company_team based on selected card
+        const sel = document.getElementById('ccCardSelect');
+        const cName = sel ? (sel.options[sel.selectedIndex]?.text || '') : '';
+        const isKY = cName.toUpperCase().includes('KY') || cName.toUpperCase().includes('JENNY');
+        let team = t.company_team;
+        if (isKY && (t.category === 'gift' || t.category === 'ad_spend' || t.category === 'manychat')) {
+          team = 'Alpha C';
+        } else if (!isKY && team === null && (t.category === 'gift' || t.category === 'ad_spend' || t.category === 'manychat')) {
+          team = 'New Era';
+        }
+        return { ...t, company_team: team, year: defaultYear, month: defaultMonth };
+      });
 
     // Step 2: statement balance reconciliation
     // If total > statement balance, find & remove transactions matching the excess
