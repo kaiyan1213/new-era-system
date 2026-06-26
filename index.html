@@ -6298,12 +6298,13 @@ async function loadPL() {
         const orders = JSON.parse(bd.categories_json || '[]');
         const bucketTotals = {};
         let grand = 0;
+        // Use order count as weight if total_com is missing/zero for all orders
+        const hasComData = orders.some(o => parseFloat(o.total_com || 0) > 0);
         orders.forEach(o => {
           // Check assignment for this order — assignments have accurate team/channel/algo
           const assignKey = `${String(bd.proxy_id)}|${String(o.order_no)}`;
           const assign = plAssignMap[assignKey];
           const algo = assign?.commission_algo || o.commission_algo || null;
-          if (assign?.commission_algo === 'outsider') console.log('[PL-BUCKET] outsider FOUND:', assignKey, 'total_com:', o.total_com, 'com:', parseFloat(o.total_com||0));
           // If algo is 'outsider' → Outsider bucket regardless of team
           let bucket;
           if (algo === 'outsider' || o.team === 'Outsider') {
@@ -6313,7 +6314,8 @@ async function loadPL() {
             const ch = assign?.channel || o.channel || 'DM';
             bucket = `${t}|${ch}`;
           }
-          const com = parseFloat(o.total_com || 0);
+          // Use total_com if available, else use 1 per order as equal weight
+          const com = hasComData ? parseFloat(o.total_com || 0) : 1;
           grand += com;
           bucketTotals[bucket] = (bucketTotals[bucket] || 0) + com;
         });
@@ -6589,7 +6591,9 @@ async function loadPL() {
     document.getElementById('plTeams').innerHTML = DISPLAY_ORDER.map(b => {
       const rev = revBucket[b] || 0;
       const cost = costByBucket8[b] || 0;
-      const net = r2(rev - cost);
+      // Outsider: revenue = cost by definition (commission passes straight through)
+      const net = isOutsider ? 0 : r2(rev - cost);
+      const displayCost = isOutsider ? rev : cost;
       const pct = totalRevFinal > 0 ? (rev / totalRevFinal * 100).toFixed(1) : '0.0';
       const color = BUCKET_COLORS[b] || 'var(--muted)';
       const label = BUCKET_LABELS[b] || b;
@@ -6638,7 +6642,7 @@ async function loadPL() {
         <div style="display:flex;flex-direction:column;gap:1px;margin-bottom:4px">${costRows}</div>
         <div style="display:flex;justify-content:space-between;font-size:11px;border-top:1px solid var(--border);padding-top:4px;margin-top:4px">
           <span style="color:var(--muted)">Total Cost</span>
-          <span style="font-family:var(--mono);color:var(--red);font-weight:600">RM ${fmtNum(cost)}</span>
+          <span style="font-family:var(--mono);color:var(--red);font-weight:600">RM ${fmtNum(isOutsider ? displayCost : cost)}</span>
         </div>
         ${netSection}
       </div>`;
