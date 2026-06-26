@@ -6772,7 +6772,7 @@ async function processCCFile(file) {
       reader.readAsDataURL(file);
     });
 
-    const response = await fetch('/api/parse-cc-statement', {
+    const response = await fetch('/api/parse-cc-v2', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ base64, categories: costCategories })
