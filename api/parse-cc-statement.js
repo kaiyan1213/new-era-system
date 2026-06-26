@@ -99,8 +99,8 @@ ${hasOther ? '' : '  (if truly nothing fits, pick whichever category is the clos
   * AI tools (ANTHROPIC, OPENAI, PADDLE, APPLE.COM/BILL) → "SHARED"
   * Otherwise → "SHARED"
 - company_team: pick from ${JSON.stringify(TEAMS)} using these STRICT rules based on which card this statement is from (card owner info is in the statement header):
-  * If card belongs to CARINE LEE WEI YING (CIMB card) AND category is "ad_spend" (Facebook ads) → "Alpha C"
   * If card name/owner contains "KY ALLIANCE" or "JENNY" → all gift transactions = "Alpha C", all ads = "Alpha C"
+  * All other cards (including Carine CIMB, Kai Yan Alliance, Chloe etc) → "New Era" for ads and gift
   * "MANYCHAT" → always "New Era" UNLESS card is KY Alliance
   * AI tools (ANTHROPIC, OPENAI, APPLE, PADDLE) → always null (shared, split 50/50)
   * Gift (Shopee) → "New Era" UNLESS card is KY Alliance
