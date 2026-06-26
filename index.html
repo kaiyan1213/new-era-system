@@ -6278,14 +6278,37 @@ async function loadPL() {
     const plStaffMap = {};
     plStaffList.forEach(s => { plStaffMap[s.id] = s; });
     const plAssignMap = {};
+    // outsiderCommByStaff: staff_id -> total outsider commission from breakdowns
+    const outsiderCommByStaff = {};
+    // tmCommByStaff: staff_id -> total TM commission from breakdowns
+    const tmCommByStaff = {};
+
+    // Build a map of order_no -> total_com from breakdowns
+    const orderComMap = {};
+    for (const bd of breakdowns) {
+      try {
+        const orders = JSON.parse(bd.categories_json || '[]');
+        orders.forEach(o => {
+          if (o.order_no) orderComMap[String(o.order_no)] = parseFloat(o.total_com || 0);
+        });
+      } catch(e) {}
+    }
+
     plAssignments.forEach(a => {
       const staff = plStaffMap[a.staff_id] || {};
-      // Use string key — order_no as string to match breakdown
       plAssignMap[`${String(a.proxy_id)}|${String(a.order_no)}`] = {
         commission_algo: a.commission_algo,
         team: staff.company_team || 'New Era',
         channel: staff.channel || 'DM'
       };
+      // Accumulate outsider/TM commission per staff
+      const com = orderComMap[String(a.order_no)] || 0;
+      if (a.commission_algo === 'outsider' && a.staff_id && com > 0) {
+        outsiderCommByStaff[a.staff_id] = (outsiderCommByStaff[a.staff_id] || 0) + com;
+      }
+      if (a.commission_algo === 'tm' && a.staff_id && com > 0) {
+        tmCommByStaff[a.staff_id] = (tmCommByStaff[a.staff_id] || 0) + com;
+      }
     });
 
     // Build per-proxy team-split proportions — New Era / Alpha C / Outsider
@@ -6440,6 +6463,19 @@ async function loadPL() {
       const staffName = staffRec.name || 'Unknown';
 
       if (p.record_type === 'manager') {
+        // Split out outsider/TM portions from manager payroll too
+        const mgrOutsiderCom = r2(outsiderCommByStaff[p.staff_id] || 0);
+        const mgrTmCom = r2(tmCommByStaff[p.staff_id] || 0);
+        if (mgrOutsiderCom > 0) {
+          addCost('Outsider', 'Outsider Commission', mgrOutsiderCom);
+          addTooltipDetail('Outsider', 'Outsider Commission', staffName, mgrOutsiderCom);
+        }
+        if (mgrTmCom > 0) {
+          const mgrTeam = allStaff.find(s => s.id === p.staff_id)?.company_team || 'New Era';
+          const tmBucket = mgrTeam === 'Alpha C' ? 'AC-TM' : 'NE-TM';
+          addCost(tmBucket, 'Staff Commission (TM)', mgrTmCom);
+          addTooltipDetail(tmBucket, 'Staff Commission (TM)', staffName, mgrTmCom);
+        }
         addCost('Manager Pool', 'Manager Settlement', outlay);
         addTooltipDetail('Manager Pool', 'Manager Settlement', staffName, outlay);
         return;
@@ -6463,9 +6499,23 @@ async function loadPL() {
       }
       if (staff?.staff_type === 'sales') {
         const bucket = team === 'Alpha C' ? (ch === 'TM' ? 'AC-TM' : 'AC-DM') : (ch === 'TM' ? 'NE-TM' : 'NE-DM');
-        // Use outlay (net after deductions) not gross commission
-        addCost(bucket, `Staff Commission (${ch})`, outlay - claim);
-        addTooltipDetail(bucket, `Staff Commission (${ch})`, staffName, outlay - claim);
+        // Split out outsider commission from total
+        const outsiderCom = r2(outsiderCommByStaff[p.staff_id] || 0);
+        const tmCom = ch !== 'TM' ? r2(tmCommByStaff[p.staff_id] || 0) : 0; // TM staff already in TM bucket
+        const mainCom = r2(Math.max(0, (outlay - claim) - outsiderCom - tmCom));
+        if (outsiderCom > 0) {
+          addCost('Outsider', 'Outsider Commission', outsiderCom);
+          addTooltipDetail('Outsider', 'Outsider Commission', staffName, outsiderCom);
+        }
+        if (tmCom > 0) {
+          const tmBucket = team === 'Alpha C' ? 'AC-TM' : 'NE-TM';
+          addCost(tmBucket, 'Staff Commission (TM)', tmCom);
+          addTooltipDetail(tmBucket, 'Staff Commission (TM)', staffName, tmCom);
+        }
+        if (mainCom > 0) {
+          addCost(bucket, `Staff Commission (${ch})`, mainCom);
+          addTooltipDetail(bucket, `Staff Commission (${ch})`, staffName, mainCom);
+        }
         if (claim > 0) { addCost(bucket, 'Staff Claim', claim); addTooltipDetail(bucket, 'Staff Claim', staffName, claim); }
       } else {
         const sharedBucket = team === 'Alpha C' ? 'AC-Shared' : 'NE-Shared';
