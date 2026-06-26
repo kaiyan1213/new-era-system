@@ -2128,6 +2128,47 @@
   </div>
 </div>
 
+<!-- Edit Credit Card Modal -->
+<div class="modal-bg hidden" id="modalEditCard">
+  <div class="modal">
+    <div class="modal-title">Edit Credit Card</div>
+    <input type="hidden" id="ecCardId">
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">Card Name</label>
+        <input type="text" id="ecCardName" class="form-input" placeholder="e.g. KY CIMB">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Bank</label>
+        <input type="text" id="ecBank" class="form-input" placeholder="e.g. CIMB">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Statement Day (1-31)</label>
+          <input type="number" id="ecStatementDay" class="form-input" min="1" max="31">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Due Day (1-31)</label>
+          <input type="number" id="ecDueDay" class="form-input" min="1" max="31">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Default Gift/Shopping Team</label>
+        <select id="ecGiftTeam" class="form-input">
+          <option value="">— Not set —</option>
+          <option value="New Era">New Era</option>
+          <option value="Alpha C">Alpha C</option>
+        </select>
+      </div>
+      <div style="font-size:11px;color:var(--muted)">Gift/Shopping category (Shopee etc) will default to this team when uploading statements from this card. Ads always go to New Era. AI Tools always Shared.</div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalEditCard')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEditCard()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
 <!-- Credit Card Payment Reminder Modal -->
 <div class="modal-bg hidden" id="modalCCReminder">
   <div class="modal" style="max-width:560px">
@@ -6194,7 +6235,7 @@ async function loadPL() {
     const proxies = await sb('proxy_accounts', { select: 'id,channel,company_team' });
     const costs = await sb('nec_pl_costs', { filter: invFilter });
     // Ensure ccCards is loaded so we can determine which card belongs to NE vs AC
-    if (!ccCards.length) ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true', select: 'id,card_name,bank,owner_team' }).catch(() => []);
+    if (!ccCards.length) ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true', select: 'id,card_name,bank,owner_team,gift_team' }).catch(() => []);
     const breakdowns = await sb('nec_payslip_breakdown', { filter: invFilter, select: 'proxy_id,year,month,categories_json' });
 
     // Build per-proxy team-split proportions — New Era / Alpha C / Outsider
@@ -6656,7 +6697,7 @@ let ccCardsLoaded = false;
 async function loadCreditCards(force = false) {
   if (ccCardsLoaded && !force) return;
   try {
-    ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true&order=card_name.asc', select: 'id,card_name,bank,statement_day,due_day,owner_team' });
+    ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true&order=card_name.asc', select: 'id,card_name,bank,statement_day,due_day,owner_team,gift_team' });
     ccCardsLoaded = true;
   } catch(e) { ccCards = []; } // table not set up yet — features degrade gracefully
 }
@@ -6811,17 +6852,15 @@ async function processCCFile(file) {
         const sel = document.getElementById('ccStatementCard');
         const selCardId = sel ? sel.value : '';
         const selCard = ccCards.find(c => c.id === selCardId);
-        const cardOwnerTeam = selCard?.owner_team || null;
-        const isAC = cardOwnerTeam === 'Alpha C';
+        // gift_team: per-card setting for Shopee/gift category
+        const cardGiftTeam = selCard?.gift_team || selCard?.owner_team || null;
         let team = t.company_team;
         if (t.category === 'gift') {
-          team = isAC ? 'Alpha C' : 'New Era';
+          team = cardGiftTeam || 'New Era';
         } else if (t.category === 'ad_spend' || t.category === 'manychat') {
-          team = 'New Era'; // Ads always NE
+          team = 'New Era'; // Ads/Manychat always NE
         } else if (t.category === 'ai_tools') {
           team = null; // AI tools = shared
-        } else if (cardOwnerTeam) {
-          team = cardOwnerTeam; // other categories follow card's team
         }
         return { ...t, company_team: team, year: defaultYear, month: defaultMonth };
       });
@@ -7123,7 +7162,7 @@ function renderCCTracker() {
     const ownerTeamOpts = ['NE — Chloe','NE — Carine','Alpha C','Shared','Other'].map(t=>
       `<option value="${t}"${(card.owner_team||'')===t?' selected':''}>${t}</option>`).join('');
     return `<tr>
-      <td class="td-name">${card.card_name}${card.bank ? `<div class="td-muted" style="font-size:10px">${card.bank}</div>` : ''}</td>
+      <td class="td-name">${card.card_name}${card.bank ? `<div class="td-muted" style="font-size:10px">${card.bank}</div>` : ''}<button class="btn btn-ghost btn-sm" style="padding:2px 6px;font-size:10px;margin-top:2px" onclick="openEditCard('${card.id}')">✎ Edit</button></td>
       <td><select style="font-size:11px;padding:3px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);min-width:120px" onchange="updateCCCardOwner('${card.id}',this.value)">
         <option value="">— team —</option>${ownerTeamOpts}
       </select></td>
@@ -7237,6 +7276,38 @@ function openAddCardModal() {
   document.getElementById('acStatementDay').value = '';
   document.getElementById('acDueDay').value = '';
   openModal('modalAddCard');
+}
+
+function openEditCard(cardId) {
+  const card = ccCards.find(c => c.id === cardId);
+  if (!card) return;
+  document.getElementById('ecCardId').value = cardId;
+  document.getElementById('ecCardName').value = card.card_name || '';
+  document.getElementById('ecBank').value = card.bank || '';
+  document.getElementById('ecStatementDay').value = card.statement_day || '';
+  document.getElementById('ecDueDay').value = card.due_day || '';
+  document.getElementById('ecGiftTeam').value = card.gift_team || card.owner_team || '';
+  document.getElementById('modalEditCard').classList.remove('hidden');
+}
+
+async function saveEditCard() {
+  const cardId = document.getElementById('ecCardId').value;
+  const card_name = document.getElementById('ecCardName').value.trim();
+  if (!card_name) return showToast('Enter a card name', 'error');
+  const body = {
+    card_name,
+    bank: document.getElementById('ecBank').value.trim() || null,
+    statement_day: parseInt(document.getElementById('ecStatementDay').value) || null,
+    due_day: parseInt(document.getElementById('ecDueDay').value) || null,
+    gift_team: document.getElementById('ecGiftTeam').value || null
+  };
+  try {
+    await sb('nec_credit_cards', { method: 'PATCH', filter: `id=eq.${cardId}`, body });
+    showToast('Card updated ✓');
+    closeModal('modalEditCard');
+    await loadCreditCards(true);
+    renderCCTracker();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
 async function saveNewCard() {
