@@ -6283,13 +6283,16 @@ async function loadPL() {
     // tmCommByStaff: staff_id -> total TM commission from breakdowns
     const tmCommByStaff = {};
 
-    // Build a map of order_no -> total_com from breakdowns
+    // Build a map of order_no -> {total_com, com_from_payslip} from breakdowns
     const orderComMap = {};
     for (const bd of breakdowns) {
       try {
         const orders = JSON.parse(bd.categories_json || '[]');
         orders.forEach(o => {
-          if (o.order_no) orderComMap[String(o.order_no)] = parseFloat(o.total_com || 0);
+          if (o.order_no) orderComMap[String(o.order_no)] = {
+            total_com: parseFloat(o.total_com || 0),
+            com_from_payslip: parseFloat(o.com_from_payslip || 0)
+          };
         });
       } catch(e) {}
     }
@@ -6303,15 +6306,19 @@ async function loadPL() {
         team: staff.company_team || 'New Era',
         channel: staff.channel || 'DM'
       };
-      // Accumulate per-algo commission totals per staff (from breakdown total_com)
-      const com = orderComMap[String(a.order_no)] || 0;
+      // Use total_com for outsider (full pass-through), com_from_payslip for TM (earned amount)
+      const orderData = orderComMap[String(a.order_no)] || { total_com: 0, com_from_payslip: 0 };
+      const totalCom = orderData.total_com;
+      const earnedCom = orderData.com_from_payslip || totalCom;
       if (!a.staff_id) return;
-      totalCommByStaff[a.staff_id] = (totalCommByStaff[a.staff_id] || 0) + com;
-      if (a.commission_algo === 'outsider' && com > 0) {
-        outsiderCommByStaff[a.staff_id] = (outsiderCommByStaff[a.staff_id] || 0) + com;
+      totalCommByStaff[a.staff_id] = (totalCommByStaff[a.staff_id] || 0) + totalCom;
+      if (a.commission_algo === 'outsider' && totalCom > 0) {
+        // Outsider: cost = full total_com (pass-through)
+        outsiderCommByStaff[a.staff_id] = (outsiderCommByStaff[a.staff_id] || 0) + totalCom;
       }
-      if (a.commission_algo === 'tm' && com > 0) {
-        tmCommByStaff[a.staff_id] = (tmCommByStaff[a.staff_id] || 0) + com;
+      if (a.commission_algo === 'tm' && earnedCom > 0) {
+        // TM: cost = com_from_payslip (what staff actually earned after cost deduction)
+        tmCommByStaff[a.staff_id] = (tmCommByStaff[a.staff_id] || 0) + earnedCom;
       }
     });
 
@@ -6467,13 +6474,14 @@ async function loadPL() {
       const staffName = staffRec.name || 'Unknown';
 
       if (p.record_type === 'manager') {
-        // Managers: only split out outsider/TM from their commission_earned portion using ratios
+        // Managers: outsider cost = direct total_com of outsider orders (pass-through)
+        // TM cost = from payroll commission_earned proportionally (TM is % based)
         const mgrTotalRev = totalCommByStaff[p.staff_id] || 0;
         const mgrCommEarned = parseFloat(p.commission_earned || 0);
-        const mgrOutsiderRatio = mgrTotalRev > 0 ? (outsiderCommByStaff[p.staff_id] || 0) / mgrTotalRev : 0;
-        const mgrTmRatio = mgrTotalRev > 0 ? (tmCommByStaff[p.staff_id] || 0) / mgrTotalRev : 0;
-        const mgrOutsiderCom = r2(mgrCommEarned * mgrOutsiderRatio);
-        const mgrTmCom = r2(mgrCommEarned * mgrTmRatio);
+        // Outsider: direct from breakdown total_com (not ratio-based)
+        const mgrOutsiderCom = r2(outsiderCommByStaff[p.staff_id] || 0);
+        // TM: use direct sum of com_from_payslip for TM orders (actual earned)
+        const mgrTmCom = r2(tmCommByStaff[p.staff_id] || 0);
         if (mgrOutsiderCom > 0) {
           addCost('Outsider', 'Outsider Commission', mgrOutsiderCom);
           addTooltipDetail('Outsider', 'Outsider Commission', staffName, mgrOutsiderCom);
@@ -6509,11 +6517,10 @@ async function loadPL() {
         const bucket = team === 'Alpha C' ? (ch === 'TM' ? 'AC-TM' : 'AC-DM') : (ch === 'TM' ? 'NE-TM' : 'NE-DM');
         const totalRev = totalCommByStaff[p.staff_id] || 0;
         const commEarned = parseFloat(p.commission_earned || 0);
-        // Use revenue ratios to split actual commission_earned
-        const outsiderRatio = totalRev > 0 ? (outsiderCommByStaff[p.staff_id] || 0) / totalRev : 0;
-        const tmRatio = (ch !== 'TM' && totalRev > 0) ? (tmCommByStaff[p.staff_id] || 0) / totalRev : 0;
-        const outsiderCom = r2(commEarned * outsiderRatio);
-        const tmCom = r2(commEarned * tmRatio);
+        // Outsider: direct from breakdown total_com (pass-through, not ratio)
+        const outsiderCom = r2(outsiderCommByStaff[p.staff_id] || 0);
+        // TM: direct sum of com_from_payslip for TM orders (actual earned)
+        const tmCom = (ch !== 'TM') ? r2(tmCommByStaff[p.staff_id] || 0) : 0;
         const mainCom = r2(Math.max(0, commEarned - outsiderCom - tmCom));
         if (outsiderCom > 0) {
           addCost('Outsider', 'Outsider Commission', outsiderCom);
