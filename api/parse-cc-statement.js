@@ -83,7 +83,7 @@ export default async function handler(req, res) {
 
     const prompt = `You are extracting transactions from a Malaysian credit card statement (raw PDF text dump below — column alignment may be lost, dates/descriptions/amounts may run together).
 
-For EVERY individual purchase/charge transaction (skip "PAYMENT RECEIVED", "TOTAL DUE", opening/closing balance lines, and statement boilerplate — but DO include interest/late fees as a normal transaction), extract:
+For EVERY individual purchase/charge transaction (skip "PAYMENT RECEIVED", "TOTAL DUE", opening/closing balance lines, statement boilerplate, and any transaction marked "CR" which means credit/refund/payment — but DO include interest/late fees as a normal transaction), extract:
 - date: as written in the statement (e.g. "15/06" or "15 JUN")
 - description: the merchant name, cleaned up (strip card masking digits, trailing reference numbers)
 - amount: positive number, MYR, no currency symbol or commas
