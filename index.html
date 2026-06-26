@@ -6783,60 +6783,66 @@ async function processCCFile(file) {
     const defaultYear = parseInt(document.getElementById('ccBulkYear')?.value || '2026');
     const defaultMonth = new Date().getMonth() + 1;
     // Filter out CR (credit/refund/payment) transactions and zero/negative amounts
-    // Build CR amount set from parser's _cr_filtered list AND from description-based heuristics
+    // CR amounts from parser (regex-detected from raw PDF text)
     const crAmountCents = new Set((data._cr_filtered || []).map(a => Math.round(a * 100)));
 
+    // Step 1: basic filter (negative, payment keywords, parser-flagged)
     let allTxns = data.transactions
       .filter(t => {
         const amt = parseFloat(t.amount || 0);
         if (amt <= 0) return false;
-        if (t.is_credit) return false; // parser flagged as credit/refund/payment
-        // Check against CR amounts detected from raw PDF text
+        if (t.is_credit) return false;
         if (crAmountCents.has(Math.round(amt * 100))) return false;
         const desc = (t.description || '').toUpperCase();
-        // Skip payment/refund/credit transactions by description
         if (desc.includes('PAYMENT') || desc.includes('DUITNOW TO') || desc.includes('REFUND') || desc.includes('CREDIT')) return false;
         return true;
       })
       .map(t => ({ ...t, year: defaultYear, month: defaultMonth }));
 
-    // If parser provided a statement balance, use it to auto-drop any transactions
-    // that appear to be refunds/credits (i.e. the total exceeds the statement balance).
-    // Strategy: sort by amount desc, greedily remove transactions whose amount matches
-    // the excess until the total equals the statement balance.
+    // Step 2: statement balance reconciliation
+    // If total > statement balance, find & remove transactions matching the excess
     const stmtBal = (typeof data.statement_balance === 'number') ? data.statement_balance : null;
-    console.log('[CR2] stmtBal=', stmtBal, typeof data.statement_balance, data.statement_balance, 'total=', allTxns.reduce((s,t)=>s+t.amount,0).toFixed(2));
+    ccStatementBalance = stmtBal;
     if (stmtBal !== null) {
-      const currentTotal = Math.round(allTxns.reduce((s,t) => s + t.amount, 0) * 100);
-      const targetTotal = Math.round(stmtBal * 100);
-      if (currentTotal > targetTotal) {
-        const excess = currentTotal - targetTotal;
-        // Find transactions that sum exactly to the excess (CR refunds)
-        // Use proper subset-sum: build dp array indexed by sum value
-        const candidates = allTxns
-          .map((t,i) => ({ cents: Math.round(t.amount * 100), i }))
-          .filter(c => c.cents < excess);
-        // dp[s] = array of original indices whose amounts sum to s, or null if unreachable
-        const dp = new Array(excess + 1).fill(null);
-        dp[0] = [];
-        for (const c of candidates) {
-          // iterate backwards to avoid using same item twice
-          for (let s = excess; s >= c.cents; s--) {
-            if (dp[s] === null && dp[s - c.cents] !== null) {
-              dp[s] = [...dp[s - c.cents], c.i];
+      // Use precise cent arithmetic to avoid floating point issues
+      const txnTotalCents = allTxns.reduce((s,t) => s + Math.round(t.amount * 100), 0);
+      const targetCents = Math.round(stmtBal * 100);
+      if (txnTotalCents > targetCents) {
+        const excessCents = txnTotalCents - targetCents;
+        // 0/1 knapsack: find subset of transactions summing to excessCents
+        const cands = allTxns.map((t,i) => [Math.round(t.amount * 100), i]).filter(([c]) => c <= excessCents);
+        const N = cands.length;
+        // dp[i][s] = true if first i items can sum to s
+        // Use 1D rolling array
+        const dp = new Uint8Array(excessCents + 1);
+        const prev = new Int16Array(excessCents + 1).fill(-1); // which item index was added
+        const from = new Int32Array(excessCents + 1).fill(-1); // previous sum
+        dp[0] = 1;
+        for (let k = 0; k < N; k++) {
+          const [c, origIdx] = cands[k];
+          for (let s = excessCents; s >= c; s--) {
+            if (!dp[s] && dp[s - c]) {
+              dp[s] = 1;
+              prev[s] = k;
+              from[s] = s - c;
             }
           }
         }
-        console.log('[DP2] excess=', excess, 'candidates=', candidates.length, 'found=', dp[excess] !== null, dp[excess]);
-        if (dp[excess] !== null) {
-          const removeIndices = new Set(dp[excess]);
-          allTxns = allTxns.filter((t, i) => !removeIndices.has(i));
+        if (dp[excessCents]) {
+          // Backtrack to find which items to remove
+          const removeOrigIndices = new Set();
+          let s = excessCents;
+          while (s > 0) {
+            const k = prev[s];
+            removeOrigIndices.add(cands[k][1]);
+            s = from[s];
+          }
+          allTxns = allTxns.filter((_,i) => !removeOrigIndices.has(i));
         }
       }
     }
 
     ccTransactions = allTxns;
-    ccStatementBalance = (typeof data.statement_balance === 'number') ? data.statement_balance : null;
 
     document.getElementById('ccProgress').classList.add('hidden');
     if (!ccTransactions.length) {
