@@ -6351,8 +6351,9 @@ async function loadPL() {
       }
       if (staff?.staff_type === 'sales') {
         const bucket = team === 'Alpha C' ? (ch === 'TM' ? 'AC-TM' : 'AC-DM') : (ch === 'TM' ? 'NE-TM' : 'NE-DM');
-        addCost(bucket, `Staff Commission (${ch})`, comm);
-        addTooltipDetail(bucket, `Staff Commission (${ch})`, staffName, comm);
+        // Use outlay (net after deductions) not gross commission
+        addCost(bucket, `Staff Commission (${ch})`, outlay - claim);
+        addTooltipDetail(bucket, `Staff Commission (${ch})`, staffName, outlay - claim);
         if (claim > 0) { addCost(bucket, 'Staff Claim', claim); addTooltipDetail(bucket, 'Staff Claim', staffName, claim); }
       } else {
         const sharedBucket = team === 'Alpha C' ? 'AC-Shared' : 'NE-Shared';
