@@ -6269,12 +6269,19 @@ async function loadPL() {
     // Ensure ccCards is loaded so we can determine which card belongs to NE vs AC
     if (!ccCards.length) ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true', select: 'id,card_name,bank,owner_team,gift_team,ads_team' }).catch(() => []);
     const breakdowns = await sb('nec_payslip_breakdown', { filter: invFilter, select: 'proxy_id,year,month,categories_json' });
-    // Fetch order assignments so we can correctly bucket Outsider/TM orders
-    const plAssignments = await sb('nec_order_assignments', { filter: invFilter, select: 'proxy_id,order_no,customer_name,commission_algo,team,channel' }).catch(() => []);
+    // Fetch order assignments + staff to correctly bucket Outsider/TM orders
+    const plAssignments = await sb('nec_order_assignments', { filter: invFilter, select: 'proxy_id,order_no,commission_algo,staff_id' }).catch(() => []);
+    const plStaffList = await sb('nec_staff', { select: 'id,company_team,channel' }).catch(() => []);
+    const plStaffMap = {};
+    plStaffList.forEach(s => { plStaffMap[s.id] = s; });
     const plAssignMap = {};
     plAssignments.forEach(a => {
-      const k = `${a.proxy_id}|${a.order_no}`;
-      plAssignMap[k] = a;
+      const staff = plStaffMap[a.staff_id] || {};
+      plAssignMap[`${a.proxy_id}|${a.order_no}`] = {
+        commission_algo: a.commission_algo,
+        team: staff.company_team || 'New Era',
+        channel: staff.channel || 'DM'
+      };
     });
 
     // Build per-proxy team-split proportions — New Era / Alpha C / Outsider
