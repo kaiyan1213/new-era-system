@@ -6303,8 +6303,7 @@ async function loadPL() {
           const assignKey = `${String(bd.proxy_id)}|${String(o.order_no)}`;
           const assign = plAssignMap[assignKey];
           const algo = assign?.commission_algo || o.commission_algo || null;
-          if (algo === 'outsider' && !assign) console.log('[PL-BUCKET] outsider no assign key:', assignKey, 'bd.proxy_id type:', typeof bd.proxy_id, 'o.order_no type:', typeof o.order_no);
-          if (assign?.commission_algo === 'outsider') console.log('[PL-BUCKET] outsider FOUND:', assignKey, assign);
+          if (assign?.commission_algo === 'outsider') console.log('[PL-BUCKET] outsider FOUND:', assignKey, 'total_com:', o.total_com, 'com:', parseFloat(o.total_com||0));
           // If algo is 'outsider' → Outsider bucket regardless of team
           let bucket;
           if (algo === 'outsider' || o.team === 'Outsider') {
