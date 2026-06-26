@@ -6538,7 +6538,7 @@ async function loadPL() {
         // Passive income total from proxy_invoices
         const passiveTotal = r2(invoices.reduce((s,i) => s + parseFloat(i.passive_income || 0), 0));
         const plPassiveEl = document.getElementById('plPassiveAmt');
-        if (plPassiveEl) plPassiveEl.textContent = 'RM ' + fmt(passiveTotal);
+        if (plPassiveEl) plPassiveEl.textContent = fmt(passiveTotal);
     document.getElementById('plTotalCost').textContent = fmt(totalCost);
     const npEl = document.getElementById('plNetProfit');
     npEl.textContent = fmt(netProfit);
@@ -6591,13 +6591,15 @@ async function loadPL() {
     document.getElementById('plTeams').innerHTML = DISPLAY_ORDER.map(b => {
       const rev = revBucket[b] || 0;
       const cost = costByBucket8[b] || 0;
+      const isShared = b.includes('Shared');
+      const isOutsider = b === 'Outsider';
+      const isManager = b === 'Manager Pool';
       // Outsider: revenue = cost by definition (commission passes straight through)
       const net = isOutsider ? 0 : r2(rev - cost);
       const displayCost = isOutsider ? rev : cost;
       const pct = totalRevFinal > 0 ? (rev / totalRevFinal * 100).toFixed(1) : '0.0';
       const color = BUCKET_COLORS[b] || 'var(--muted)';
       const label = BUCKET_LABELS[b] || b;
-      const isShared = b.includes('Shared');
       const isOutsider = b === 'Outsider';
       const isManager = b === 'Manager Pool';
       const orderCount = orderCountByBucket[b] || 0;
