@@ -110,12 +110,13 @@ ${hasOther ? '' : '  (if truly nothing fits, pick whichever category is the clos
   * Facebook Ads → "New Era" UNLESS card is Carine CIMB or KY Alliance
   * Otherwise → null
 
-Respond with ONLY a raw JSON object (no markdown, no code fences), with two keys:
-1. "transactions": array of charge transactions (exclude CR/refund/payment lines entirely)
-2. "cr_amounts": array of numeric amounts (MYR) that had "CR" suffix in the statement (refunds/credits)
+Respond with ONLY a raw JSON object (no markdown, no code fences), with three keys:
+1. "transactions": array of charge transactions (EXCLUDE all CR/refund/payment lines entirely — do NOT include them)
+2. "cr_amounts": array of numeric amounts (MYR) that appeared with "CR" suffix in the statement (e.g. "56.45 CR" → include 56.45)
+3. "statement_balance": the final total balance number from the statement (e.g. "SUB TOTAL", "TOTAL BALANCE", "Current Balance" — as a number, MYR)
 
 Format:
-{"transactions":[{"date":"15/06","description":"FACEBK *ADS8X7Y2Z","amount":450.00,"is_credit":false,"category":"${categorySlugs[0]}","channel":"SHARED","company_team":null}],"cr_amounts":[81.80,3.15]}
+{"transactions":[{"date":"15/06","description":"FACEBK *ADS8X7Y2Z","amount":450.00,"is_credit":false,"category":"${categorySlugs[0]}","channel":"SHARED","company_team":null}],"cr_amounts":[56.45,3.15],"statement_balance":17047.71}
 
 Statement text:
 ${trimmedText}`;
@@ -146,11 +147,13 @@ ${trimmedText}`;
 
     let transactions;
     let claudeCrAmounts = [];
+    let claudeStatementBalance = null;
     try {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.transactions)) {
         transactions = parsed.transactions;
         claudeCrAmounts = Array.isArray(parsed.cr_amounts) ? parsed.cr_amounts.map(Number).filter(n => !isNaN(n)) : [];
+        claudeStatementBalance = (typeof parsed.statement_balance === 'number') ? parsed.statement_balance : null;
       } else if (Array.isArray(parsed)) {
         transactions = parsed; // old format fallback
       } else {
@@ -224,7 +227,7 @@ ${trimmedText}`;
     claudeCrAmounts.forEach(a => crAmountSet.add(Math.round(a * 100)));
     const crAmounts = [...crAmountSet].map(c => c/100);
 
-    return res.status(200).json({ success: true, transactions: cleaned, total, count: cleaned.length, _cr_filtered: crAmounts });
+    return res.status(200).json({ success: true, transactions: cleaned, total, count: cleaned.length, _cr_filtered: crAmounts, statement_balance: claudeStatementBalance });
   } catch(e) {
     return res.status(500).json({ error: e.message });
   }
