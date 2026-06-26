@@ -6805,34 +6805,31 @@ async function processCCFile(file) {
     // Strategy: sort by amount desc, greedily remove transactions whose amount matches
     // the excess until the total equals the statement balance.
     const stmtBal = (typeof data.statement_balance === 'number') ? data.statement_balance : null;
-    console.log('[CR-reconcile] stmtBal=', stmtBal, 'allTxns total=', allTxns.reduce((s,t)=>s+t.amount,0).toFixed(2), 'count=', allTxns.length);
     if (stmtBal !== null) {
-      let currentTotal = Math.round(allTxns.reduce((s,t) => s + t.amount, 0) * 100);
+      const currentTotal = Math.round(allTxns.reduce((s,t) => s + t.amount, 0) * 100);
       const targetTotal = Math.round(stmtBal * 100);
-      console.log('[CR-reconcile] currentTotal cents=', currentTotal, 'targetTotal cents=', targetTotal, 'excess=', currentTotal - targetTotal);
       if (currentTotal > targetTotal) {
         const excess = currentTotal - targetTotal;
-        const toRemoveCentsList = [];
-        let remaining = excess;
-        const candidates = [...allTxns].sort((a,b) => a.amount - b.amount);
-        for (const t of candidates) {
-          const cents = Math.round(t.amount * 100);
-          if (cents <= remaining) {
-            toRemoveCentsList.push(cents);
-            remaining -= cents;
-            if (remaining === 0) break;
+        // Use subset-sum DP to find exact set of transactions matching the excess
+        // Only consider transactions up to excess size, cap at 20 candidates to keep it fast
+        const candidates = allTxns
+          .map((t,i) => ({ cents: Math.round(t.amount * 100), i }))
+          .filter(c => c.cents <= excess)
+          .slice(0, 20);
+        // DP: dp[s] = list of candidate indices that sum to s
+        const dp = new Map();
+        dp.set(0, []);
+        for (const c of candidates) {
+          for (const [sum, indices] of [...dp.entries()]) {
+            const newSum = sum + c.cents;
+            if (newSum <= excess && !dp.has(newSum)) {
+              dp.set(newSum, [...indices, c.i]);
+            }
           }
         }
-        console.log('[CR-reconcile] toRemove=', toRemoveCentsList, 'remaining=', remaining);
-        if (remaining === 0) {
-          const removeList = [...toRemoveCentsList];
-          allTxns = allTxns.filter(t => {
-            const cents = Math.round(t.amount * 100);
-            const idx = removeList.indexOf(cents);
-            if (idx !== -1) { removeList.splice(idx, 1); return false; }
-            return true;
-          });
-          console.log('[CR-reconcile] after filter count=', allTxns.length, 'total=', allTxns.reduce((s,t)=>s+t.amount,0).toFixed(2));
+        if (dp.has(excess)) {
+          const removeIndices = new Set(dp.get(excess));
+          allTxns = allTxns.filter((t, i) => !removeIndices.has(i));
         }
       }
     }
