@@ -138,12 +138,12 @@ ${trimmedText}`;
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
         max_tokens: 16000,
-        messages: [{ role: 'user', content: hasUsefulText ? prompt : [
+        messages: [{ role: 'user', content: [
           {
             type: 'document',
             source: { type: 'base64', media_type: 'application/pdf', data: base64 }
           },
-          { type: 'text', text: prompt.split('Statement text:')[0] + 'The PDF statement is attached above as a document. Extract all transactions from it.' }
+          { type: 'text', text: prompt.split('Statement text:')[0] + 'The PDF statement is attached above. Extract all transactions from it.' }
         ]}]
       })
     });
