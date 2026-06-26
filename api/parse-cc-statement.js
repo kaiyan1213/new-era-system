@@ -1,3 +1,4 @@
+// v2026-06-26-password-support
 import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 
 // Auto-categorizes credit card statement transactions for the P&L Costs
