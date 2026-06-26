@@ -6772,13 +6772,60 @@ async function processCCFile(file) {
       reader.readAsDataURL(file);
     });
 
-    const response = await fetch('/api/parse-cc-statement', {
+    document.getElementById('ccProgress').textContent = `Analysing ${file.name} with Claude…`;
+
+    // Call Claude API directly with PDF as document (bypasses serverless text extraction issues)
+    const categorySlugs = costCategories.map(c => c.slug);
+    const selectedCardId = document.getElementById('ccCardSelect')?.value || '';
+    const selectedCardName = selectedCardId ? (ccCards.find(c=>c.id===selectedCardId)?.name||'') : '';
+    const ccPrompt = `You are extracting transactions from a Malaysian credit card statement PDF.
+
+IMPORTANT: Extract ALL charge/purchase transactions. Do NOT skip any section.
+EXCLUDE only: lines with "CR" suffix, PAYMENT lines, PREVIOUS BALANCE/STATEMENT BALANCE lines, MINIMUM PAYMENT lines, CURRENT BALANCE lines.
+
+For each transaction extract:
+- date: as written (e.g. "23/04/26")
+- description: merchant name cleaned up
+- amount: positive number MYR (no currency symbol)
+- is_credit: true ONLY if amount has "CR" suffix or it is a payment/refund line
+- category: best match from [${JSON.stringify(categorySlugs)}] — "ad_spend" for Facebook/FACEBK, "gift" for Shopee, "ai_tools" for Anthropic/OpenAI/Paddle/Apple
+- channel: "DM" for Facebook/Shopee/Manychat, "SHARED" for AI tools, else "SHARED"
+- company_team: ${selectedCardName.includes('KY') || selectedCardName.includes('Alliance') ? '"Alpha C" for gift/ads, null for AI tools' : '"New Era" for gift/ads, null for AI tools'}
+
+Also provide:
+- cr_amounts: array of amounts that had "CR" suffix
+- statement_balance: the CHARGES THIS MONTH or CURRENT BALANCE number
+
+Respond with ONLY a raw JSON object:
+{"transactions":[{"date":"23/04/26","description":"Shopee MY Marketplace","amount":78.90,"is_credit":false,"category":"gift","channel":"DM","company_team":"Alpha C"}],"cr_amounts":[99.90],"statement_balance":26397.85}`;
+
+    const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ base64, categories: costCategories })
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 16000,
+        messages: [{ role: 'user', content: [
+          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
+          { type: 'text', text: ccPrompt }
+        ]}]
+      })
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Failed to parse statement');
+    const claudeData = await claudeResp.json();
+    let rawText = (claudeData.content || []).map(b => b.text || '').join('').trim();
+    rawText = rawText.replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/```\s*$/i,'').trim();
+    const jsonObjMatch = rawText.match(/\{[\s\S]*\}/);
+    if (jsonObjMatch) rawText = jsonObjMatch[0];
+    let parsed;
+    try { parsed = JSON.parse(rawText); } catch(e) { throw new Error('Could not parse Claude response: ' + rawText.slice(0,200)); }
+    const data = {
+      success: true,
+      transactions: Array.isArray(parsed.transactions) ? parsed.transactions : (Array.isArray(parsed) ? parsed : []),
+      _cr_filtered: parsed.cr_amounts || [],
+      statement_balance: parsed.statement_balance || null,
+      _debug_raw_count: Array.isArray(parsed.transactions) ? parsed.transactions.length : 0
+    };
+    console.log('[CC Frontend] transactions:', data.transactions.length, 'cr_amounts:', data._cr_filtered, 'stmt_bal:', data.statement_balance);
 
     const defaultYear = parseInt(document.getElementById('ccBulkYear')?.value || '2026');
     const defaultMonth = new Date().getMonth() + 1;
