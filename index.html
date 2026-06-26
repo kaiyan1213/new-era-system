@@ -6810,27 +6810,25 @@ async function processCCFile(file) {
       const targetTotal = Math.round(stmtBal * 100);
       if (currentTotal > targetTotal) {
         const excess = currentTotal - targetTotal;
-        // Try to find transactions whose amounts sum exactly to the excess
-        // Simple approach: find individual transactions matching the excess or subsets
-        const toRemoveCents = new Set();
+        // Greedily find transactions (smallest first) that sum to the excess
+        // Use array (not Set) to allow duplicate amounts
+        const toRemoveCentsList = [];
         let remaining = excess;
-        // Sort candidates by amount asc to find refund-sized amounts first
         const candidates = [...allTxns].sort((a,b) => a.amount - b.amount);
         for (const t of candidates) {
           const cents = Math.round(t.amount * 100);
           if (cents <= remaining) {
-            toRemoveCents.add(cents);
+            toRemoveCentsList.push(cents);
             remaining -= cents;
             if (remaining === 0) break;
           }
         }
         if (remaining === 0) {
-          // Successfully found transactions that account for the excess — remove them
-          const removeCentsList = [...toRemoveCents];
+          const removeList = [...toRemoveCentsList];
           allTxns = allTxns.filter(t => {
             const cents = Math.round(t.amount * 100);
-            const idx = removeCentsList.indexOf(cents);
-            if (idx !== -1) { removeCentsList.splice(idx, 1); return false; }
+            const idx = removeList.indexOf(cents);
+            if (idx !== -1) { removeList.splice(idx, 1); return false; }
             return true;
           });
         }
