@@ -6799,8 +6799,10 @@ async function processCCFile(file) {
       })
       .map(t => {
         // Override company_team based on selected card
-        const sel = document.getElementById('ccCardSelect');
-        const cName = sel ? (sel.options[sel.selectedIndex]?.text || '') : '';
+        const sel = document.getElementById('ccStatementCard');
+        const selCardId = sel ? sel.value : '';
+        const selCard = ccCards.find(c => c.id === selCardId);
+        const cName = selCard ? (selCard.card_name || '') : '';
         const isKY = cName.toUpperCase().includes('KY') || cName.toUpperCase().includes('JENNY');
         let team = t.company_team;
         if (isKY && (t.category === 'gift' || t.category === 'ad_spend' || t.category === 'manychat')) {
