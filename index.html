@@ -6815,7 +6815,8 @@ async function processCCFile(file) {
   document.getElementById('ccProgress').classList.remove('hidden');
 
   try {
-    const base64 = await new Promise((res, rej) => {
+    // Read file as base64
+    const rawBase64 = await new Promise((res, rej) => {
       const reader = new FileReader();
       reader.onload = () => {
         const result = reader.result;
@@ -6826,6 +6827,23 @@ async function processCCFile(file) {
       reader.onerror = () => rej(new Error('File read error'));
       reader.readAsDataURL(file);
     });
+
+    // If password provided, decrypt PDF in frontend using pdf-lib
+    const pdfPassword = document.getElementById('ccPdfPassword')?.value || '';
+    let base64 = rawBase64;
+    if (pdfPassword) {
+      try {
+        document.getElementById('ccProgress').textContent = 'Decrypting PDF…';
+        const { PDFDocument } = await import('https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm');
+        const pdfBytes = Uint8Array.from(atob(rawBase64), c => c.charCodeAt(0));
+        const pdfDoc = await PDFDocument.load(pdfBytes, { password: pdfPassword, ignoreEncryption: false });
+        // Save without encryption
+        const decryptedBytes = await pdfDoc.save({ useObjectStreams: false });
+        base64 = btoa(String.fromCharCode(...decryptedBytes));
+      } catch(decryptErr) {
+        throw new Error('Could not decrypt PDF — wrong password? ' + decryptErr.message);
+      }
+    }
 
     const response = await fetch('/api/parse-cc-statement', {
       method: 'POST',
