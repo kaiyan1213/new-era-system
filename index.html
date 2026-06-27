@@ -6307,6 +6307,11 @@ async function loadPL() {
     // Helper: map assignment to 8-bucket label
     function assignToBucket(algo, team, channel) {
       if (algo === 'outsider') return 'Outsider';
+      // commission_algo = 'tm' means TM channel regardless of staff's default channel
+      if (algo === 'tm') {
+        const t = team || 'New Era';
+        return t === 'Alpha C' ? 'AC-TM' : 'NE-TM';
+      }
       const t = team || 'New Era';
       const ch = (channel || 'DM').toUpperCase();
       if (t === 'Alpha C') return ch === 'TM' ? 'AC-TM' : 'AC-DM';
@@ -6349,18 +6354,17 @@ async function loadPL() {
 
         const bucketComTotals = {};
         let grandTotal = 0;
-        let noMatchCount = 0;
+
         orders.forEach(o => {
           if (!o.order_no) return;
           const assignKey = `${String(bd.proxy_id)}|${String(o.order_no)}`;
           const assign = plAssignMap[assignKey];
-          if (!assign) noMatchCount++;
           const bucket = assignToBucket(assign?.commission_algo, assign?.team, assign?.channel);
           const com = parseFloat(o.total_com || 0);
           bucketComTotals[bucket] = (bucketComTotals[bucket] || 0) + com;
           grandTotal += com;
         });
-        if (noMatchCount > 0) console.log('[PL-NOMATCH] proxy:', String(bd.proxy_id).slice(0,8), 'no assign match:', noMatchCount, 'of', orders.length, 'orders');
+
 
         if (grandTotal > 0 && payslipTotal > 0) {
           Object.entries(bucketComTotals).forEach(([bucket, com]) => {
