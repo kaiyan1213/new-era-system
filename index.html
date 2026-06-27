@@ -6349,15 +6349,18 @@ async function loadPL() {
 
         const bucketComTotals = {};
         let grandTotal = 0;
+        let noMatchCount = 0;
         orders.forEach(o => {
           if (!o.order_no) return;
           const assignKey = `${String(bd.proxy_id)}|${String(o.order_no)}`;
           const assign = plAssignMap[assignKey];
+          if (!assign) noMatchCount++;
           const bucket = assignToBucket(assign?.commission_algo, assign?.team, assign?.channel);
           const com = parseFloat(o.total_com || 0);
           bucketComTotals[bucket] = (bucketComTotals[bucket] || 0) + com;
           grandTotal += com;
         });
+        if (noMatchCount > 0) console.log('[PL-NOMATCH] proxy:', String(bd.proxy_id).slice(0,8), 'no assign match:', noMatchCount, 'of', orders.length, 'orders');
 
         if (grandTotal > 0 && payslipTotal > 0) {
           Object.entries(bucketComTotals).forEach(([bucket, com]) => {
