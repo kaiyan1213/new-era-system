@@ -922,6 +922,32 @@
       </div>
     </div>
 
+    <!-- NE / AC Split Summary -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div style="background:var(--surface);border:1px solid #2563eb;border-radius:8px;padding:14px;border-left:4px solid #2563eb">
+        <div style="font-size:11px;font-weight:700;color:#2563eb;text-transform:uppercase;margin-bottom:8px">🏢 New Era Company</div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+          <span style="color:var(--muted)">Revenue (DM+TM+Outsider+Pool)</span>
+          <span style="font-family:var(--mono);color:var(--green);font-weight:600" id="plNeRev">—</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+          <span style="color:var(--muted)">Net Profit</span>
+          <span style="font-family:var(--mono);font-weight:600" id="plNeNet">—</span>
+        </div>
+      </div>
+      <div style="background:var(--surface);border:1px solid #f97316;border-radius:8px;padding:14px;border-left:4px solid #f97316">
+        <div style="font-size:11px;font-weight:700;color:#f97316;text-transform:uppercase;margin-bottom:8px">🏢 Alpha C Company</div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+          <span style="color:var(--muted)">Revenue (DM+TM+Shared)</span>
+          <span style="font-family:var(--mono);color:var(--green);font-weight:600" id="plAcRev">—</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+          <span style="color:var(--muted)">Net Profit</span>
+          <span style="font-family:var(--mono);font-weight:600" id="plAcNet">—</span>
+        </div>
+      </div>
+    </div>
+
     <!-- By Team cards -->
     <div class="section-title" style="margin-top:8px">By Team</div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:16px;margin-bottom:24px" id="plTeams">
@@ -6631,26 +6657,33 @@ async function loadPL() {
       }
     });
 
-    // Compute totals
+    // Compute totals — NE and AC completely separate
     const costByBucket8 = {};
     BUCKETS8.forEach(b => { costByBucket8[b] = r2(Object.values(costCat[b] || {}).reduce((s,v) => s+v, 0)); });
-    const totalCost = r2(BUCKETS8.reduce((s,b) => s + costByBucket8[b], 0));
-    // Total revenue
-    // Total Revenue = actual Coway payslip total (what company received)
-    // Bucket revenues = total_com per bucket (accurate channel breakdown)
-    // Difference = passive income + allowance (shown separately)
-    const totalRevFromBuckets = r2(Object.values(revBucket).reduce((s,v) => s+v, 0));
+
+    const NE_BUCKETS = ['NE-DM','NE-TM','NE-Shared','Outsider','Manager Pool'];
+    const AC_BUCKETS = ['AC-DM','AC-TM','AC-Shared'];
+
+    // NE Total Revenue = NE payslip (proxies under NE staff) + Manager Pool + Outsider
+    // Use total_com from revBucket for buckets, payslip for headline
+    const neRevFromBuckets = r2(NE_BUCKETS.reduce((s,b) => s + (revBucket[b] || 0), 0));
+    const acRevFromBuckets = r2(AC_BUCKETS.reduce((s,b) => s + (revBucket[b] || 0), 0));
+    const neCost = r2(NE_BUCKETS.reduce((s,b) => s + costByBucket8[b], 0));
+    const acCost = r2(AC_BUCKETS.reduce((s,b) => s + costByBucket8[b], 0));
+    const neNet = r2(neRevFromBuckets - neCost);
+    const acNet = r2(acRevFromBuckets - acCost);
+
+    // Headline: total payslip (NE + AC combined, actual money received)
     const totalPayslip = r2(invoices.reduce((s,i) => s + parseFloat(i.coway_payslip_amount || 0), 0));
     const passiveTotal = r2(invoices.reduce((s,i) => s + parseFloat(i.passive_income || 0), 0));
-    const totalRevFinal = totalPayslip; // use actual payslip as headline revenue
+    const totalRevFinal = totalPayslip;
+    const totalCost = r2(BUCKETS8.reduce((s,b) => s + costByBucket8[b], 0));
     const netProfit = r2(totalRevFinal - totalCost);
     const margin = totalRevFinal > 0 ? (netProfit / totalRevFinal * 100) : 0;
 
-    // For backward compat with stat cards
     const totalRev2 = totalRevFinal;
 
         document.getElementById('plTotalRev').textContent = fmt(totalRevFinal);
-        // Passive income total from proxy_invoices
         const plPassiveEl = document.getElementById('plPassiveAmt');
         if (plPassiveEl) plPassiveEl.textContent = fmt(passiveTotal);
     document.getElementById('plTotalCost').textContent = fmt(totalCost);
@@ -6660,6 +6693,16 @@ async function loadPL() {
     const mgEl = document.getElementById('plMargin');
     mgEl.textContent = margin.toFixed(1) + '%';
     mgEl.style.color = margin >= 20 ? 'var(--green)' : margin >= 0 ? 'var(--yellow)' : 'var(--red)';
+
+    // NE / AC breakdown stat cards (if elements exist)
+    const neRevEl = document.getElementById('plNeRev');
+    const acRevEl = document.getElementById('plAcRev');
+    const neNetEl = document.getElementById('plNeNet');
+    const acNetEl = document.getElementById('plAcNet');
+    if (neRevEl) neRevEl.textContent = fmt(neRevFromBuckets);
+    if (acRevEl) acRevEl.textContent = fmt(acRevFromBuckets);
+    if (neNetEl) { neNetEl.textContent = fmt(neNet); neNetEl.style.color = neNet>=0?'var(--green)':'var(--red)'; }
+    if (acNetEl) { acNetEl.textContent = fmt(acNet); acNetEl.style.color = acNet>=0?'var(--green)':'var(--red)'; }
 
     // ── RENDER new 8-bucket cards ──
     const BUCKET_COLORS = {
