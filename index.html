@@ -6476,31 +6476,31 @@ async function loadPL() {
       const staffRec = allStaff.find(s => s.id === p.staff_id) || {};
       const staffName = staffRec.name || p.staff_name || 'Unknown';
 
-      // 1. Manager → TM cost from com_from_payslip; outsider cost handled in breakdown loop
-      // TM cost = com_from_payslip for TM orders + proportional bonus + proportional claim
-      // Outsider cost = total_com already added in breakdown loop (do NOT add again here)
-      // Manager Pool = full outlay minus TM portion
+      // 1. Manager → clean split:
+      //    TM commission (com_from_payslip) → NE-TM
+      //    Outsider commission (total_com) → Outsider (already in breakdown loop, skip here)
+      //    ALL other costs (claim/bonus/salary/deductions) → NE-Shared (listed clearly)
+      //    Manager Pool = revenue only (no cost shown there)
       if (p.record_type === 'manager') {
-        const outlay = r2(comm + sal + bon + claim - ded - epf);
-        if (outlay === 0) return;
+        if (comm === 0 && sal === 0 && bon === 0 && claim === 0) return;
         const sid = p.staff_id;
-        const mgrTmEarned = r2(tmEarnedByStaff[sid] || 0); // com_from_payslip sum for TM orders
-        // Proportional bonus + claim for TM (by fraction of TM earned vs total commission)
-        const tmFrac = comm > 0 && mgrTmEarned > 0 ? Math.min(mgrTmEarned / comm, 1) : 0;
-        const bonusForTm = r2(bon * tmFrac);
-        const claimForTm = r2(claim * tmFrac);
+        const mgrTmEarned = r2(tmEarnedByStaff[sid] || 0);
+
+        // TM commission → NE-TM
         if (mgrTmEarned > 0) {
-          const tmTotal = r2(mgrTmEarned + bonusForTm + claimForTm);
-          addCost('NE-TM', 'Staff Commission (TM)', tmTotal);
-          addTooltipDetail('NE-TM', 'Staff Commission (TM)', staffName, tmTotal);
+          addCost('NE-TM', 'Staff Commission (TM)', mgrTmEarned);
+          addTooltipDetail('NE-TM', 'Staff Commission (TM)', staffName, mgrTmEarned);
         }
-        // Manager Pool = outlay minus TM portion only
-        // (outsider total_com cost is in breakdown loop — NOT deducted here to avoid double count)
-        const poolCost = r2(outlay - mgrTmEarned - bonusForTm - claimForTm);
-        if (poolCost !== 0) {
-          addCost('Manager Pool', 'Manager Settlement', poolCost);
-          addTooltipDetail('Manager Pool', 'Manager Settlement', staffName, poolCost);
+
+        // All other costs → NE-Shared (bonus, claim, salary, minus deductions/EPF)
+        // This includes Jess's claim RM239, bonus RM518, etc.
+        const sharedCost = r2(bon + claim + sal - ded - epf);
+        if (sharedCost !== 0) {
+          addCost('NE-Shared', 'Manager Expenses', sharedCost);
+          addTooltipDetail('NE-Shared', 'Manager Expenses', staffName, sharedCost);
         }
+        // Note: manager commission_earned (DM portion) is NOT a cost here
+        // It comes from Manager Pool revenue redistribution (handled separately)
         return;
       }
 
@@ -6702,7 +6702,13 @@ async function loadPL() {
           }).join('')
         : `<div style="font-size:10px;color:var(--muted)">No costs this period</div>`;
 
-      const revSection = (!isShared && !isManager) ? `
+      const revSection = isManager ? `
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px">
+          <span style="color:var(--muted)">Pool Revenue (from manager payslips)</span>
+          <span style="font-family:var(--mono);color:var(--green);font-weight:600">RM ${fmtNum(rev)}</span>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:6px">Manager commission splits paid via this pool. Individual costs listed in NE-Shared.</div>` :
+        (!isShared ? `
         <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px">
           <span style="color:var(--muted)">Revenue</span>
           <span style="font-family:var(--mono);color:var(--green);font-weight:600">RM ${fmtNum(rev)}</span>
@@ -6710,7 +6716,7 @@ async function loadPL() {
         ${orderCount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:6px">
           <span style="color:var(--muted)">${orderCount} orders · avg/order</span>
           <span style="font-family:var(--mono);color:var(--muted)">RM ${fmtNum(perOrder)}</span>
-        </div>` : ''}` : '';
+        </div>` : ''}` : '');
 
       const netSection = (!isShared) ? `
         <div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px;display:flex;justify-content:space-between;font-size:12px;font-weight:700">
@@ -6722,13 +6728,14 @@ async function loadPL() {
         <div style="font-size:12px;font-weight:700;color:${color};margin-bottom:2px">${label}</div>
         ${!isShared && !isManager ? `<div style="font-size:10px;color:var(--muted);margin-bottom:8px">${pct}% of total revenue</div>` : '<div style="margin-bottom:8px"></div>'}
         ${revSection}
+        ${!isManager ? `
         <div style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Costs</div>
         <div style="display:flex;flex-direction:column;gap:1px;margin-bottom:4px">${costRows}</div>
         <div style="display:flex;justify-content:space-between;font-size:11px;border-top:1px solid var(--border);padding-top:4px;margin-top:4px">
           <span style="color:var(--muted)">Total Cost</span>
           <span style="font-family:var(--mono);color:var(--red);font-weight:600">RM ${fmtNum(isOutsider ? displayCost : cost)}</span>
         </div>
-        ${netSection}
+        ${netSection}` : ''}
       </div>`;
     }).join('');
 
