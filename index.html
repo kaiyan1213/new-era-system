@@ -6369,6 +6369,14 @@ async function loadPL() {
       }
     });
 
+    // tooltip detail maps: bucket -> label -> [{name, amount}]
+    const tooltipDetails = {};
+    function addTooltipDetail(bucket, label, name, amt) {
+      if (!tooltipDetails[bucket]) tooltipDetails[bucket] = {};
+      if (!tooltipDetails[bucket][label]) tooltipDetails[bucket][label] = [];
+      tooltipDetails[bucket][label].push({ name, amount: amt });
+    }
+
     // ── REVENUE + OUTSIDER COST: both from breakdown directly ──
     // Outsider: revenue = total_com, cost = com_from_payslip (same source = guaranteed net ~0)
     // DM/TM: revenue = payslip amount × proportion
@@ -6445,13 +6453,6 @@ async function loadPL() {
       } catch(e) {}
     }
 
-    // tooltip detail maps: bucket -> label -> [{name, amount}]
-    const tooltipDetails = {};
-    function addTooltipDetail(bucket, label, name, amt) {
-      if (!tooltipDetails[bucket]) tooltipDetails[bucket] = {};
-      if (!tooltipDetails[bucket][label]) tooltipDetails[bucket][label] = [];
-      tooltipDetails[bucket][label].push({ name, amount: amt });
-    }
 
     // ── PAYROLL COSTS ──
     // Rules (verified against June 2026 payroll data):
