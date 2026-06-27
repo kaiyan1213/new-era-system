@@ -6651,7 +6651,6 @@ async function loadPL() {
 
         document.getElementById('plTotalRev').textContent = fmt(totalRevFinal);
         // Passive income total from proxy_invoices
-        const passiveTotal = r2(invoices.reduce((s,i) => s + parseFloat(i.passive_income || 0), 0));
         const plPassiveEl = document.getElementById('plPassiveAmt');
         if (plPassiveEl) plPassiveEl.textContent = fmt(passiveTotal);
     document.getElementById('plTotalCost').textContent = fmt(totalCost);
