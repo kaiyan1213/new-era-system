@@ -6274,7 +6274,7 @@ async function loadPL() {
     console.log('[PL] assignments fetched:', plAssignments.length, 'filter:', invFilter);
     const outsiderAssigns = plAssignments.filter(a => a.commission_algo === 'outsider');
     console.log('[PL] outsider assigns:', outsiderAssigns.length, outsiderAssigns.slice(0,3));
-    const plStaffList = await sb('nec_staff', { select: 'id,company_team,channel' }).catch(() => []);
+    const plStaffList = await sb('nec_staff', { select: 'id,name,company_team,channel' }).catch(() => []);
     const plStaffMap = {};
     plStaffList.forEach(s => { plStaffMap[s.id] = s; });
     // Build order map: order_no -> {total_com, com_from_payslip} from breakdown
@@ -6399,18 +6399,13 @@ async function loadPL() {
           const bucket = assignToBucket(assign?.commission_algo, assign?.team, assign?.channel);
           const com = parseFloat(o.total_com || 0);
 
-          if (bucket === 'Outsider') {
-            // OUTSIDER: Revenue AND Cost both = total_com directly (company is pure pass-through)
-            // Using total_com for both guarantees Net = 0 without forcing
-            if (com > 0) {
-              revBucket['Outsider'] = r2((revBucket['Outsider'] || 0) + com);
-              const sName = assign?.staff_name || (assign?.staff_id ? plStaffMap[assign.staff_id]?.name : null) || '(unassigned)';
-              outsiderCostByStaff[sName] = (outsiderCostByStaff[sName] || 0) + com;
-            }
-            // Don't add to bucketComTotals for outsider (handled above, not via payslip proportion)
-          } else {
-            bucketComTotals[bucket] = (bucketComTotals[bucket] || 0) + com;
-            grandTotal += com;
+          // All buckets including Outsider go through payslip proportion for revenue
+          bucketComTotals[bucket] = (bucketComTotals[bucket] || 0) + com;
+          grandTotal += com;
+          // OUTSIDER COST: total_com (company passes everything through to staff)
+          if (bucket === 'Outsider' && com > 0) {
+            const sName = assign?.staff_name || (assign?.staff_id ? plStaffMap[assign.staff_id]?.name : null) || '(unassigned)';
+            outsiderCostByStaff[sName] = (outsiderCostByStaff[sName] || 0) + com;
           }
         });
 
@@ -6513,33 +6508,35 @@ async function loadPL() {
         const sid = p.staff_id;
         const mgrTmEarned = r2(tmEarnedByStaff[sid] || 0);
 
-        // TM commission → NE-TM
+        // TM commission + claim → NE-TM (Jess's TM work claim goes here)
+        const adjSplit = mgrAdjByStaff[p.staff_id] || null;
         if (mgrTmEarned > 0) {
           addCost('NE-TM', 'Staff Commission (TM)', mgrTmEarned);
           addTooltipDetail('NE-TM', 'Staff Commission (TM)', staffName, mgrTmEarned);
+          // Claim for TM managers goes to NE-TM (only if no special adj split needed)
+          if (claim > 0 && !adjSplit) {
+            addCost('NE-TM', 'Staff Claim', claim);
+            addTooltipDetail('NE-TM', 'Staff Claim', staffName, claim);
+          }
         }
 
-        // All other costs (bonus + claim + salary - deductions - EPF) split by adjustment categories
-        // Use mgrAdjByManager to split claim correctly (Both Co Loan = 50/50 NE/AC)
-        const adjSplit = mgrAdjByStaff[p.staff_id] || null;
-        const nonClaimCost = r2(bon + sal - ded - epf); // bonus + salary - deductions - EPF
+        // Bonus + salary → NE-Shared (manager operating expenses)
+        const nonClaimCost = r2(bon + sal - ded - epf);
         if (nonClaimCost !== 0) {
           addCost('NE-Shared', 'Manager Expenses', nonClaimCost);
           addTooltipDetail('NE-Shared', 'Manager Expenses', staffName, nonClaimCost);
         }
-        // Split claim using adjustment breakdown
+        // Claim split by adjustment category (Both Co Loan = 50/50 NE/AC)
         if (adjSplit) {
           const neAmt = r2(adjSplit.ne);
           const acAmt = r2(adjSplit.ac);
           if (neAmt !== 0) { addCost('NE-Shared', 'Manager Claim', neAmt); addTooltipDetail('NE-Shared', 'Manager Claim', staffName, neAmt); }
           if (acAmt !== 0) { addCost('AC-Shared', 'Manager Claim (AC)', acAmt); addTooltipDetail('AC-Shared', 'Manager Claim (AC)', staffName, acAmt); }
-        } else if (claim !== 0) {
-          // No adjustment detail — default all claim to NE-Shared
+        } else if (claim !== 0 && mgrTmEarned === 0) {
+          // Pure DM/pool manager with no TM orders — claim to NE-Shared
           addCost('NE-Shared', 'Manager Claim', claim);
           addTooltipDetail('NE-Shared', 'Manager Claim', staffName, claim);
         }
-        // Note: manager commission_earned (DM portion) is NOT a cost here
-        // It comes from Manager Pool revenue redistribution (handled separately)
         return;
       }
 
