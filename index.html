@@ -6341,18 +6341,12 @@ async function loadPL() {
     }
 
     // ── REVENUE: per-proxy, split payslip amount by total_com proportion per bucket ──
-    // Also build outsiderComByStaff / tmComByStaff for splitting payroll commission later
-    const outsiderComByStaff = {}; // staff_id -> total_com of outsider orders
-    const tmComByStaff = {};       // staff_id -> total_com of TM orders
-    const totalComByStaff = {};    // staff_id -> total_com of all orders
-
     for (const bd of breakdowns) {
       try {
         const orders = JSON.parse(bd.categories_json || '[]');
         const inv = invoices.find(i => i.proxy_id === bd.proxy_id && i.year === bd.year && i.month === bd.month);
         const payslipTotal = parseFloat(inv?.coway_payslip_amount || 0);
 
-        // Sum total_com per bucket for this proxy-month
         const bucketComTotals = {};
         let grandTotal = 0;
         orders.forEach(o => {
@@ -6363,16 +6357,8 @@ async function loadPL() {
           const com = parseFloat(o.total_com || 0);
           bucketComTotals[bucket] = (bucketComTotals[bucket] || 0) + com;
           grandTotal += com;
-          // Track per-staff for payroll commission splitting
-          if (assign?.staff_id && com > 0) {
-            const sid = assign.staff_id;
-            totalComByStaff[sid] = (totalComByStaff[sid] || 0) + com;
-            if (assign.commission_algo === 'outsider') outsiderComByStaff[sid] = (outsiderComByStaff[sid] || 0) + com;
-            if (assign.commission_algo === 'tm') tmComByStaff[sid] = (tmComByStaff[sid] || 0) + com;
-          }
         });
 
-        // Split payslip amount by proportion → revBucket
         if (grandTotal > 0 && payslipTotal > 0) {
           Object.entries(bucketComTotals).forEach(([bucket, com]) => {
             revBucket[bucket] = r2((revBucket[bucket] || 0) + payslipTotal * (com / grandTotal));
@@ -6415,8 +6401,8 @@ async function loadPL() {
     }
 
     // ── PAYROLL COSTS ──
-    // Commission cost from payroll.commission_earned, split by outsider/TM ratio
-    // Salary/bonus/claim from payroll directly
+    // Simple: commission_type determines bucket, no ratio splitting
+    // Managers → Manager Pool, outsider records → Outsider, sales → their channel bucket
     payrollRows.forEach(p => {
       const comm = parseFloat(p.commission_earned || 0);
       const sal = parseFloat(p.base_salary || 0);
@@ -6454,19 +6440,14 @@ async function loadPL() {
         return;
       }
       if (staff?.staff_type === 'sales') {
-        const mainBucket = team === 'Alpha C' ? (ch === 'TM' ? 'AC-TM' : 'AC-DM') : (ch === 'TM' ? 'NE-TM' : 'NE-DM');
-        const sid = p.staff_id;
-        const totalCom = totalComByStaff[sid] || 0;
-        // Split commission_earned: outsider portion → Outsider, TM portion (if DM staff) → NE-TM, rest → main bucket
-        const outsiderFrac = totalCom > 0 ? (outsiderComByStaff[sid] || 0) / totalCom : 0;
-        const tmFrac = (ch !== 'TM' && totalCom > 0) ? (tmComByStaff[sid] || 0) / totalCom : 0;
-        const outsiderComAmt = r2(comm * outsiderFrac);
-        const tmComAmt = r2(comm * tmFrac);
-        const mainComAmt = r2(Math.max(0, comm - outsiderComAmt - tmComAmt));
-        if (outsiderComAmt > 0) { addCost('Outsider', 'Outsider Commission', outsiderComAmt); addTooltipDetail('Outsider', 'Outsider Commission', staffName, outsiderComAmt); }
-        if (tmComAmt > 0) { const tb = team === 'Alpha C' ? 'AC-TM' : 'NE-TM'; addCost(tb, 'Staff Commission (TM)', tmComAmt); addTooltipDetail(tb, 'Staff Commission (TM)', staffName, tmComAmt); }
-        if (mainComAmt > 0) { addCost(mainBucket, `Staff Commission (${ch})`, mainComAmt); addTooltipDetail(mainBucket, `Staff Commission (${ch})`, staffName, mainComAmt); }
-        if (claim > 0) { addCost(mainBucket, 'Staff Claim', claim); addTooltipDetail(mainBucket, 'Staff Claim', staffName, claim); }
+        // Sales staff: full commission_earned → their channel bucket (TM staff → TM, DM staff → DM)
+        // Note: Jess has TM+outsider orders but her payroll is under Manager Pool via manager record
+        // Pure outsider-only staff have commission_type='outsider' (handled above)
+        const bucket = team === 'Alpha C' ? (ch === 'TM' ? 'AC-TM' : 'AC-DM') : (ch === 'TM' ? 'NE-TM' : 'NE-DM');
+        if (comm > 0) { addCost(bucket, `Staff Commission (${ch})`, comm); addTooltipDetail(bucket, `Staff Commission (${ch})`, staffName, comm); }
+        if (claim > 0) { addCost(bucket, 'Staff Claim', claim); addTooltipDetail(bucket, 'Staff Claim', staffName, claim); }
+        const salOut = r2(sal + bon - ded - epf);
+        if (salOut > 0) { addCost(bucket, 'Staff Salary', salOut); addTooltipDetail(bucket, 'Staff Salary', salOut > 0 ? salOut : 0, staffName); }
       } else {
         const sharedBucket = team === 'Alpha C' ? 'AC-Shared' : 'NE-Shared';
         const pos = (staff?.position || staff?.staff_type || '').toLowerCase();
