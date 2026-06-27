@@ -6345,6 +6345,20 @@ async function loadPL() {
       costCat[bucket][label] = (costCat[bucket][label] || 0) + amt;
     }
 
+    // ── Build per-staff outsider/TM total_com maps from assignments ──
+    // Used to split manager payroll cost into correct buckets
+    const outsiderComByStaff = {}; // staff_id -> total outsider total_com
+    const tmComByStaff = {};       // staff_id -> total TM total_com  
+    const allComByStaff = {};      // staff_id -> total all total_com
+    plAssignments.forEach(a => {
+      const orderData = orderComMap[String(a.order_no)];
+      const com = parseFloat(orderData?.total_com || 0);
+      if (!a.staff_id || com <= 0) return;
+      allComByStaff[a.staff_id] = (allComByStaff[a.staff_id] || 0) + com;
+      if (a.commission_algo === 'outsider') outsiderComByStaff[a.staff_id] = (outsiderComByStaff[a.staff_id] || 0) + com;
+      if (a.commission_algo === 'tm') tmComByStaff[a.staff_id] = (tmComByStaff[a.staff_id] || 0) + com;
+    });
+
     // ── REVENUE: per-proxy, split payslip amount by total_com proportion per bucket ──
     for (const bd of breakdowns) {
       try {
@@ -6429,12 +6443,31 @@ async function loadPL() {
       const staffRec = allStaff.find(s => s.id === p.staff_id) || {};
       const staffName = staffRec.name || p.staff_name || 'Unknown';
 
-      // 1. Manager → Manager Pool
+      // 1. Manager → split outsider/TM cost into correct buckets, rest → Manager Pool
       if (p.record_type === 'manager') {
         const outlay = r2(comm + sal + bon + claim - ded - epf);
-        if (outlay !== 0) {
-          addCost('Manager Pool', 'Manager Settlement', outlay);
-          addTooltipDetail('Manager Pool', 'Manager Settlement', staffName, outlay);
+        if (outlay === 0) return;
+        const sid = p.staff_id;
+        const totalCom = allComByStaff[sid] || 0;
+        const outsiderCom = outsiderComByStaff[sid] || 0;
+        const tmCom = tmComByStaff[sid] || 0;
+        // Fraction of manager's total revenue that came from outsider/TM orders
+        const outsiderFrac = totalCom > 0 ? outsiderCom / totalCom : 0;
+        const tmFrac = totalCom > 0 ? tmCom / totalCom : 0;
+        const mgrOutsiderCost = r2(outlay * outsiderFrac);
+        const mgrTmCost = r2(outlay * tmFrac);
+        const mgrPoolCost = r2(outlay - mgrOutsiderCost - mgrTmCost);
+        if (mgrOutsiderCost > 0) {
+          addCost('Outsider', 'Outsider Commission', mgrOutsiderCost);
+          addTooltipDetail('Outsider', 'Outsider Commission', staffName, mgrOutsiderCost);
+        }
+        if (mgrTmCost > 0) {
+          addCost('NE-TM', 'Staff Commission (TM)', mgrTmCost);
+          addTooltipDetail('NE-TM', 'Staff Commission (TM)', staffName, mgrTmCost);
+        }
+        if (mgrPoolCost !== 0) {
+          addCost('Manager Pool', 'Manager Settlement', mgrPoolCost);
+          addTooltipDetail('Manager Pool', 'Manager Settlement', staffName, mgrPoolCost);
         }
         return;
       }
@@ -6620,9 +6653,10 @@ async function loadPL() {
       const isShared = b.includes('Shared');
       const isOutsider = b === 'Outsider';
       const isManager = b === 'Manager Pool';
-      // Outsider: revenue = cost by definition (commission passes straight through)
+      // Outsider: net = 0 (pass-through). Revenue collected = commission paid out.
+      // After manager split fix, outsider cost should equal outsider revenue.
       const net = isOutsider ? 0 : r2(rev - cost);
-      const displayCost = isOutsider ? rev : cost;
+      const displayCost = cost;
       const pct = totalRevFinal > 0 ? (rev / totalRevFinal * 100).toFixed(1) : '0.0';
       const color = BUCKET_COLORS[b] || 'var(--muted)';
       const label = BUCKET_LABELS[b] || b;
