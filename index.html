@@ -6369,9 +6369,11 @@ async function loadPL() {
       }
     });
 
-    // ── REVENUE: per-proxy, split payslip amount by total_com proportion per bucket ──
-    // Also collect com_from_payslip for null-staff orders (these have no payroll record)
-    const nullStaffEarnedByBucket = {};
+    // ── REVENUE + OUTSIDER COST: both from breakdown directly ──
+    // Outsider: revenue = total_com, cost = com_from_payslip (same source = guaranteed net ~0)
+    // DM/TM: revenue = payslip amount × proportion
+    // Outsider cost tracked per staff_name for tooltip
+    const outsiderCostByStaff = {}; // display_name -> com_from_payslip total
 
     for (const bd of breakdowns) {
       try {
@@ -6390,10 +6392,15 @@ async function loadPL() {
           const com = parseFloat(o.total_com || 0);
           bucketComTotals[bucket] = (bucketComTotals[bucket] || 0) + com;
           grandTotal += com;
-          // If assignment has no staff_id, no payroll record covers this cost
-          if (assign && !assign.staff_id) {
-            const earned = parseFloat(o.com_from_payslip || 0);
-            if (earned > 0) nullStaffEarnedByBucket[bucket] = (nullStaffEarnedByBucket[bucket] || 0) + earned;
+
+          // OUTSIDER COST: use total_com (company passes through everything — com + allowance — to outsider staff)
+          // Revenue = total_com, Cost = total_com → Net = 0 by logic, not forced
+          if (bucket === 'Outsider') {
+            const totalComForOrder = parseFloat(o.total_com || 0);
+            if (totalComForOrder > 0) {
+              const sName = assign?.staff_name || (assign?.staff_id ? plStaffMap[assign.staff_id]?.name : null) || '(unassigned)';
+              outsiderCostByStaff[sName] = (outsiderCostByStaff[sName] || 0) + totalComForOrder;
+            }
           }
         });
 
@@ -6408,16 +6415,16 @@ async function loadPL() {
         }
       } catch(e) {}
     }
+    // Add outsider cost from breakdown (this is the ONLY source for outsider cost)
+    const totalOutsiderCost = r2(Object.values(outsiderCostByStaff).reduce((s,v) => s+v, 0));
+    if (totalOutsiderCost > 0) {
+      addCost('Outsider', 'Outsider Commission', totalOutsiderCost);
+      Object.entries(outsiderCostByStaff).forEach(([name, amt]) => {
+        addTooltipDetail('Outsider', 'Outsider Commission', name, amt);
+      });
+    }
     // Manager pool revenue
     revBucket['Manager Pool'] = r2((revBucket['Manager Pool'] || 0) + managerPoolRevenue);
-    // Add null-staff com_from_payslip costs (orders with no payroll record to cover them)
-    Object.entries(nullStaffEarnedByBucket).forEach(([bucket, earned]) => {
-      if (earned <= 0) return;
-      const label = (bucket === 'Outsider') ? 'Outsider Commission' :
-                    (bucket.endsWith('-TM')) ? 'Staff Commission (TM)' : 'Staff Commission (DM)';
-      addCost(bucket, label, earned);
-      addTooltipDetail(bucket, label, '(unassigned staff)', earned);
-    });
 
     // ── PAYROLL COSTS ──
     let payFilter = `year=eq.${year}`;
@@ -6468,39 +6475,27 @@ async function loadPL() {
       const staffRec = allStaff.find(s => s.id === p.staff_id) || {};
       const staffName = staffRec.name || p.staff_name || 'Unknown';
 
-      // 1. Manager → split outsider/TM cost using actual com_from_payslip earned
-      // Outsider cost = com_from_payslip for outsider orders (what proxy/staff actually received)
-      // TM cost = com_from_payslip for TM orders
-      // Rest (base manager income = comm + bonus + claim - ded - epf minus above) → Manager Pool
+      // 1. Manager → TM cost from com_from_payslip; outsider cost handled in breakdown loop
+      // TM cost = com_from_payslip for TM orders + proportional bonus + proportional claim
+      // Outsider cost = total_com already added in breakdown loop (do NOT add again here)
+      // Manager Pool = full outlay minus TM portion
       if (p.record_type === 'manager') {
         const outlay = r2(comm + sal + bon + claim - ded - epf);
         if (outlay === 0) return;
         const sid = p.staff_id;
-        // Use com_from_payslip = actual amount earned per order type
-        const mgrOutsiderCost = r2(outsiderEarnedByStaff[sid] || 0);
-        const mgrTmCost = r2(tmEarnedByStaff[sid] || 0);
-        // For claim: split proportionally (claim is reimbursement, goes to dominant channel)
-        // Jess's claim RM 239 → she does TM + outsider, split by earned ratio
-        const mgrTmOutsiderTotal = mgrOutsiderCost + mgrTmCost;
-        const claimForTm = mgrTmOutsiderTotal > 0 ? r2(claim * mgrTmCost / mgrTmOutsiderTotal) : 0;
-        const claimForOutsider = mgrTmOutsiderTotal > 0 ? r2(claim * mgrOutsiderCost / mgrTmOutsiderTotal) : 0;
-        const claimForPool = r2(claim - claimForTm - claimForOutsider);
-        // Bonus: if manager has TM/outsider activity, split bonus proportionally too
-        const totalOutlay = r2(comm + sal + bon - ded - epf); // without claim
-        const nonActivityOutlay = r2(totalOutlay - mgrOutsiderCost - mgrTmCost);
-        
-        if (mgrOutsiderCost > 0) {
-          const outsiderTotal = r2(mgrOutsiderCost + claimForOutsider);
-          addCost('Outsider', 'Outsider Commission', outsiderTotal);
-          addTooltipDetail('Outsider', 'Outsider Commission', staffName, outsiderTotal);
-        }
-        if (mgrTmCost > 0) {
-          const tmTotal = r2(mgrTmCost + claimForTm);
+        const mgrTmEarned = r2(tmEarnedByStaff[sid] || 0); // com_from_payslip sum for TM orders
+        // Proportional bonus + claim for TM (by fraction of TM earned vs total commission)
+        const tmFrac = comm > 0 && mgrTmEarned > 0 ? Math.min(mgrTmEarned / comm, 1) : 0;
+        const bonusForTm = r2(bon * tmFrac);
+        const claimForTm = r2(claim * tmFrac);
+        if (mgrTmEarned > 0) {
+          const tmTotal = r2(mgrTmEarned + bonusForTm + claimForTm);
           addCost('NE-TM', 'Staff Commission (TM)', tmTotal);
           addTooltipDetail('NE-TM', 'Staff Commission (TM)', staffName, tmTotal);
         }
-        // Rest → Manager Pool (base commission from DM orders + bonus - deductions + pool claim)
-        const poolCost = r2(outlay - mgrOutsiderCost - mgrTmCost - claimForTm - claimForOutsider);
+        // Manager Pool = outlay minus TM portion only
+        // (outsider total_com cost is in breakdown loop — NOT deducted here to avoid double count)
+        const poolCost = r2(outlay - mgrTmEarned - bonusForTm - claimForTm);
         if (poolCost !== 0) {
           addCost('Manager Pool', 'Manager Settlement', poolCost);
           addTooltipDetail('Manager Pool', 'Manager Settlement', staffName, poolCost);
@@ -6509,22 +6504,13 @@ async function loadPL() {
       }
 
       // 2. Outsider payroll record
+      // Outsider COMMISSION cost comes directly from com_from_payslip in breakdown loop (not payroll)
+      // Only handle salary/EPF here (e.g. Pei Qi base salary RM2700 → NE-Shared)
       if (p.commission_type === 'outsider') {
-        // Commission part → Outsider (pass-through to staff)
-        if (comm !== 0) {
-          addCost('Outsider', 'Outsider Commission', comm);
-          addTooltipDetail('Outsider', 'Outsider Commission', staffName, comm);
-        }
-        // Salary part (e.g. Pei Qi base salary RM2700 - EPF) → NE-Shared
         const salaryOut = r2(sal + bon - epf);
         if (salaryOut !== 0) {
           addCost('NE-Shared', 'Admin Salary', salaryOut);
           addTooltipDetail('NE-Shared', 'Admin Salary', staffName, salaryOut);
-        }
-        // Claims → Outsider (incurred doing outsider work)
-        if (claim > 0) {
-          addCost('Outsider', 'Outsider Commission', claim);
-          addTooltipDetail('Outsider', 'Outsider Commission', staffName + ' (claim)', claim);
         }
         return;
       }
