@@ -6401,8 +6401,15 @@ async function loadPL() {
     }
 
     // ── PAYROLL COSTS ──
-    // Simple: commission_type determines bucket, no ratio splitting
-    // Managers → Manager Pool, outsider records → Outsider, sales → their channel bucket
+    // Rules (verified against June 2026 payroll data):
+    // 1. Managers → Manager Pool (total outlay incl commission+bonus+claim)
+    // 2. commission_type='outsider' staff:
+    //    - commission_earned → Outsider bucket (pass-through cost)
+    //    - base_salary + bonus - epf → NE-Shared (they are NE admin staff with fixed salary)
+    // 3. Sales DM staff → NE-DM or AC-DM (commission + claim; deductions reduce cost)
+    // 4. Sales TM staff → NE-TM (commission + claim)
+    // 5. Shared admin staff → NE-Shared / AC-Shared split
+    // 6. Non-sales admin (Samantha, etc.) → NE-Shared
     payrollRows.forEach(p => {
       const comm = parseFloat(p.commission_earned || 0);
       const sal = parseFloat(p.base_salary || 0);
@@ -6410,46 +6417,77 @@ async function loadPL() {
       const claim = parseFloat(p.claim_amount || 0);
       const ded = parseFloat(p.deductions || 0);
       const epf = parseFloat(p.epf_employee || 0);
-      const outlay = r2(comm + sal + bon + claim - ded - epf);
-      if (outlay === 0) return;
 
       const staff = staffMap[p.staff_id];
       const staffRec = allStaff.find(s => s.id === p.staff_id) || {};
-      const staffName = staffRec.name || 'Unknown';
+      const staffName = staffRec.name || p.staff_name || 'Unknown';
 
+      // 1. Manager → Manager Pool
       if (p.record_type === 'manager') {
-        addCost('Manager Pool', 'Manager Settlement', outlay);
-        addTooltipDetail('Manager Pool', 'Manager Settlement', staffName, outlay);
+        const outlay = r2(comm + sal + bon + claim - ded - epf);
+        if (outlay !== 0) {
+          addCost('Manager Pool', 'Manager Settlement', outlay);
+          addTooltipDetail('Manager Pool', 'Manager Settlement', staffName, outlay);
+        }
         return;
       }
+
+      // 2. Outsider payroll record
       if (p.commission_type === 'outsider') {
-        addCost('Outsider', 'Outsider Commission', outlay);
-        addTooltipDetail('Outsider', 'Outsider Commission', staffName, outlay);
+        // Commission part → Outsider (pass-through to staff)
+        if (comm !== 0) {
+          addCost('Outsider', 'Outsider Commission', comm);
+          addTooltipDetail('Outsider', 'Outsider Commission', staffName, comm);
+        }
+        // Salary part (e.g. Pei Qi base salary RM2700 - EPF) → NE-Shared
+        const salaryOut = r2(sal + bon - epf);
+        if (salaryOut !== 0) {
+          addCost('NE-Shared', 'Admin Salary', salaryOut);
+          addTooltipDetail('NE-Shared', 'Admin Salary', staffName, salaryOut);
+        }
+        // Claims → Outsider (incurred doing outsider work)
+        if (claim > 0) {
+          addCost('Outsider', 'Outsider Commission', claim);
+          addTooltipDetail('Outsider', 'Outsider Commission', staffName + ' (claim)', claim);
+        }
         return;
       }
+
       const team = staff?.company_team || 'New Era';
       const ch = (staff?.channel || 'DM').toUpperCase();
+
+      // 3 & 4. Sales staff (DM or TM)
+      if (staff?.staff_type === 'sales') {
+        const bucket = team === 'Alpha C' ? (ch === 'TM' ? 'AC-TM' : 'AC-DM') : (ch === 'TM' ? 'NE-TM' : 'NE-DM');
+        // commission_earned: deductions REDUCE commission cost (e.g. staff repay advance)
+        const netComm = r2(comm - ded);
+        if (netComm !== 0) { addCost(bucket, `Staff Commission (${ch})`, netComm); addTooltipDetail(bucket, `Staff Commission (${ch})`, staffName, netComm); }
+        if (bon !== 0) { addCost(bucket, 'Staff Bonus', bon); addTooltipDetail(bucket, 'Staff Bonus', staffName, bon); }
+        if (claim > 0) { addCost(bucket, 'Staff Claim', claim); addTooltipDetail(bucket, 'Staff Claim', staffName, claim); }
+        const salEpf = r2(sal - epf);
+        if (salEpf !== 0) { addCost(bucket, 'Staff Salary', salEpf); addTooltipDetail(bucket, 'Staff Salary', staffName, salEpf); }
+        return;
+      }
+
+      // 5. Shared admin (Ku Jia Wen)
       if (team === 'Shared') {
         const bankEntry = bankDirSplitMap[staff?.id];
         const nePct = bankEntry?.salary_split_ne != null ? bankEntry.salary_split_ne / 100 : 0.5;
         const acPct = 1 - nePct;
         const pos = (staff?.position || staff?.staff_type || '').toLowerCase();
         const roleLabel = pos.includes('editor') ? 'Editor Salary' : pos.includes('content') ? 'Content Creator Salary' : 'Admin Salary';
-        if (nePct > 0) { addCost('NE-Shared', roleLabel + ' (Shared)', r2(outlay * nePct)); addTooltipDetail('NE-Shared', roleLabel + ' (Shared)', staffName, r2(outlay * nePct)); }
-        if (acPct > 0) { addCost('AC-Shared', roleLabel + ' (Shared)', r2(outlay * acPct)); addTooltipDetail('AC-Shared', roleLabel + ' (Shared)', staffName, r2(outlay * acPct)); }
+        const outlay = r2(sal + bon + claim - ded - epf);
+        if (outlay !== 0) {
+          if (nePct > 0) { addCost('NE-Shared', roleLabel + ' (Shared)', r2(outlay * nePct)); addTooltipDetail('NE-Shared', roleLabel + ' (Shared)', staffName, r2(outlay * nePct)); }
+          if (acPct > 0) { addCost('AC-Shared', roleLabel + ' (Shared)', r2(outlay * acPct)); addTooltipDetail('AC-Shared', roleLabel + ' (Shared)', staffName, r2(outlay * acPct)); }
+        }
         return;
       }
-      if (staff?.staff_type === 'sales') {
-        // Sales staff: full commission_earned → their channel bucket (TM staff → TM, DM staff → DM)
-        // Note: Jess has TM+outsider orders but her payroll is under Manager Pool via manager record
-        // Pure outsider-only staff have commission_type='outsider' (handled above)
-        const bucket = team === 'Alpha C' ? (ch === 'TM' ? 'AC-TM' : 'AC-DM') : (ch === 'TM' ? 'NE-TM' : 'NE-DM');
-        if (comm > 0) { addCost(bucket, `Staff Commission (${ch})`, comm); addTooltipDetail(bucket, `Staff Commission (${ch})`, staffName, comm); }
-        if (claim > 0) { addCost(bucket, 'Staff Claim', claim); addTooltipDetail(bucket, 'Staff Claim', staffName, claim); }
-        const salOut = r2(sal + bon - ded - epf);
-        if (salOut > 0) { addCost(bucket, 'Staff Salary', salOut); addTooltipDetail(bucket, 'Staff Salary', salOut > 0 ? salOut : 0, staffName); }
-      } else {
-        const sharedBucket = team === 'Alpha C' ? 'AC-Shared' : 'NE-Shared';
+
+      // 6. Other admin (Samantha, etc.) → NE-Shared or AC-Shared
+      const sharedBucket = team === 'Alpha C' ? 'AC-Shared' : 'NE-Shared';
+      const outlay = r2(comm + sal + bon + claim - ded - epf);
+      if (outlay !== 0) {
         const pos = (staff?.position || staff?.staff_type || '').toLowerCase();
         const roleLabel = pos.includes('editor') ? 'Editor Salary' : pos.includes('content') ? 'Content Creator Salary' : 'Admin Salary';
         addCost(sharedBucket, roleLabel, outlay);
@@ -6543,16 +6581,16 @@ async function loadPL() {
     // Order: NE-DM, NE-TM, NE-Shared, AC-DM, AC-TM, AC-Shared, Outsider, Manager Pool
     const DISPLAY_ORDER = ['NE-DM','NE-TM','NE-Shared','AC-DM','AC-TM','AC-Shared','Outsider','Manager Pool'];
 
-    // Count orders per bucket (for "X units" display)
+    // Count orders per bucket using plAssignMap (same logic as revenue)
     const orderCountByBucket = {};
     for (const bd of breakdowns) {
       try {
         const orders = JSON.parse(bd.categories_json || '[]');
         orders.forEach(o => {
-          const t = o.team || 'New Era';
-          const ch = o.channel || 'DM';
-          let bk = t === 'Outsider' ? 'Outsider' : (t === 'Alpha C' ? 'AC' : 'NE') + '-' + ch;
-          if (!['NE-DM','NE-TM','AC-DM','AC-TM','Outsider'].includes(bk)) bk = 'NE-DM';
+          if (!o.order_no) return;
+          const assignKey = `${String(bd.proxy_id)}|${String(o.order_no)}`;
+          const assign = plAssignMap[assignKey];
+          const bk = assignToBucket(assign?.commission_algo, assign?.team, assign?.channel);
           orderCountByBucket[bk] = (orderCountByBucket[bk] || 0) + 1;
         });
       } catch(e) {}
