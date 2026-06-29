@@ -2005,7 +2005,7 @@
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Category</label>
-          <select id="ceCategory" class="form-input" onchange="handleCECategoryChange(this)">
+          <select id="ceCategory" class="form-input" onchange="handleCECategoryChange(this);ceSyncAmount()">
           </select>
         </div>
         <div class="form-group">
@@ -2018,7 +2018,7 @@
         </div>
         <div class="form-group">
           <label class="form-label">Company Team</label>
-          <select id="ceTeam" class="form-input">
+          <select id="ceTeam" class="form-input" onchange="ceSyncAmount()">
             <option value="">Shared (both teams)</option>
             <option value="New Era">New Era</option>
             <option value="Alpha C">Alpha C</option>
@@ -2031,14 +2031,27 @@
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Amount (RM)</label>
-          <input type="number" id="ceAmount" class="form-input" placeholder="0.00" step="0.01">
+          <label class="form-label">Total Amount (RM)</label>
+          <input type="number" id="ceAmount" class="form-input" placeholder="0.00" step="0.01" oninput="ceSyncAmount()">
         </div>
         <div class="form-group">
           <label class="form-label">Credit Card (optional)</label>
           <select id="ceCard" class="form-input">
             <option value="">— Not linked to a card —</option>
           </select>
+        </div>
+      </div>
+      <div id="ceNEACRow" style="display:none">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Optional: split between NE and AC (leave blank to use Company Team setting above)</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">🏢 New Era Amount (RM)</label>
+            <input type="number" id="ceAmountNE" class="form-input" placeholder="0.00" step="0.01" oninput="ceSyncAC()">
+          </div>
+          <div class="form-group">
+            <label class="form-label">🏢 Alpha C Amount (RM)</label>
+            <input type="number" id="ceAmountAC" class="form-input" placeholder="0.00" step="0.01" oninput="ceSyncNE()">
+          </div>
         </div>
       </div>
     </div>
@@ -6644,13 +6657,27 @@ async function loadPL() {
         addCost(b, 'Manychat', amt);
         addTooltipDetail(b, 'Manychat', txDesc, amt);
       } else if (cat === 'admin' || cat === 'rental' || cat === 'wifi' || cat === 'utilities' || cat === 'cleaning' || cat === 'team_building') {
-        const b = isAC ? 'AC-Shared' : 'NE-Shared';
-        addCost(b, label, amt);
-        addTooltipDetail(b, label, txDesc, amt);
+        // If amount_ne / amount_ac are set, use them for split; otherwise full to NE or AC
+        const neAmt = parseFloat(c.amount_ne ?? (isAC ? 0 : amt));
+        const acAmt = parseFloat(c.amount_ac ?? (isAC ? amt : 0));
+        if (neAmt > 0) { addCost('NE-Shared', label, neAmt); addTooltipDetail('NE-Shared', label, txDesc, neAmt); }
+        if (acAmt > 0) { addCost('AC-Shared', label, acAmt); addTooltipDetail('AC-Shared', label, txDesc, acAmt); }
+      } else if (cat === 'electric_bill' || cat === 'electricity') {
+        // Electric Bill → NE-Shared only (AC has separate meter / not shared)
+        addCost('NE-Shared', label, amt);
+        addTooltipDetail('NE-Shared', label, txDesc, amt);
       } else {
-        if (isAC) { addCost('AC-Shared', label, amt); addTooltipDetail('AC-Shared', label, txDesc, amt); }
-        else if (c.company_team === 'New Era') { addCost('NE-Shared', label, amt); addTooltipDetail('NE-Shared', label, txDesc, amt); }
-        else {
+        // Check amount_ne / amount_ac first
+        const neAmt2 = parseFloat(c.amount_ne ?? 0);
+        const acAmt2 = parseFloat(c.amount_ac ?? 0);
+        if (neAmt2 > 0 || acAmt2 > 0) {
+          if (neAmt2 > 0) { addCost('NE-Shared', label, neAmt2); addTooltipDetail('NE-Shared', label, txDesc, neAmt2); }
+          if (acAmt2 > 0) { addCost('AC-Shared', label, acAmt2); addTooltipDetail('AC-Shared', label, txDesc, acAmt2); }
+        } else if (isAC) { 
+          addCost('AC-Shared', label, amt); addTooltipDetail('AC-Shared', label, txDesc, amt);
+        } else if (c.company_team === 'New Era') { 
+          addCost('NE-Shared', label, amt); addTooltipDetail('NE-Shared', label, txDesc, amt);
+        } else {
           addCost('NE-Shared', label, r2(amt * 0.5)); addTooltipDetail('NE-Shared', label, txDesc, r2(amt * 0.5));
           addCost('AC-Shared', label, r2(amt * 0.5)); addTooltipDetail('AC-Shared', label, txDesc, r2(amt * 0.5));
         }
@@ -6878,7 +6905,30 @@ async function handleCECategoryChange(selectEl) {
   selectEl.dataset.prev = slug || prevValue;
 }
 
+// Show NE/AC split row for shared cost categories
+function ceSyncAmount() {
+  const total = parseFloat(document.getElementById('ceAmount').value) || 0;
+  const cat = document.getElementById('ceCategory').value;
+  const team = document.getElementById('ceTeam').value;
+  const showSplit = !team && (cat === 'admin' || cat === 'rental' || cat === 'wifi' || cat === 'utilities' || cat === 'office' || cat === 'other');
+  document.getElementById('ceNEACRow').style.display = showSplit ? 'block' : 'none';
+}
+function ceSyncAC() {
+  const total = parseFloat(document.getElementById('ceAmount').value) || 0;
+  const ne = parseFloat(document.getElementById('ceAmountNE').value) || 0;
+  const ac = total - ne;
+  if (ac >= 0) document.getElementById('ceAmountAC').value = ac.toFixed(2);
+}
+function ceSyncNE() {
+  const total = parseFloat(document.getElementById('ceAmount').value) || 0;
+  const ac = parseFloat(document.getElementById('ceAmountAC').value) || 0;
+  const ne = total - ac;
+  if (ne >= 0) document.getElementById('ceAmountNE').value = ne.toFixed(2);
+}
+
 async function saveCostEntry() {
+  const neAmt = parseFloat(document.getElementById('ceAmountNE')?.value) || null;
+  const acAmt = parseFloat(document.getElementById('ceAmountAC')?.value) || null;
   const body = {
     year: parseInt(document.getElementById('ceYear').value),
     month: parseInt(document.getElementById('ceMonth').value),
@@ -6888,6 +6938,8 @@ async function saveCostEntry() {
     description: document.getElementById('ceDesc').value,
     amount: parseFloat(document.getElementById('ceAmount').value),
     credit_card_id: document.getElementById('ceCard').value || null,
+    amount_ne: neAmt,
+    amount_ac: acAmt,
   };
   if (!body.amount) return showToast('Enter amount', 'error');
   try {
