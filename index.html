@@ -333,6 +333,8 @@
       <a class="nav-link" onclick="showPage('bankdir')">Bank Details</a>
       <a class="nav-link" onclick="showPage('export')">Export</a>
       <a class="nav-link" id="auditNavLink" onclick="showPage('audit')" style="display:none">Audit Log</a>
+      <a class="nav-link" onclick="showPage('simcards')">SIM Cards</a>
+      <a class="nav-link" onclick="showPage('simcards')">SIM Cards</a>
       <a class="nav-link" onclick="showPage('setup')">Setup</a>    </div>
     <div class="nav-user">
       <div class="user-chip" id="userChip" style="display:none">
@@ -1073,6 +1075,76 @@
   </div>
 
   <!-- ========== SETUP PAGE ========== -->
+  <!-- SIM CARDS PAGE -->
+  <div id="page-simcards" class="hidden">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <div>
+        <div class="page-title">📱 SIM Cards</div>
+        <div class="page-sub">Work phone SIM expiry tracker — auto-reminds 30 days before expiry</div>
+      </div>
+      <button class="btn btn-primary" onclick="openAddSimModal()">+ Add SIM Card</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
+      <div class="stat-card" style="border-left:3px solid var(--red)">
+        <div class="stat-label">⚠️ Expiring ≤ 30 days</div>
+        <div class="stat-value red" id="simExpiringSoon">—</div>
+      </div>
+      <div class="stat-card" style="border-left:3px solid var(--yellow)">
+        <div class="stat-label">🔔 Expiring 31–60 days</div>
+        <div class="stat-value" style="color:var(--yellow)" id="simExpiringMid">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total SIM Cards</div>
+        <div class="stat-value green" id="simTotal">—</div>
+      </div>
+    </div>
+    <div class="card" style="overflow-x:auto">
+      <table class="table">
+        <thead><tr>
+          <th>Phone</th><th>Number</th><th>Account</th><th>Staff</th>
+          <th>IC/Ref</th><th>Location</th><th>Expiry</th><th>Days Left</th><th>Status</th><th>Actions</th>
+        </tr></thead>
+        <tbody id="simTableBody"><tr><td colspan="10" style="text-align:center;padding:40px;color:var(--muted)">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Add/Edit SIM Modal -->
+  <div class="modal-backdrop" id="modalSimCard" style="display:none">
+    <div class="modal" style="max-width:500px">
+      <div class="modal-title" id="simModalTitle">Add SIM Card</div>
+      <input type="hidden" id="simEditId">
+      <div class="form-grid">
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Phone Model</label><input type="text" id="simPhone" class="form-input" placeholder="e.g. iPhone 7 Black"></div>
+          <div class="form-group"><label class="form-label">Number</label><input type="text" id="simNumber" class="form-input" placeholder="60 11-5873 5435"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Account Holder</label><input type="text" id="simHolder" class="form-input" placeholder="e.g. Jie Ru"></div>
+          <div class="form-group"><label class="form-label">Assigned Staff</label><input type="text" id="simStaff" class="form-input" placeholder="e.g. Jie Ru"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">IC / Reference</label><input type="text" id="simIC" class="form-input" placeholder="e.g. Goy Kah Li"></div>
+          <div class="form-group"><label class="form-label">SIM Location</label>
+            <select id="simLocation" class="form-input">
+              <option>Inside Phone</option><option>Office</option><option>Other</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Expiry Date (MM/YYYY)</label>
+          <input type="month" id="simExpiry" class="form-input">
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">System reminds you 30 days before expiry</div>
+        </div>
+        <div class="form-group"><label class="form-label">Notes</label><input type="text" id="simNotes" class="form-input" placeholder="Optional"></div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-ghost" onclick="closeModal('modalSimCard')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveSimCard()">Save</button>
+      </div>
+    </div>
+  </div>
+
   <div id="page-setup" class="hidden">
     <div class="page-header">
       <div>
@@ -2362,6 +2434,7 @@ function initUserUI() {
   // Show audit log only for owner
   if (currentUser.role === 'owner') {
     document.getElementById('auditNavLink').style.display = 'inline-flex';
+    checkSimCardAlerts();
   }
   // Check for credit cards due soon/overdue — slight delay so this doesn't
   // block the initial page render, and so it appears on top once the
@@ -2500,6 +2573,7 @@ function showPage(page) {
   if (page === 'audit') loadAuditLog();
   if (page === 'breakdown') loadBreakdown();
   if (page === 'setup') loadSetup();
+  if (page === 'simcards') loadSimCards();
   if (page === 'directory') loadDirectory();
   if (page === 'bankdir') loadBankDirectory();
 }
@@ -9417,6 +9491,136 @@ window.addEventListener('DOMContentLoaded', () => {
   }
   // Login screen is visible by default, no need to show it
 });
+
+// ── SIM CARDS ─────────────────────────────────────────────────
+async function loadSimCards() {
+  const sims = await sb('nec_sim_cards', { select: '*' }).catch(() => []);
+  const today = new Date(); today.setHours(0,0,0,0);
+  let soon = 0, mid = 0;
+
+  const rows = sims.map(s => {
+    const exp = s.expiry_date ? new Date(s.expiry_date + '-01') : null;
+    // Set to last day of that month
+    if (exp) exp.setMonth(exp.getMonth() + 1, 0);
+    const diff = exp ? Math.ceil((exp - today) / 86400000) : null;
+    if (diff !== null && diff <= 30) soon++;
+    else if (diff !== null && diff <= 60) mid++;
+
+    const statusColor = diff === null ? 'var(--muted)' :
+      diff <= 0 ? 'var(--red)' : diff <= 30 ? 'var(--red)' : diff <= 60 ? 'var(--yellow)' : 'var(--green)';
+    const statusText = diff === null ? '—' :
+      diff <= 0 ? '🔴 EXPIRED' : diff <= 30 ? `🔴 ${diff}d left — RENEW NOW` :
+      diff <= 60 ? `🟡 ${diff}d left` : `🟢 ${diff}d left`;
+    const rowBg = diff !== null && diff <= 30 ? 'background:rgba(239,68,68,0.08)' :
+      diff !== null && diff <= 60 ? 'background:rgba(245,158,11,0.08)' : '';
+
+    return `<tr style="${rowBg}">
+      <td>${s.phone_model || '—'}</td>
+      <td style="font-family:var(--mono)">${s.phone_number || '—'}</td>
+      <td>${s.account_holder || '—'}</td>
+      <td>${s.assigned_staff || '—'}</td>
+      <td style="font-size:12px;color:var(--muted)">${s.ic_reference || '—'}</td>
+      <td>${s.sim_location || '—'}</td>
+      <td style="font-family:var(--mono)">${s.expiry_date ? s.expiry_date.slice(0,7).replace('-','/') : '—'}</td>
+      <td style="text-align:center;font-weight:600;color:${statusColor}">${diff !== null ? diff : '—'}</td>
+      <td style="font-size:12px;color:${statusColor}">${statusText}</td>
+      <td>
+        <button class="btn btn-ghost btn-sm" onclick="openEditSimModal('${s.id}')">✎ Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteSimCard('${s.id}')">✕</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('simTableBody').innerHTML = rows || '<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--muted)">No SIM cards added yet. Click "+ Add SIM Card" to start.</td></tr>';
+  document.getElementById('simExpiringSoon').textContent = soon;
+  document.getElementById('simExpiringMid').textContent = mid;
+  document.getElementById('simTotal').textContent = sims.length;
+
+  // Show popup alert if any expiring soon
+  if (soon > 0 && document.getElementById('page-simcards').style.display !== 'none') {
+    showToast(`⚠️ ${soon} SIM card(s) expiring within 30 days!`, 'error', 5000);
+  }
+}
+
+let simCards = [];
+async function openAddSimModal() {
+  document.getElementById('simModalTitle').textContent = 'Add SIM Card';
+  document.getElementById('simEditId').value = '';
+  ['simPhone','simNumber','simHolder','simStaff','simIC','simNotes'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('simExpiry').value = '';
+  document.getElementById('simLocation').value = 'Inside Phone';
+  openModal('modalSimCard');
+}
+
+async function openEditSimModal(id) {
+  const rows = await sb('nec_sim_cards', { filter: `id=eq.${id}` });
+  if (!rows?.length) return;
+  const s = rows[0];
+  document.getElementById('simModalTitle').textContent = 'Edit SIM Card';
+  document.getElementById('simEditId').value = s.id;
+  document.getElementById('simPhone').value = s.phone_model || '';
+  document.getElementById('simNumber').value = s.phone_number || '';
+  document.getElementById('simHolder').value = s.account_holder || '';
+  document.getElementById('simStaff').value = s.assigned_staff || '';
+  document.getElementById('simIC').value = s.ic_reference || '';
+  document.getElementById('simLocation').value = s.sim_location || 'Inside Phone';
+  document.getElementById('simExpiry').value = s.expiry_date ? s.expiry_date.slice(0,7) : '';
+  document.getElementById('simNotes').value = s.notes || '';
+  openModal('modalSimCard');
+}
+
+async function saveSimCard() {
+  const expiry = document.getElementById('simExpiry').value; // YYYY-MM
+  const body = {
+    phone_model: document.getElementById('simPhone').value,
+    phone_number: document.getElementById('simNumber').value,
+    account_holder: document.getElementById('simHolder').value,
+    assigned_staff: document.getElementById('simStaff').value,
+    ic_reference: document.getElementById('simIC').value,
+    sim_location: document.getElementById('simLocation').value,
+    expiry_date: expiry ? expiry + '-01' : null,
+    notes: document.getElementById('simNotes').value,
+  };
+  if (!body.phone_number) return showToast('Enter phone number', 'error');
+  if (!body.expiry_date) return showToast('Enter expiry date', 'error');
+  const editId = document.getElementById('simEditId').value;
+  try {
+    if (editId) {
+      await sb('nec_sim_cards', { method: 'PATCH', filter: `id=eq.${editId}`, body });
+      showToast('SIM card updated');
+    } else {
+      await sb('nec_sim_cards', { method: 'POST', body });
+      showToast('SIM card added');
+    }
+    closeModal('modalSimCard');
+    loadSimCards();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteSimCard(id) {
+  if (!confirm('Delete this SIM card record?')) return;
+  await sbDelete('nec_sim_cards', `id=eq.${id}`);
+  showToast('Deleted');
+  loadSimCards();
+}
+
+// Check for expiring SIMs on login
+async function checkSimCardAlerts() {
+  try {
+    const sims = await sb('nec_sim_cards', { select: 'phone_number,assigned_staff,expiry_date' });
+    const today = new Date(); today.setHours(0,0,0,0);
+    const expiringSoon = sims.filter(s => {
+      if (!s.expiry_date) return false;
+      const exp = new Date(s.expiry_date); exp.setMonth(exp.getMonth() + 1, 0);
+      const diff = Math.ceil((exp - today) / 86400000);
+      return diff >= 0 && diff <= 30;
+    });
+    if (expiringSoon.length > 0) {
+      setTimeout(() => showToast(`📱 ${expiringSoon.length} SIM card(s) expiring in ≤30 days! Go to SIM Cards tab.`, 'error', 8000), 2000);
+    }
+  } catch(e) {}
+}
+
 </script>
 </body>
 </html>
