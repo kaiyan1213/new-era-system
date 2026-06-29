@@ -5080,7 +5080,23 @@ async function generateStaffPayslip(idx) {
   win.document.write(`<html><head><title>Calculation - ${staff.name} - ${MONTHS[month]} ${year}</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>body{margin:24px;background:#f5f5f5}@media print{body{margin:0;background:#fff}}</style></head>
-    <body>${calcHtml}<br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
+    <body>${calcHtml}<br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button>
+  <!-- SIM Card Expiry Alert Modal -->
+  <div class="modal-backdrop" id="modalSimAlert" style="display:none">
+    <div class="modal" style="max-width:480px">
+      <div style="text-align:center;margin-bottom:16px">
+        <div style="font-size:40px;margin-bottom:8px">📱⚠️</div>
+        <div class="modal-title" style="color:var(--red)">SIM Card Expiry Alert</div>
+        <div style="font-size:13px;color:var(--muted)">The following SIM cards need to be renewed soon</div>
+      </div>
+      <div id="simAlertList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;max-height:300px;overflow-y:auto"></div>
+      <div style="display:flex;gap:8px;justify-content:center">
+        <button class="btn btn-ghost" onclick="closeModal('modalSimAlert')">Dismiss</button>
+        <button class="btn btn-primary" onclick="closeModal('modalSimAlert');showPage('simcards')">Go to SIM Cards →</button>
+      </div>
+    </div>
+  </div>
+</body></html>`);
 }
 
 // Pulls out the two earning categories (Com, Claim) and the deduction
@@ -5345,7 +5361,23 @@ function generatePayrollCalculation(recordId) {
   win.document.write(`<html><head><title>Calculation - ${staff.name} - ${MONTHS[r.month]} ${r.year}</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>body{margin:24px;background:#f5f5f5}@media print{body{margin:0;background:#fff}}</style></head>
-    <body>${html}<button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
+    <body>${html}<button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button>
+  <!-- SIM Card Expiry Alert Modal -->
+  <div class="modal-backdrop" id="modalSimAlert" style="display:none">
+    <div class="modal" style="max-width:480px">
+      <div style="text-align:center;margin-bottom:16px">
+        <div style="font-size:40px;margin-bottom:8px">📱⚠️</div>
+        <div class="modal-title" style="color:var(--red)">SIM Card Expiry Alert</div>
+        <div style="font-size:13px;color:var(--muted)">The following SIM cards need to be renewed soon</div>
+      </div>
+      <div id="simAlertList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;max-height:300px;overflow-y:auto"></div>
+      <div style="display:flex;gap:8px;justify-content:center">
+        <button class="btn btn-ghost" onclick="closeModal('modalSimAlert')">Dismiss</button>
+        <button class="btn btn-primary" onclick="closeModal('modalSimAlert');showPage('simcards')">Go to SIM Cards →</button>
+      </div>
+    </div>
+  </div>
+</body></html>`);
 }
 
 function generatePayrollRecordPayslip(recordId) {
@@ -5366,7 +5398,23 @@ function generatePayrollRecordPayslip(recordId) {
     <style>body{margin:40px;background:#f5f5f5;font-family:Inter,sans-serif}
     ${INVOICE_PRINT_STYLE}
     @media print{body{margin:0;background:#fff}.invoice-preview{box-shadow:none}}
-    </style></head><body>${html}<br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button></body></html>`);
+    </style></head><body>${html}<br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button>
+  <!-- SIM Card Expiry Alert Modal -->
+  <div class="modal-backdrop" id="modalSimAlert" style="display:none">
+    <div class="modal" style="max-width:480px">
+      <div style="text-align:center;margin-bottom:16px">
+        <div style="font-size:40px;margin-bottom:8px">📱⚠️</div>
+        <div class="modal-title" style="color:var(--red)">SIM Card Expiry Alert</div>
+        <div style="font-size:13px;color:var(--muted)">The following SIM cards need to be renewed soon</div>
+      </div>
+      <div id="simAlertList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;max-height:300px;overflow-y:auto"></div>
+      <div style="display:flex;gap:8px;justify-content:center">
+        <button class="btn btn-ghost" onclick="closeModal('modalSimAlert')">Dismiss</button>
+        <button class="btn btn-primary" onclick="closeModal('modalSimAlert');showPage('simcards')">Go to SIM Cards →</button>
+      </div>
+    </div>
+  </div>
+</body></html>`);
 }
 
 async function openPayrollEntryModal() {
@@ -9603,23 +9651,60 @@ async function deleteSimCard(id) {
   loadSimCards();
 }
 
-// Check for expiring SIMs on login
+// Check for expiring SIMs on login — show popup modal
 async function checkSimCardAlerts() {
   try {
-    const sims = await sb('nec_sim_cards', { select: 'phone_number,assigned_staff,expiry_date' });
+    const sims = await sb('nec_sim_cards', { select: 'phone_model,phone_number,assigned_staff,expiry_date' });
     const today = new Date(); today.setHours(0,0,0,0);
-    const expiringSoon = sims.filter(s => {
-      if (!s.expiry_date) return false;
-      const exp = new Date(s.expiry_date); exp.setMonth(exp.getMonth() + 1, 0);
-      const diff = Math.ceil((exp - today) / 86400000);
-      return diff >= 0 && diff <= 30;
-    });
-    if (expiringSoon.length > 0) {
-      setTimeout(() => showToast(`📱 ${expiringSoon.length} SIM card(s) expiring in ≤30 days! Go to SIM Cards tab.`, 'error', 8000), 2000);
-    }
+    // Show alert for SIMs expiring within next month (≤31 days)
+    const expiring = sims
+      .map(s => {
+        if (!s.expiry_date) return null;
+        const exp = new Date(s.expiry_date); exp.setMonth(exp.getMonth() + 1, 0);
+        const diff = Math.ceil((exp - today) / 86400000);
+        return { ...s, diff, exp };
+      })
+      .filter(s => s && s.diff >= 0 && s.diff <= 31)
+      .sort((a, b) => a.diff - b.diff);
+
+    if (expiring.length === 0) return;
+
+    const listEl = document.getElementById('simAlertList');
+    if (!listEl) return;
+    listEl.innerHTML = expiring.map(s => `
+      <div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:12px;display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-weight:600;font-size:14px">${s.phone_model || s.phone_number}</div>
+          <div style="font-size:12px;color:var(--muted);font-family:var(--mono)">${s.phone_number}</div>
+          <div style="font-size:12px;color:var(--muted)">Assigned: ${s.assigned_staff || '—'}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="color:var(--red);font-weight:700;font-size:16px">${s.diff === 0 ? 'TODAY' : s.diff + 'd left'}</div>
+          <div style="font-size:11px;color:var(--muted)">Expires ${s.exp.toLocaleDateString('en-MY', {month:'short',year:'numeric'})}</div>
+        </div>
+      </div>
+    `).join('');
+
+    setTimeout(() => openModal('modalSimAlert'), 1500);
   } catch(e) {}
 }
 
 </script>
+
+  <!-- SIM Card Expiry Alert Modal -->
+  <div class="modal-backdrop" id="modalSimAlert" style="display:none">
+    <div class="modal" style="max-width:480px">
+      <div style="text-align:center;margin-bottom:16px">
+        <div style="font-size:40px;margin-bottom:8px">📱⚠️</div>
+        <div class="modal-title" style="color:var(--red)">SIM Card Expiry Alert</div>
+        <div style="font-size:13px;color:var(--muted)">The following SIM cards need to be renewed soon</div>
+      </div>
+      <div id="simAlertList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;max-height:300px;overflow-y:auto"></div>
+      <div style="display:flex;gap:8px;justify-content:center">
+        <button class="btn btn-ghost" onclick="closeModal('modalSimAlert')">Dismiss</button>
+        <button class="btn btn-primary" onclick="closeModal('modalSimAlert');showPage('simcards')">Go to SIM Cards →</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
