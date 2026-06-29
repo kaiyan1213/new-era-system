@@ -1138,7 +1138,7 @@
         <div class="form-group"><label class="form-label">Notes</label><input type="text" id="simNotes" class="form-input" placeholder="Optional"></div>
       </div>
       <div class="form-actions">
-        <button class="btn btn-ghost" onclick="closeModal('modalSimCard')">Cancel</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('modalSimCard').style.display='none'">Cancel</button>
         <button class="btn btn-primary" onclick="saveSimCard()">Save</button>
       </div>
     </div>
@@ -5091,7 +5091,7 @@ async function generateStaffPayslip(idx) {
       </div>
       <div id="simAlertList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;max-height:300px;overflow-y:auto"></div>
       <div style="display:flex;gap:8px;justify-content:center">
-        <button class="btn btn-ghost" onclick="closeModal('modalSimAlert')">Dismiss</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('modalSimAlert').style.display='none'">Dismiss</button>
         <button class="btn btn-primary" onclick="closeModal('modalSimAlert');showPage('simcards')">Go to SIM Cards →</button>
       </div>
     </div>
@@ -5372,7 +5372,7 @@ function generatePayrollCalculation(recordId) {
       </div>
       <div id="simAlertList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;max-height:300px;overflow-y:auto"></div>
       <div style="display:flex;gap:8px;justify-content:center">
-        <button class="btn btn-ghost" onclick="closeModal('modalSimAlert')">Dismiss</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('modalSimAlert').style.display='none'">Dismiss</button>
         <button class="btn btn-primary" onclick="closeModal('modalSimAlert');showPage('simcards')">Go to SIM Cards →</button>
       </div>
     </div>
@@ -5409,7 +5409,7 @@ function generatePayrollRecordPayslip(recordId) {
       </div>
       <div id="simAlertList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;max-height:300px;overflow-y:auto"></div>
       <div style="display:flex;gap:8px;justify-content:center">
-        <button class="btn btn-ghost" onclick="closeModal('modalSimAlert')">Dismiss</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('modalSimAlert').style.display='none'">Dismiss</button>
         <button class="btn btn-primary" onclick="closeModal('modalSimAlert');showPage('simcards')">Go to SIM Cards →</button>
       </div>
     </div>
@@ -9540,15 +9540,33 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── SIM CARDS ─────────────────────────────────────────────────
+// Parse date string safely (avoid Safari NaN with new Date('YYYY-MM-DD'))
+function parseSimDate(dateStr) {
+  if (!dateStr) return null;
+  const parts = dateStr.split('-');
+  if (parts.length < 2) return null;
+  const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2] || 1));
+  return isNaN(d.getTime()) ? null : d;
+}
+
 async function loadSimCards() {
   const sims = await sb('nec_sim_cards', { select: '*' }).catch(() => []);
   const today = new Date(); today.setHours(0,0,0,0);
   let soon = 0, mid = 0;
 
-  const rows = sims.map(s => {
-    const exp = s.expiry_date ? new Date(s.expiry_date + '-01') : null;
-    // Set to last day of that month
-    if (exp) exp.setMonth(exp.getMonth() + 1, 0);
+  // Sort by days left ascending (soonest expiry first)
+  const sorted = [...sims].sort((a, b) => {
+    const da = parseSimDate(a.expiry_date), db = parseSimDate(b.expiry_date);
+    if (!da && !db) return 0;
+    if (!da) return 1;
+    if (!db) return -1;
+    return da - db;
+  });
+
+  const rows = sorted.map(s => {
+    const exp = parseSimDate(s.expiry_date);
+    // Use last day of that month
+    if (exp) exp.setDate(new Date(exp.getFullYear(), exp.getMonth() + 1, 0).getDate());
     const diff = exp ? Math.ceil((exp - today) / 86400000) : null;
     if (diff !== null && diff <= 30) soon++;
     else if (diff !== null && diff <= 60) mid++;
@@ -9556,64 +9574,61 @@ async function loadSimCards() {
     const statusColor = diff === null ? 'var(--muted)' :
       diff <= 0 ? 'var(--red)' : diff <= 30 ? 'var(--red)' : diff <= 60 ? 'var(--yellow)' : 'var(--green)';
     const statusText = diff === null ? '—' :
-      diff <= 0 ? '🔴 EXPIRED' : diff <= 30 ? `🔴 ${diff}d left — RENEW NOW` :
+      diff <= 0 ? '🔴 EXPIRED' : diff <= 30 ? `🔴 ${diff}d — RENEW NOW` :
       diff <= 60 ? `🟡 ${diff}d left` : `🟢 ${diff}d left`;
     const rowBg = diff !== null && diff <= 30 ? 'background:rgba(239,68,68,0.08)' :
-      diff !== null && diff <= 60 ? 'background:rgba(245,158,11,0.08)' : '';
+      diff !== null && diff <= 60 ? 'background:rgba(245,158,11,0.06)' : '';
+    const expiryDisplay = s.expiry_date ? s.expiry_date.slice(0,7).replace('-','/') : '—';
 
     return `<tr style="${rowBg}">
       <td>${s.phone_model || '—'}</td>
-      <td style="font-family:var(--mono)">${s.phone_number || '—'}</td>
+      <td style="font-family:var(--mono);font-size:13px">${s.phone_number || '—'}</td>
       <td>${s.account_holder || '—'}</td>
       <td>${s.assigned_staff || '—'}</td>
       <td style="font-size:12px;color:var(--muted)">${s.ic_reference || '—'}</td>
       <td>${s.sim_location || '—'}</td>
-      <td style="font-family:var(--mono)">${s.expiry_date ? s.expiry_date.slice(0,7).replace('-','/') : '—'}</td>
-      <td style="text-align:center;font-weight:600;color:${statusColor}">${diff !== null ? diff : '—'}</td>
-      <td style="font-size:12px;color:${statusColor}">${statusText}</td>
-      <td>
-        <button class="btn btn-ghost btn-sm" onclick="openEditSimModal('${s.id}')">✎ Edit</button>
+      <td style="font-family:var(--mono)">${expiryDisplay}</td>
+      <td style="text-align:center;font-weight:700;font-size:15px;color:${statusColor}">${diff !== null ? diff : '—'}</td>
+      <td style="font-size:12px;font-weight:600;color:${statusColor}">${statusText}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" style="margin-right:4px" onclick="openEditSimModal('${s.id}')">✎</button>
         <button class="btn btn-danger btn-sm" onclick="deleteSimCard('${s.id}')">✕</button>
       </td>
     </tr>`;
   }).join('');
 
-  document.getElementById('simTableBody').innerHTML = rows || '<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--muted)">No SIM cards added yet. Click "+ Add SIM Card" to start.</td></tr>';
+  document.getElementById('simTableBody').innerHTML = rows || '<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--muted)">No SIM cards added yet.</td></tr>';
   document.getElementById('simExpiringSoon').textContent = soon;
   document.getElementById('simExpiringMid').textContent = mid;
   document.getElementById('simTotal').textContent = sims.length;
-
-  // Show popup alert if any expiring soon
-  if (soon > 0 && document.getElementById('page-simcards').style.display !== 'none') {
-    showToast(`⚠️ ${soon} SIM card(s) expiring within 30 days!`, 'error', 5000);
-  }
 }
 
-let simCards = [];
 async function openAddSimModal() {
   document.getElementById('simModalTitle').textContent = 'Add SIM Card';
   document.getElementById('simEditId').value = '';
-  ['simPhone','simNumber','simHolder','simStaff','simIC','simNotes'].forEach(id => document.getElementById(id).value = '');
-  document.getElementById('simExpiry').value = '';
-  document.getElementById('simLocation').value = 'Inside Phone';
-  openModal('modalSimCard');
+  ['simPhone','simNumber','simHolder','simStaff','simIC','simNotes'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+  const expEl = document.getElementById('simExpiry'); if(expEl) expEl.value = '';
+  const locEl = document.getElementById('simLocation'); if(locEl) locEl.value = 'Inside Phone';
+  document.getElementById('modalSimCard').style.display = 'flex';
 }
 
 async function openEditSimModal(id) {
-  const rows = await sb('nec_sim_cards', { filter: `id=eq.${id}` });
-  if (!rows?.length) return;
-  const s = rows[0];
-  document.getElementById('simModalTitle').textContent = 'Edit SIM Card';
-  document.getElementById('simEditId').value = s.id;
-  document.getElementById('simPhone').value = s.phone_model || '';
-  document.getElementById('simNumber').value = s.phone_number || '';
-  document.getElementById('simHolder').value = s.account_holder || '';
-  document.getElementById('simStaff').value = s.assigned_staff || '';
-  document.getElementById('simIC').value = s.ic_reference || '';
-  document.getElementById('simLocation').value = s.sim_location || 'Inside Phone';
-  document.getElementById('simExpiry').value = s.expiry_date ? s.expiry_date.slice(0,7) : '';
-  document.getElementById('simNotes').value = s.notes || '';
-  openModal('modalSimCard');
+  try {
+    const rows = await sb('nec_sim_cards', { filter: `id=eq.${id}`, select: '*' });
+    if (!rows?.length) return showToast('Could not load record', 'error');
+    const s = rows[0];
+    document.getElementById('simModalTitle').textContent = 'Edit SIM Card';
+    document.getElementById('simEditId').value = s.id;
+    document.getElementById('simPhone').value = s.phone_model || '';
+    document.getElementById('simNumber').value = s.phone_number || '';
+    document.getElementById('simHolder').value = s.account_holder || '';
+    document.getElementById('simStaff').value = s.assigned_staff || '';
+    document.getElementById('simIC').value = s.ic_reference || '';
+    document.getElementById('simLocation').value = s.sim_location || 'Inside Phone';
+    document.getElementById('simExpiry').value = s.expiry_date ? s.expiry_date.slice(0,7) : '';
+    document.getElementById('simNotes').value = s.notes || '';
+    document.getElementById('modalSimCard').style.display = 'flex';
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
 async function saveSimCard() {
@@ -9685,7 +9700,7 @@ async function checkSimCardAlerts() {
       </div>
     `).join('');
 
-    setTimeout(() => openModal('modalSimAlert'), 1500);
+    setTimeout(() => { document.getElementById('modalSimAlert').style.display='flex'; }, 1500);
   } catch(e) {}
 }
 
@@ -9701,7 +9716,7 @@ async function checkSimCardAlerts() {
       </div>
       <div id="simAlertList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;max-height:300px;overflow-y:auto"></div>
       <div style="display:flex;gap:8px;justify-content:center">
-        <button class="btn btn-ghost" onclick="closeModal('modalSimAlert')">Dismiss</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('modalSimAlert').style.display='none'">Dismiss</button>
         <button class="btn btn-primary" onclick="closeModal('modalSimAlert');showPage('simcards')">Go to SIM Cards →</button>
       </div>
     </div>
