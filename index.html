@@ -9632,7 +9632,19 @@ async function openEditSimModal(id) {
 }
 
 async function saveSimCard() {
-  const expiry = document.getElementById('simExpiry').value; // YYYY-MM
+  let expiry = document.getElementById('simExpiry').value; // YYYY-MM ideally
+  // Normalize: accept both YYYY-MM and MM/YYYY formats
+  if (expiry) {
+    expiry = expiry.trim();
+    if (/^\d{2}\/\d{4}$/.test(expiry)) {
+      // MM/YYYY → YYYY-MM
+      const [mm, yyyy] = expiry.split('/');
+      expiry = `${yyyy}-${mm}`;
+    } else if (/^\d{1,2}\/\d{4}$/.test(expiry)) {
+      const [mm, yyyy] = expiry.split('/');
+      expiry = `${yyyy}-${mm.padStart(2,'0')}`;
+    }
+  }
   const body = {
     phone_model: document.getElementById('simPhone').value,
     phone_number: document.getElementById('simNumber').value,
