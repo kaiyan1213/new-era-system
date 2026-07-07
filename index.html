@@ -1013,6 +1013,7 @@
         <thead>
           <tr>
             <th>Card</th>
+            <th>Team</th>
             <th>Statement Amount</th>
             <th>Payment Amount</th>
             <th>Balance</th>
@@ -1023,7 +1024,7 @@
           </tr>
         </thead>
         <tbody id="cctTableBody">
-          <tr><td colspan="8"><div class="empty"><div class="empty-icon">💳</div><div class="empty-text">Loading cards...</div></div></td></tr>
+          <tr><td colspan="9"><div class="empty"><div class="empty-icon">💳</div><div class="empty-text">Loading cards...</div></div></td></tr>
         </tbody>
         <tfoot id="cctTableFoot"></tfoot>
       </table>
@@ -2706,7 +2707,7 @@ async function loadInvoices() {
     tbody.innerHTML = html;
   } catch(e) {
     console.error(e);
-    document.getElementById('invoiceTableBody').innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading data. Check Setup tab to create tables first.</div></div></td></tr>`;
+    document.getElementById('invoiceTableBody').innerHTML = `<tr><td colspan="9"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading data. Check Setup tab to create tables first.</div></div></td></tr>`;
     document.getElementById('setupBanner').style.display = 'flex';
   }
 }
@@ -7523,7 +7524,7 @@ async function loadCCTracker() {
     ccStatements = await sb('nec_cc_statements', { filter: `year=eq.${year}&month=eq.${month}` });
     renderCCTracker();
   } catch(e) {
-    document.getElementById('cctTableBody').innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Tables not set up. Go to Setup tab.</div></div></td></tr>`;
+    document.getElementById('cctTableBody').innerHTML = `<tr><td colspan="9"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Tables not set up. Go to Setup tab.</div></div></td></tr>`;
   }
 }
 
@@ -7543,7 +7544,7 @@ function renderCCTracker() {
   const month = parseInt(document.getElementById('cctMonth').value);
   const tbody = document.getElementById('cctTableBody');
   if (!ccCards.length) {
-    tbody.innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-icon">💳</div><div class="empty-text">No cards yet. Click "+ Add Card" above.</div></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9"><div class="empty"><div class="empty-icon">💳</div><div class="empty-text">No cards yet. Click "+ Add Card" above.</div></div></td></tr>`;
     document.getElementById('cctTableFoot').innerHTML = '';
     return;
   }
