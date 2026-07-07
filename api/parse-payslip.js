@@ -501,7 +501,7 @@ function parseCowayPayslip(text) {
   }
 
   // ── 4. Build new orders detail ──────────────────────────────
-  const DIVISIBLE_ALLOWANCE_TYPES = ['special ws', 'hp new pi'];
+  const DIVISIBLE_ALLOWANCE_TYPES = ['special ws', 'hp new pi', 'monthly hp multiplier', 'hp multiplier'];
   const allowanceTotal = r2(allowances.reduce((s,a) => s + a.amount, 0));
   const divisibleAllowanceTotal = allowances
     .filter(a => DIVISIBLE_ALLOWANCE_TYPES.some(t => (a.description || '').toLowerCase().includes(t)))
