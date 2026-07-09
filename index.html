@@ -2174,7 +2174,7 @@
         <div style="font-size:13px;color:var(--muted)">
           <span id="ccCount">0</span> transactions found — Total: <span id="ccTotal" style="color:var(--accent);font-weight:700">RM 0.00</span>
           <span id="ccBalanceWrap" class="hidden" style="margin-left:10px">· Statement Balance (per bank): <span id="ccBalance" style="color:var(--text);font-weight:700">RM 0.00</span></span>
-          <span id="ccPrevBalWrap" class="hidden" style="display:block;margin-top:4px;font-size:12px;color:var(--muted)">Previous Balance: <span id="ccPrevBal">RM 0.00</span> + New Charges: <span id="ccNewCharges">RM 0.00</span></span>
+          <span id="ccPrevBalWrap" class="hidden" style="display:block;margin-top:4px;font-size:12px;color:var(--muted)">Previous Balance: <span id="ccPrevBal">RM 0.00</span> + New Charges: <span id="ccNewCharges">RM 0.00</span><span id="ccPayments"></span> = Statement Balance</span>
         </div>
         <div style="display:flex;gap:8px;align-items:center">
           <span style="font-size:11px;color:var(--muted)">Set all:</span>
@@ -7299,6 +7299,12 @@ async function processCCFile(file) {
         prevWrap.style.display = 'block';
         document.getElementById('ccPrevBal').textContent = `RM ${fmtNum(prevBal)}`;
         document.getElementById('ccNewCharges').textContent = `RM ${fmtNum(data.total || 0)}`;
+        // Calculate payments = prev + charges - statement balance
+        const payments = r2(prevBal + (data.total || 0) - (data.statement_balance || 0));
+        const pmtEl = document.getElementById('ccPayments');
+        if (pmtEl) {
+          pmtEl.textContent = payments > 0 ? ` − Payments: RM ${fmtNum(payments)}` : '';
+        }
       }
     }
     if (stmtBal !== null) {
