@@ -6490,7 +6490,7 @@ async function loadPL() {
     if (!ccCards.length) ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true', select: 'id,card_name,bank,owner_team,gift_team,ads_team' }).catch(() => []);
     const breakdowns = await sb('nec_payslip_breakdown', { filter: invFilter, select: 'proxy_id,year,month,categories_json' });
     // Fetch order assignments + staff to correctly bucket Outsider/TM orders
-    const plAssignments = await sb('nec_order_assignments', { filter: invFilter, select: 'proxy_id,order_no,commission_algo,staff_id,staff_name' }).catch(() => []);
+    const plAssignments = await sb('nec_order_assignments', { filter: invFilter, select: 'proxy_id,order_no,commission_algo,staff_id,staff_name,team' }).catch(() => []);
     console.log('[PL] assignments fetched:', plAssignments.length, 'filter:', invFilter);
     const outsiderAssigns = plAssignments.filter(a => a.commission_algo === 'outsider');
     console.log('[PL] outsider assigns:', outsiderAssigns.length, outsiderAssigns.slice(0,3));
@@ -6512,12 +6512,18 @@ async function loadPL() {
     }
 
     // Build assignment map: proxy_id|order_no -> {commission_algo, team, channel, staff_id, staff_name}
+    // team resolution: the order's OWN team (a.team, set explicitly via the
+    // Team buttons in Bulk Upload/Breakdown — this is the admin's actual
+    // classification for THIS order) takes priority. Only fall back to the
+    // assigned staff's company_team for legacy rows saved before the `team`
+    // column existed (a.team IS NULL) — reassigning an order to a different
+    // staff member later must not silently change which team it belongs to.
     const plAssignMap = {};
     plAssignments.forEach(a => {
       const staff = plStaffMap[a.staff_id] || {};
       plAssignMap[`${String(a.proxy_id)}|${String(a.order_no)}`] = {
         commission_algo: a.commission_algo,
-        team: staff.company_team || 'New Era',
+        team: a.team || staff.company_team || 'New Era',
         channel: (staff.channel || 'DM').toUpperCase(),
         staff_id: a.staff_id,
         staff_name: a.staff_name || ''
@@ -8345,6 +8351,15 @@ CREATE TABLE IF NOT EXISTS nec_order_assignments (
 -- overridden per order to 'outsider' for non-ad-sourced customers — this
 -- is why the choice lives per-order here rather than only on nec_staff.
 ALTER TABLE nec_order_assignments ADD COLUMN IF NOT EXISTS commission_algo text;
+-- Per-order team ('New Era' | 'Alpha C' | 'Outsider') — the admin's explicit
+-- NE/AC classification for THIS order, chosen via the Team buttons in Bulk
+-- Payslip Upload / Breakdown. P&L's 8-bucket routing (NE-DM/NE-TM/NE-Shared/
+-- AC-DM/AC-TM/AC-Shared/Outsider/Manager Pool) reads this column first and
+-- only falls back to the assigned staff's own company_team for legacy rows
+-- saved before this column existed (team IS NULL) — an order's team should
+-- not silently change just because it gets reassigned to a different staff
+-- member later.
+ALTER TABLE nec_order_assignments ADD COLUMN IF NOT EXISTS team text;
 
 CREATE TABLE IF NOT EXISTS nec_bank_directory (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -8454,6 +8469,18 @@ const _channelMap = {};
 const _staffMap = {};
 function setOrderStaff(code, orderNo, staffId) {
   _staffMap[`${code}|${orderNo}`] = staffId || null;
+}
+
+// Single source of truth for turning an order's Team + Channel choice into
+// the `commission_algo` value nec_order_assignments/P&L understand ('dm' |
+// 'tm' | 'outsider'). Used by every place that writes an order assignment
+// (Bulk Upload save, Breakdown "Set All", Breakdown single-order assign) so
+// they can't drift out of sync with each other again. Team overrides
+// channel: an order marked Outsider is 'outsider' regardless of what its
+// Channel dropdown says (channel is disabled/moot for Outsider orders).
+function deriveCommAlgo(team, channel) {
+  if (team === 'Outsider') return 'outsider';
+  return (channel || 'DM').toLowerCase();
 }
 
 function getOrderTeam(code, orderNo) {
@@ -8956,18 +8983,29 @@ async function confirmBulkSave() {
 
       await logAudit('CREATE', 'proxy_invoices', `Bulk import: ${p.distributor_name} — ${MONTHS[month]} ${year} — RM${p.total_net_payable}`);
 
-      // Save per-order staff assignments for any orders that had a staff selected
+      // Save each order's Team/Channel classification (+ staff, if picked)
+      // to nec_order_assignments. This MUST run for every order regardless
+      // of whether an owner/staff was picked yet — the Team/Channel buttons
+      // on this review screen are the admin's explicit NE/AC/Outsider +
+      // DM/TM classification for the order, and that's what P&L reads (via
+      // the `team` + `commission_algo` columns) to route revenue into the
+      // 8 buckets. This used to `continue` (skip entirely) whenever no
+      // staff was assigned yet, which silently threw the whole
+      // classification away — P&L then had no assignment row to read at
+      // all for that order and fell back to a hardcoded NE-DM default,
+      // regardless of what was actually picked on screen.
       for (const o of ordersWithTeam) {
-        const staffId = _staffMap[`${code}|${o.order_no}`];
-        if (!staffId) continue;
-        const commAlgo = (_channelMap[`${code}|${o.order_no}`] || 'DM').toLowerCase();
+        const staffId = _staffMap[`${code}|${o.order_no}`] || null;
+        const staffObj = staffId ? staffList.find(s => String(s.id) === String(staffId)) : null;
+        const orderTeam = o.team || proxyTeam;
+        const commAlgo = deriveCommAlgo(orderTeam, o.channel);
         try {
           await sbDelete('nec_order_assignments', `year=eq.${year}&month=eq.${month}&proxy_id=eq.${p.proxy_id}&order_no=eq.${o.order_no}&customer_name=eq.${encodeURIComponent(o.customer_name)}`);
           await sb('nec_order_assignments', {
             method: 'POST',
-            body: { year, month, order_no: o.order_no, customer_name: o.customer_name, proxy_id: p.proxy_id, staff_id: staffId, source: 'bulk_upload', commission_algo: commAlgo }
+            body: { year, month, order_no: o.order_no, customer_name: o.customer_name, proxy_id: p.proxy_id, staff_id: staffId, staff_name: staffObj?.name || null, source: 'bulk_upload', commission_algo: commAlgo, team: orderTeam }
           });
-        } catch(e) { /* non-fatal — assignment can be done manually in Auto Commission */ }
+        } catch(e) { /* non-fatal — assignment can be corrected manually in Auto Commission / Breakdown */ }
       }
     } catch(e) {
       console.error('Save error for', p.distributor_name, e.message);
@@ -9104,7 +9142,6 @@ async function setAllBreakdownOwner(breakdownId, selectedOnly = false) {
                    || proxyList.find(p => p.coway_id === String(b.distributor_code));
   const proxyVal = _proxyEntry?.id || b.proxy_id;
   const staffVal = staffId; // always use the raw dropdown value (UUID)
-  const commAlgo = (staff?.channel || 'DM').toLowerCase();
   let orders = JSON.parse(b.categories_json || '[]').filter(o => o.order_no);
   if (selectedOnly) {
     const checkedNos = new Set([...document.querySelectorAll(`.bd-order-chk[data-bdid="${breakdownId}"]:checked`)].map(c => c.dataset.orderno));
@@ -9115,12 +9152,17 @@ async function setAllBreakdownOwner(breakdownId, selectedOnly = false) {
   let ok = 0;
   for (const o of orders) {
     try {
+      // Use THIS order's own team/channel (already set via the Team/Channel
+      // buttons on this card) to derive commission_algo — not the staff's
+      // own channel — so assigning an owner never overwrites what was
+      // already classified as Alpha C / TM / Outsider for this order.
+      const commAlgo = deriveCommAlgo(o.team, o.channel || staff?.channel);
       await fetch(`${SUPABASE_URL}/rest/v1/nec_order_assignments?year=eq.${b.year}&month=eq.${b.month}&proxy_id=eq.${proxyVal}&order_no=eq.${encodeURIComponent(o.order_no)}`,
         { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
       const r = await fetch(`${SUPABASE_URL}/rest/v1/nec_order_assignments`, {
         method: 'POST',
         headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ year: parseInt(b.year), month: parseInt(b.month), order_no: o.order_no, customer_name: o.customer_name||'', proxy_id: proxyVal, staff_id: staffVal, staff_name: staff?.name||'', source: 'breakdown', commission_algo: o.team==='Outsider'?'outsider':commAlgo })
+        body: JSON.stringify({ year: parseInt(b.year), month: parseInt(b.month), order_no: o.order_no, customer_name: o.customer_name||'', proxy_id: proxyVal, staff_id: staffVal, staff_name: staff?.name||'', source: 'breakdown', commission_algo: commAlgo, team: o.team || null })
       });
       if (r.ok) ok++;
     } catch(e) {}
@@ -9294,9 +9336,7 @@ async function bdAssignSave(btn) {
   const staffId = document.getElementById('bdAssignSel')?.value;
   if (!staffId) return showToast('Pick a staff member', 'error');
   const staff = staffList.find(s => String(s.id) === String(staffId));
-  const commAlgo = (modal.dataset.orderteam === 'Outsider')
-    ? 'outsider'
-    : (staff?.channel || modal.dataset.orderchannel || 'DM').toLowerCase();
+  const commAlgo = deriveCommAlgo(modal.dataset.orderteam, modal.dataset.orderchannel || staff?.channel);
   const proxyVal = isNaN(parseInt(proxyid)) ? proxyid : parseInt(proxyid);
   // Try to get the UUID from proxyList (to match how Bulk Upload stores proxy_id)
   const proxyListEntry = proxyList.find(p => String(p.id) === String(proxyid));
@@ -9321,7 +9361,7 @@ async function bdAssignSave(btn) {
       year: parseInt(year), month: parseInt(month),
       order_no: orderno, customer_name: custname,
       proxy_id: proxyValFinal, staff_id: staffVal, staff_name: staff?.name || '',
-      source: 'breakdown', commission_algo: commAlgo
+      source: 'breakdown', commission_algo: commAlgo, team: modal.dataset.orderteam || null
     };
     console.log('[BDSave] INSERT body:', JSON.stringify(insBody));
     const insResp = await fetch(`${SUPABASE_URL}/rest/v1/nec_order_assignments`, {
