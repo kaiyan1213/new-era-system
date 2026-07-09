@@ -137,10 +137,11 @@ Respond with ONLY a raw JSON object (no markdown, no code fences), with three ke
    - is_credit must be TRUE only if the amount has "CR" suffix, or is explicitly a DUITNOW TO / PAYMENT RECEIVED line
    - NEVER set is_credit: true just because the description contains words like "BILL", "SUBSCRIPTION", "SERVICE"
 2. "cr_amounts": array of numeric amounts (MYR) that appeared with "CR" suffix (refunds/credits/payments)
-3. "statement_balance": the CHARGES THIS MONTH or CURRENT BALANCE total from the statement (as a number, MYR)
+3. "statement_balance": the final STATEMENT BALANCE shown at the bottom of the statement (as a number, MYR) — this includes previous balance + new charges - payments
+4. "previous_balance": the PREVIOUS BALANCE / Balance Brought Forward shown at the top (as a number, MYR, or null if not shown)
 
 Format:
-{"transactions":[{"date":"15/06","description":"FACEBK *ADS8X7Y2Z","amount":450.00,"is_credit":false,"category":"${categorySlugs[0]}","channel":"SHARED","company_team":null}],"cr_amounts":[56.45,3.15],"statement_balance":17047.71}
+{"transactions":[{"date":"15/06","description":"FACEBK *ADS8X7Y2Z","amount":450.00,"is_credit":false,"category":"${categorySlugs[0]}","channel":"SHARED","company_team":null}],"cr_amounts":[56.45,3.15],"statement_balance":44543.40,"previous_balance":30361.46}
 
 Statement text:
 ${trimmedText}`;
@@ -191,12 +192,14 @@ ${trimmedText}`;
     let transactions;
     let claudeCrAmounts = [];
     let claudeStatementBalance = null;
+    let claudePreviousBalance = null;
     try {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.transactions)) {
         transactions = parsed.transactions;
         claudeCrAmounts = Array.isArray(parsed.cr_amounts) ? parsed.cr_amounts.map(Number).filter(n => !isNaN(n)) : [];
         claudeStatementBalance = (typeof parsed.statement_balance === 'number') ? parsed.statement_balance : null;
+        claudePreviousBalance = (typeof parsed.previous_balance === 'number') ? parsed.previous_balance : null;
       } else if (Array.isArray(parsed)) {
         transactions = parsed; // old format fallback
       } else {
@@ -278,7 +281,7 @@ ${trimmedText}`;
     const crAmounts = [...crAmountSet].map(c => c/100);
 
     console.log('[Parser] cleaned count:', cleaned.length, 'raw transactions count:', transactions.length, 'cr_amounts:', claudeCrAmounts, 'stmt_bal:', claudeStatementBalance);
-    return res.status(200).json({ success: true, transactions: cleaned, total, count: cleaned.length, _cr_filtered: crAmounts, statement_balance: claudeStatementBalance, _debug_raw_count: transactions.length });
+    return res.status(200).json({ success: true, transactions: cleaned, total, count: cleaned.length, _cr_filtered: crAmounts, statement_balance: claudeStatementBalance, previous_balance: claudePreviousBalance, _debug_raw_count: transactions.length });
   } catch(e) {
     return res.status(500).json({ error: e.message });
   }
