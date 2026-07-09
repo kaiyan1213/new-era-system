@@ -7071,6 +7071,13 @@ async function openCostEntryModal() {
   document.getElementById('ceCategory').innerHTML = categoryOptionsHTML('ad_spend');
   document.getElementById('ceCard').innerHTML = `<option value="">— Not linked to a card —</option>`
     + ccCards.map(c => `<option value="${c.id}">${c.card_name}</option>`).join('');
+  // Default to current month/year
+  const now = new Date();
+  document.getElementById('ceMonth').value = now.getMonth() + 1;
+  document.getElementById('ceYear').value = now.getFullYear();
+  document.getElementById('ceAmountNE').value = '';
+  document.getElementById('ceAmountAC').value = '';
+  document.getElementById('ceNEACRow').style.display = 'none';
   openModal('modalCostEntry');
 }
 
