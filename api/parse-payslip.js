@@ -66,6 +66,19 @@ function parseCowayPayslip(text) {
     }
   }
 
+  // ── 1b. Global order_no -> customer_name lookup ──────────────
+  // Built once by scanning the WHOLE document for "order_no [(PREFIX)] NAME
+  // contractMonths" rows (the format used by the 100%/70% Payout order rows,
+  // e.g. "11084148 (SHI)SHAFIE SULIEMAN SOON @ SAMUEL SOON A/L SULEIMAN15").
+  // Used as a fallback source of truth for the customer name whenever a row
+  // elsewhere loses its name to pdf-parse's text-order scrambling (see the
+  // Bonus Commission handling directly below, where this actually happens).
+  const globalNameByOrder = {};
+  for (const l of lines) {
+    const gm = l.match(/^(\d{7,})\s*(?:\([A-Za-z]+\))?\s*([A-Z@].+?)\d{1,2}\s*$/);
+    if (gm) globalNameByOrder[gm[1]] = gm[2].trim();
+  }
+
   // ── 2. Find Bonus Commission section & extract new order numbers ──
   const bonusStart = lines.findIndex(l => l === 'Bonus Commission');
   const newOrderNos = new Set();
@@ -83,6 +96,24 @@ function parseCowayPayslip(text) {
       if (m) {
         newOrderNos.add(m[1]);
         bonusOrders.push({ order_no: m[1], customer_name: m[2].trim() });
+        continue;
+      }
+      // Fallback: order row with NO customer name on this line at all, e.g.
+      // "11084148RENCHP-6210N (NEON-WHITE)". This happens when a long
+      // customer name wraps onto its own line during a page break and
+      // pdf-parse extracts that wrapped-name text completely out of order
+      // (often hoisted several lines earlier, before the section header) —
+      // it never lands back next to its order number. Without this fallback
+      // the row above simply fails to match (there's no name character
+      // available for the required "([A-Z@].+?)" group before "REN"/"INS"),
+      // and the order is silently dropped: not counted, not paid, missing
+      // from the invoice. Recover the order itself here (name resolved from
+      // globalNameByOrder — the 100%/70% Payout section always has the full
+      // name on one line, wrap-free) rather than losing the order entirely.
+      const m2 = l.match(/^(\d{7,})\s*(REN|INS)/);
+      if (m2) {
+        newOrderNos.add(m2[1]);
+        bonusOrders.push({ order_no: m2[1], customer_name: globalNameByOrder[m2[1]] || '' });
       }
     }
   }
