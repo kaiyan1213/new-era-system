@@ -339,7 +339,19 @@
     .stats-row { grid-template-columns: repeat(2, 1fr) !important; gap: 10px; }
     .form-row { grid-template-columns: 1fr !important; }
     .breakdown-grid { grid-template-columns: 1fr !important; }
-    .breakdown-sidebar, .breakdown-content { max-height: none !important; }
+    /* .breakdown-sidebar is a flex column whose proxy-list child
+       (#breakdownSidebar, flex:1 + overflow-y:auto) needs the PARENT to
+       have a real, bounded height to grow/scroll against — that's what
+       max-height: calc(100vh - 200px) provides on desktop. Dropping it to
+       "none" left flex:1 with nothing to resolve against, which collapsed
+       the list to zero height in some mobile browsers (the items were
+       there in the DOM — onclick worked if you knew to tap blindly — they
+       just weren't visible/tappable). Give it a smaller bounded height
+       instead of removing the bound entirely. .breakdown-content has no
+       such nested-flex child, so removing its cap to let it flow with the
+       page is safe. */
+    .breakdown-sidebar { max-height: 50vh !important; }
+    .breakdown-content { max-height: none !important; }
     /* Excludes .order-row: that one relies on horizontal scroll (see the
        .cat-section/.parse-result-card overflow-x:auto + .order-row
        min-width rules below) to keep its columns aligned with its own
