@@ -7257,6 +7257,8 @@ async function processCCFile(file) {
       crAmountCount[cents] = (crAmountCount[cents] || 0) + 1;
     });
     console.log('[CC-v2] crAmountCount:', JSON.stringify(crAmountCount), '_cr_filtered:', data._cr_filtered);
+    window._rawTxns = data.transactions; // expose for debugging
+    console.log('[CC-v2] raw txns with ~78.9:', data.transactions.filter(t=>Math.abs(parseFloat(t.amount||0)-78.9)<0.01).map(t=>({amt:t.amount,is_credit:t.is_credit,desc:t.description})));
 
     // Step 1: basic filter
     // Rule: filter by DESCRIPTION keywords only (not by is_credit flag or amount matching)
