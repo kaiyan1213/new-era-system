@@ -129,9 +129,13 @@ Respond with ONLY a raw JSON object (no markdown, no code fences), with three ke
    ALWAYS INCLUDE (even if they look like fees or subscriptions):
    - "CREDIT PROTECTOR" or any insurance/protection fee
    - "Ezypay" or any instalment/subscription payment
+   - "APPLE.COM/BILL" or any Apple subscription
+   - "OPENAI" or any AI subscription
+   - "MANYCHAT" or any SaaS subscription
    - Interest charges, service tax, annual fees
-   - Any merchant charge, even if the merchant name is unfamiliar
-   - "TRANSFER / TOP-UP" lines that are CHARGES (no "CR" suffix) — these are purchases
+   - Any merchant purchase/charge that does NOT have "CR" after the amount
+   - is_credit must be TRUE only if the amount has "CR" suffix, or is explicitly a DUITNOW TO / PAYMENT RECEIVED line
+   - NEVER set is_credit: true just because the description contains words like "BILL", "SUBSCRIPTION", "SERVICE"
 2. "cr_amounts": array of numeric amounts (MYR) that appeared with "CR" suffix (refunds/credits/payments)
 3. "statement_balance": the CHARGES THIS MONTH or CURRENT BALANCE total from the statement (as a number, MYR)
 
