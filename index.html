@@ -7250,36 +7250,18 @@ async function processCCFile(file) {
     const defaultMonth = new Date().getMonth() + 1;
     // Filter out CR (credit/refund/payment) transactions and zero/negative amounts
     // CR amounts from parser (regex-detected from raw PDF text)
-    // Build a count map of CR amounts — each CR cancels only ONE charge of same amount
-    const crAmountCount = {};
-    (data._cr_filtered || []).forEach(a => {
-      const cents = Math.round(a * 100);
-      crAmountCount[cents] = (crAmountCount[cents] || 0) + 1;
-    });
-    console.log('[CC-v2] crAmountCount:', JSON.stringify(crAmountCount), '_cr_filtered:', data._cr_filtered);
-    window._rawTxns = data.transactions; // expose for debugging
-    console.log('[CC-v2] raw txns with ~78.9:', data.transactions.filter(t=>Math.abs(parseFloat(t.amount||0)-78.9)<0.01).map(t=>({amt:t.amount,is_credit:t.is_credit,desc:t.description})));
-
-    // Step 1: basic filter
-    // Rule: filter by DESCRIPTION keywords only (not by is_credit flag or amount matching)
-    // The crAmountCount is used ONLY to cancel out refunds against charges of same amount
-    // is_credit from Claude is unreliable (Claude confuses same-amount charges with credits)
-    const creditCancelCount = {...crAmountCount};
+    // Backend already handles CR filtering correctly via count map
+    // Frontend: only filter by description keywords (no amount-based CR matching needed)
+    console.log('[CC-v2] transactions from backend:', data.transactions?.length, '_cr_filtered:', data._cr_filtered);
 
     let allTxns = data.transactions
       .filter(t => {
         const amt = parseFloat(t.amount || 0);
         if (amt <= 0) return false;
         const desc = (t.description || '').toUpperCase();
-        // Filter by description (payment/transfer lines)
+        // Filter obvious payment/transfer lines only
         if (desc.includes('PAYMENT RECEIVED') || desc.includes('DUITNOW TO') ||
-            desc.includes('REFUND') || desc.includes('TRANSFER / TOP-UP THANK')) return false;
-        if (desc.includes('PAYMENT') && !desc.includes('CREDIT PROTECTOR') &&
-            !desc.includes('SHOPEE') && !desc.includes('LAZADA')) return false;
-        if (desc === 'CREDIT' || desc.startsWith('CREDIT NOTE') || desc.startsWith('CREDIT REVERSAL')) return false;
-        // Use crAmountCount to cancel one charge per CR (handles refunds)
-        const cents = Math.round(amt * 100);
-        if (creditCancelCount[cents] > 0) { creditCancelCount[cents]--; return false; }
+            desc.includes('TRANSFER / TOP-UP THANK YOU')) return false;
         return true;
       })
       .map(t => {
