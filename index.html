@@ -2569,7 +2569,12 @@ function showPage(page) {
   const pageEl = document.getElementById(`page-${page}`);
   if (pageEl) pageEl.classList.remove('hidden');
   event?.target?.classList.add('active');
-  if (page === 'proxy') loadInvoices();
+  if (page === 'proxy') {
+    // Default to current month
+    const fm = document.getElementById('filterMonth');
+    if (fm && !fm.value) fm.value = new Date().getMonth() + 1;
+    loadInvoices();
+  }
   if (page === 'payroll') loadPayroll();
   if (page === 'manager') loadAllManagerData();
   if (page === 'pl') loadPL();
