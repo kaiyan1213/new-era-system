@@ -2439,6 +2439,12 @@ function initUserUI() {
   if (currentUser.role === 'owner') {
     document.getElementById('auditNavLink').style.display = 'inline-flex';
     checkSimCardAlerts();
+    // Set all month selectors to current month on login
+    const _curMonth = new Date().getMonth() + 1;
+    ['filterMonth','filterMonthPayroll','filterMonthMgr','bdMonth','bdirMonth'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el && !el.value) el.value = _curMonth;
+    });
   }
   // Check for credit cards due soon/overdue — slight delay so this doesn't
   // block the initial page render, and so it appears on top once the
@@ -2575,16 +2581,32 @@ function showPage(page) {
     if (fm && !fm.value) fm.value = new Date().getMonth() + 1;
     loadInvoices();
   }
-  if (page === 'payroll') loadPayroll();
-  if (page === 'manager') loadAllManagerData();
+  if (page === 'payroll') {
+    const _m = document.getElementById('filterMonthPayroll');
+    if (_m && !_m.value) _m.value = new Date().getMonth() + 1;
+    loadPayroll();
+  }
+  if (page === 'manager') {
+    const _m = document.getElementById('filterMonthMgr');
+    if (_m && !_m.value) _m.value = new Date().getMonth() + 1;
+    loadAllManagerData();
+  }
   if (page === 'pl') loadPL();
   if (page === 'cctracker') loadCCTracker();
   if (page === 'audit') loadAuditLog();
-  if (page === 'breakdown') loadBreakdown();
+  if (page === 'breakdown') {
+    const _m = document.getElementById('bdMonth');
+    if (_m && !_m.value) _m.value = new Date().getMonth() + 1;
+    loadBreakdown();
+  }
   if (page === 'setup') loadSetup();
   if (page === 'simcards') loadSimCards();
   if (page === 'directory') loadDirectory();
-  if (page === 'bankdir') loadBankDirectory();
+  if (page === 'bankdir') {
+    const _m = document.getElementById('bdirMonth');
+    if (_m && !_m.value) _m.value = new Date().getMonth() + 1;
+    loadBankDirectory();
+  }
 }
 
 function showToast(msg, type = 'success') {
