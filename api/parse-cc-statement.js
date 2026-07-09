@@ -247,13 +247,20 @@ ${trimmedText}`;
     // invalid category slugs fall back to "other" if it exists, otherwise
     // the first category in the active list.
     const fallbackCategory = hasOther ? 'other' : categorySlugs[0];
+    // Build a count map so each CR cancels only ONE charge of same amount
+    const crCountMap = {};
+    crAmountSet.forEach(cents => { crCountMap[cents] = (crCountMap[cents] || 0) + 1; });
     const cleaned = transactions
       .filter(t => {
         if (!t || typeof t.amount !== 'number' || t.amount <= 0 || !t.description) return false;
-        if (t.is_credit) return false; // Claude flagged it
-        // Cross-check: if this amount appears as a CR in the raw PDF, skip it
         const amtCents = Math.round(t.amount * 100);
-        if (crAmountSet.has(amtCents)) return false;
+        // If Claude flagged is_credit AND there is a matching CR, count it as cancelled
+        if (t.is_credit) {
+          if (crCountMap[amtCents] > 0) crCountMap[amtCents]--;
+          return false;
+        }
+        // Cross-check: each CR cancels ONE matching charge (not all)
+        if (crCountMap[amtCents] > 0) { crCountMap[amtCents]--; return false; }
         return true;
       })
       .map(t => ({
