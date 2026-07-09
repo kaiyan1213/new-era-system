@@ -2441,7 +2441,7 @@ function initUserUI() {
     checkSimCardAlerts();
     // Set all month selectors to current month on login
     const _curMonth = new Date().getMonth() + 1;
-    ['filterMonth','filterMonthPayroll','filterMonthMgr','bdMonth','bdirMonth'].forEach(id => {
+    ['filterMonth','filterMonthPayroll','filterMonthMgr','bdMonth','bdirMonth','dirMonth'].forEach(id => {
       const el = document.getElementById(id);
       if (el && !el.value) el.value = _curMonth;
     });
@@ -2601,7 +2601,11 @@ function showPage(page) {
   }
   if (page === 'setup') loadSetup();
   if (page === 'simcards') loadSimCards();
-  if (page === 'directory') loadDirectory();
+  if (page === 'directory') {
+    const _m = document.getElementById('dirMonth');
+    if (_m && !_m.value) _m.value = new Date().getMonth() + 1;
+    loadDirectory();
+  }
   if (page === 'bankdir') {
     const _m = document.getElementById('bdirMonth');
     if (_m && !_m.value) _m.value = new Date().getMonth() + 1;
