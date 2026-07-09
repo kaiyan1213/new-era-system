@@ -7258,15 +7258,26 @@ async function processCCFile(file) {
     });
     console.log('[CC-v2] crAmountCount:', JSON.stringify(crAmountCount), '_cr_filtered:', data._cr_filtered);
 
-    // Step 1: basic filter (negative, payment keywords, parser-flagged)
+    // Step 1: basic filter
+    // Rule: filter by DESCRIPTION keywords only (not by is_credit flag or amount matching)
+    // The crAmountCount is used ONLY to cancel out refunds against charges of same amount
+    // is_credit from Claude is unreliable (Claude confuses same-amount charges with credits)
+    const creditCancelCount = {...crAmountCount};
+
     let allTxns = data.transactions
       .filter(t => {
         const amt = parseFloat(t.amount || 0);
         if (amt <= 0) return false;
-        if (t.is_credit) return false;
-        // Each CR cancels ONE matching charge (not all charges of that amount)
+        const desc = (t.description || '').toUpperCase();
+        // Filter by description (payment/transfer lines)
+        if (desc.includes('PAYMENT RECEIVED') || desc.includes('DUITNOW TO') ||
+            desc.includes('REFUND') || desc.includes('TRANSFER / TOP-UP THANK')) return false;
+        if (desc.includes('PAYMENT') && !desc.includes('CREDIT PROTECTOR') &&
+            !desc.includes('SHOPEE') && !desc.includes('LAZADA')) return false;
+        if (desc === 'CREDIT' || desc.startsWith('CREDIT NOTE') || desc.startsWith('CREDIT REVERSAL')) return false;
+        // Use crAmountCount to cancel one charge per CR (handles refunds)
         const cents = Math.round(amt * 100);
-        if (crAmountCount[cents] > 0) { crAmountCount[cents]--; return false; }
+        if (creditCancelCount[cents] > 0) { creditCancelCount[cents]--; return false; }
         const desc = (t.description || '').toUpperCase();
         // Only filter CREDIT when it's a payment/refund context, not product names like 'CREDIT PROTECTOR'
         if (desc.includes('PAYMENT RECEIVED') || desc.includes('DUITNOW TO') || desc.includes('REFUND')) return false;
