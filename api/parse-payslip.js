@@ -79,7 +79,7 @@ function parseCowayPayslip(text) {
       // App Type is usually "REN" (rental new order) but can be "INS" (outright
       // sale, e.g. "Sales Commission (Outright) - PV" section like KOK YIAT LEE's
       // 2 air-purifier units) — both represent a new order that should be counted.
-      const m = l.match(/^(\d{7,})([A-Z].+?)(REN|INS)/);
+      const m = l.match(/^(\d{7,})\s*(?:\([A-Z]+\))?\s*([A-Z@].+?)(REN|INS)/);
       if (m) {
         newOrderNos.add(m[1]);
         bonusOrders.push({ order_no: m[1], customer_name: m[2].trim() });
@@ -126,7 +126,7 @@ function parseCowayPayslip(text) {
     for (const l of oLines) {
       const am = l.match(/^([\d,]+)\s+([\d,]+\.\d{2})$/);
       if (am) outrightAmounts.push(pn(am[2]));
-      const om = l.match(/^(\d{7,})([A-Z].+?)(?:REN|INS)/);
+      const om = l.match(/^(\d{7,})\s*(?:\([A-Z]+\))?\s*([A-Z@].+?)(?:REN|INS)/);
       if (om) outrightOrders.push(om[1]);
     }
     outrightOrders.forEach((order_no, idx) => {
