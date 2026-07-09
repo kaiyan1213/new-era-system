@@ -2441,7 +2441,7 @@ function initUserUI() {
     checkSimCardAlerts();
     // Set all month selectors to current month on login
     const _curMonth = new Date().getMonth() + 1;
-    ['filterMonth','payrollMonth','mgrMonth','plMonth','bdMonth','bdirMonth','dirMonth'].forEach(id => {
+    ['filterMonth','payrollMonth','mgrMonth','plMonth','bdMonth','bdirMonth','dirMonth','uploadMonth'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = _curMonth;
     });
