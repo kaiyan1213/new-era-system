@@ -8678,7 +8678,7 @@ function buildParseResultHTML(result) {
   }).join('');
 
   return `
-    <div class="parse-result-card">
+    <div class="parse-result-card" data-parse-code="${String(code).replace(/"/g,'&quot;')}">
       <div class="parse-result-header">
         <div>
           <div class="parse-result-name">${result.distributor_name || result.filename}</div>
@@ -8727,6 +8727,8 @@ function buildParseResultHTML(result) {
           </div>
           <span class="parse-status ${statusCls}">${statusText}</span>
           <div class="parse-result-amount">RM ${fmtNum(result.total_net_payable)}</div>
+          <button class="btn btn-danger btn-sm" title="Remove this payslip from the batch (won't be saved)"
+                  onclick="removeParsedPayslip('${String(code).replace(/'/g,"\\'")}')">✕</button>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;font-size:12px">
@@ -8762,8 +8764,13 @@ function renderParseError(filename, msg) {
 
 function buildParseErrorHTML(filename, msg) {
   return `<div class="parse-result-card" style="border-color:rgba(220,38,38,0.3)">
-      <div style="color:var(--red);font-weight:600">✗ ${filename}</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:4px">${msg}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <div>
+          <div style="color:var(--red);font-weight:600">✗ ${filename}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:4px">${msg}</div>
+        </div>
+        <button class="btn btn-danger btn-sm" title="Remove from list" onclick="this.closest('.parse-result-card').remove()">✕</button>
+      </div>
     </div>`;
 }
 
@@ -8805,6 +8812,32 @@ function clearUpload() {
   document.getElementById('uploadProgress').style.display = 'none';
   document.getElementById('uploadConfirmBar').style.display = 'none';
   document.getElementById('pdfFileInput').value = '';
+}
+
+// Lets the admin drop a single bad/duplicate payslip out of the current bulk
+// upload batch (e.g. wrong file uploaded, PDF corrupted mid-parse, proxy
+// mismatched) without having to clear and re-upload every other file. The
+// entry is removed from `parsedPayslips` (so "Save All Invoices" simply never
+// sees it) and its card is removed from the DOM. `code` is the same key
+// (distributor_code || filename) used to build the card and its team/channel
+// maps, matching the `data-parse-code` attribute set in buildParseResultHTML.
+function removeParsedPayslip(code) {
+  const before = parsedPayslips.length;
+  parsedPayslips = parsedPayslips.filter(r => String(r.distributor_code || r.filename) !== String(code));
+  if (parsedPayslips.length === before) return; // nothing matched, no-op
+
+  const card = document.querySelector(`.parse-result-card[data-parse-code="${CSS.escape(String(code))}"]`);
+  if (card) card.remove();
+
+  const matched = parsedPayslips.filter(r => r.matched).length;
+  const total = parsedPayslips.length;
+  if (matched > 0) {
+    document.getElementById('uploadConfirmBar').style.display = 'flex';
+    document.getElementById('uploadConfirmText').textContent = `${matched} of ${total} payslips matched to proxy accounts`;
+  } else {
+    document.getElementById('uploadConfirmBar').style.display = 'none';
+  }
+  showToast('Removed from batch — it will not be saved');
 }
 
 async function debugPDF(file) {
