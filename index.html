@@ -5696,7 +5696,7 @@ async function loadManagers() {
   } catch(e) { return []; }
 }
 
-async function openManagerEntryModal() {
+async function openManagerEntryModal(autoConfirm = false) {
   await loadManagers();
   const poolManagers = managerList.filter(m => isPoolManager(m.name));
   document.getElementById('managerEntryFields').innerHTML = poolManagers.map(m => `
@@ -5709,6 +5709,11 @@ async function openManagerEntryModal() {
       </div>
     </div>`).join('');
   openModal('modalManagerEntry');
+  if (autoConfirm) {
+    setTimeout(async () => {
+      await saveManagerSharing();
+    }, 300);
+  }
   loadMgrEntryPreview();
 }
 
@@ -5973,6 +5978,21 @@ async function saveMgrPayslip() {
     closeModal('modalMgrPayslipUpload');
     showToast('Manager payslip saved ✓');
     loadMgrPayslips();
+    // Auto-split if all manager payslips are uploaded for this period
+    setTimeout(async () => {
+      try {
+        const existing = await sb('nec_manager_payslips', { filter: `year=eq.${year}&month=eq.${month}`, select: 'manager_id' });
+        const mainMgrs = managerList.filter(m => m.has_comm_share);
+        if (existing.length >= mainMgrs.length) {
+          // All payslips uploaded — auto-split
+          const monthSel = document.getElementById('mgrMonth');
+          const yearSel = document.getElementById('mgrYear');
+          if (monthSel) monthSel.value = month;
+          if (yearSel) yearSel.value = year;
+          await openManagerEntryModal(true); // true = auto-confirm
+        }
+      } catch(e) {}
+    }, 500);
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
