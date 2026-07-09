@@ -2174,6 +2174,7 @@
         <div style="font-size:13px;color:var(--muted)">
           <span id="ccCount">0</span> transactions found — Total: <span id="ccTotal" style="color:var(--accent);font-weight:700">RM 0.00</span>
           <span id="ccBalanceWrap" class="hidden" style="margin-left:10px">· Statement Balance (per bank): <span id="ccBalance" style="color:var(--text);font-weight:700">RM 0.00</span></span>
+          <span id="ccPrevBalWrap" class="hidden" style="display:block;margin-top:4px;font-size:12px;color:var(--muted)">Previous Balance: <span id="ccPrevBal">RM 0.00</span> + New Charges: <span id="ccNewCharges">RM 0.00</span></span>
         </div>
         <div style="display:flex;gap:8px;align-items:center">
           <span style="font-size:11px;color:var(--muted)">Set all:</span>
@@ -7287,7 +7288,19 @@ async function processCCFile(file) {
     // Step 2: statement balance reconciliation
     // If total > statement balance, find & remove transactions matching the excess
     const stmtBal = (typeof data.statement_balance === 'number') ? data.statement_balance : null;
+    const prevBal = (typeof data.previous_balance === 'number') ? data.previous_balance : null;
+    // Use full statement balance (includes previous balance) as the statement amount
     ccStatementBalance = stmtBal;
+    // Show previous balance info
+    if (prevBal !== null) {
+      const prevWrap = document.getElementById('ccPrevBalWrap');
+      if (prevWrap) {
+        prevWrap.classList.remove('hidden');
+        prevWrap.style.display = 'block';
+        document.getElementById('ccPrevBal').textContent = `RM ${fmtNum(prevBal)}`;
+        document.getElementById('ccNewCharges').textContent = `RM ${fmtNum(data.total || 0)}`;
+      }
+    }
     if (stmtBal !== null) {
       // Use precise cent arithmetic to avoid floating point issues
       const txnTotalCents = allTxns.reduce((s,t) => s + Math.round(t.amount * 100), 0);
