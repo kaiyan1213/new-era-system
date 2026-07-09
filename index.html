@@ -7256,6 +7256,7 @@ async function processCCFile(file) {
       const cents = Math.round(a * 100);
       crAmountCount[cents] = (crAmountCount[cents] || 0) + 1;
     });
+    console.log('[CC-v2] crAmountCount:', JSON.stringify(crAmountCount), '_cr_filtered:', data._cr_filtered);
 
     // Step 1: basic filter (negative, payment keywords, parser-flagged)
     let allTxns = data.transactions
