@@ -7260,7 +7260,10 @@ async function processCCFile(file) {
         if (t.is_credit) return false;
         if (crAmountCents.has(Math.round(amt * 100))) return false;
         const desc = (t.description || '').toUpperCase();
-        if (desc.includes('PAYMENT') || desc.includes('DUITNOW TO') || desc.includes('REFUND') || desc.includes('CREDIT')) return false;
+        // Only filter CREDIT when it's a payment/refund context, not product names like 'CREDIT PROTECTOR'
+        if (desc.includes('PAYMENT RECEIVED') || desc.includes('DUITNOW TO') || desc.includes('REFUND')) return false;
+        if (desc.includes('PAYMENT') && !desc.includes('CREDIT PROTECTOR')) return false;
+        if (desc === 'CREDIT' || desc.startsWith('CREDIT NOTE') || desc.startsWith('CREDIT REVERSAL')) return false;
         return true;
       })
       .map(t => {
