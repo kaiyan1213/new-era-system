@@ -7250,7 +7250,12 @@ async function processCCFile(file) {
     const defaultMonth = new Date().getMonth() + 1;
     // Filter out CR (credit/refund/payment) transactions and zero/negative amounts
     // CR amounts from parser (regex-detected from raw PDF text)
-    const crAmountCents = new Set((data._cr_filtered || []).map(a => Math.round(a * 100)));
+    // Build a count map of CR amounts — each CR cancels only ONE charge of same amount
+    const crAmountCount = {};
+    (data._cr_filtered || []).forEach(a => {
+      const cents = Math.round(a * 100);
+      crAmountCount[cents] = (crAmountCount[cents] || 0) + 1;
+    });
 
     // Step 1: basic filter (negative, payment keywords, parser-flagged)
     let allTxns = data.transactions
@@ -7258,7 +7263,9 @@ async function processCCFile(file) {
         const amt = parseFloat(t.amount || 0);
         if (amt <= 0) return false;
         if (t.is_credit) return false;
-        if (crAmountCents.has(Math.round(amt * 100))) return false;
+        // Each CR cancels ONE matching charge (not all charges of that amount)
+        const cents = Math.round(amt * 100);
+        if (crAmountCount[cents] > 0) { crAmountCount[cents]--; return false; }
         const desc = (t.description || '').toUpperCase();
         // Only filter CREDIT when it's a payment/refund context, not product names like 'CREDIT PROTECTOR'
         if (desc.includes('PAYMENT RECEIVED') || desc.includes('DUITNOW TO') || desc.includes('REFUND')) return false;
