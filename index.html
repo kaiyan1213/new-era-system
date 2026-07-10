@@ -3389,6 +3389,20 @@ async function loadDirectory() {
     staffOwnedProxyMap = {};
     ownerStaff.forEach(s => { staffOwnedProxyMap[s.own_proxy_id] = s; });
 
+    // Payroll-owned proxies no longer get a proxy_invoices row (see
+    // confirmBulkSave) — their Coway Payslip reference figure for this
+    // Directory view instead comes straight from nec_payslip_breakdown,
+    // the same table Payroll's own-proxy netting reads from.
+    const breakdownPayslipByProxy = {};
+    if (ownerStaff.length) {
+      const ownedIds = ownerStaff.map(s => s.own_proxy_id);
+      const breakdownRows = await sb('nec_payslip_breakdown', {
+        filter: `year=eq.${year}&month=eq.${month}&proxy_id=in.(${ownedIds.join(',')})`,
+        select: 'proxy_id,total_net_payable'
+      }).catch(() => []);
+      breakdownRows.forEach(r => { breakdownPayslipByProxy[r.proxy_id] = parseFloat(r.total_net_payable || 0); });
+    }
+
     // Group proxies by manager
     const groups = {};
     MANAGER_ORDER.forEach(m => groups[m] = []);
@@ -3402,11 +3416,14 @@ async function loadDirectory() {
       const people = groups[m];
       if (!people.length) return '';
 
-      // Sort: proxies with an invoice this month first (so the ones that need
-      // attention/payment are at the top), no-invoice proxies after.
+      // Sort: proxies with data this month first (invoiced proxies, or
+      // Payroll-owned proxies with a payslip breakdown on file) — so the
+      // ones that need attention/payment are at the top, no-data proxies
+      // after.
+      const hasData = (id) => directoryInvoiceMap[id] || (staffOwnedProxyMap[id] && breakdownPayslipByProxy[id] != null);
       const sorted = [...people].sort((a, b) => {
-        const aHas = directoryInvoiceMap[a.id] ? 1 : 0;
-        const bHas = directoryInvoiceMap[b.id] ? 1 : 0;
+        const aHas = hasData(a.id) ? 1 : 0;
+        const bHas = hasData(b.id) ? 1 : 0;
         if (aHas !== bHas) return bHas - aHas;
         return a.name.localeCompare(b.name);
       });
@@ -3415,9 +3432,14 @@ async function loadDirectory() {
 
       const rows = sorted.map(p => {
         const inv = directoryInvoiceMap[p.id];
-        const payslip = inv ? fmt(inv.coway_payslip_amount) : '—';
-        const invoiced = inv ? fmt(inv.invoice_amount) : '—';
         const ownerStaff = staffOwnedProxyMap[p.id];
+        // Payroll-owned proxies have no invoice row (see confirmBulkSave) —
+        // fall back to the raw payslip breakdown total for the reference
+        // figure. Invoiced (NEC) legitimately stays blank for them since no
+        // invoice was ever created.
+        const payslipAmt = inv ? parseFloat(inv.coway_payslip_amount || 0) : (ownerStaff ? breakdownPayslipByProxy[p.id] : null);
+        const payslip = payslipAmt != null ? fmt(payslipAmt) : '—';
+        const invoiced = inv ? fmt(inv.invoice_amount) : (ownerStaff ? '<span class="td-muted">via Payroll</span>' : '—');
         // PIC = amount the PIC (manager) owes the company when invoice < payslip; 0 otherwise.
         // Skipped entirely for a staff member's own proxy (ownerStaff set) —
         // that proxy is settled net through Payroll, and at that point it's
@@ -3429,6 +3451,8 @@ async function loadDirectory() {
           totalPayslip += parseFloat(inv.coway_payslip_amount||0);
           totalInvoiced += parseFloat(inv.invoice_amount||0);
           totalPic += picAmt;
+        } else if (payslipAmt != null) {
+          totalPayslip += payslipAmt;
         }
         const paymentsForInv = inv ? (invoicePaymentsByInvoice[inv.id] || []) : [];
         const totalPaid = r2(paymentsForInv.reduce((s,pmt) => s + parseFloat(pmt.amount||0), 0));
@@ -9492,32 +9516,6 @@ async function confirmBulkSave() {
   let updated = 0;
   for (const p of matched) {
     try {
-      // Check if an invoice already exists for this proxy/year/month — if so,
-      // re-upload should OVERWRITE it (e.g. after a parser bug fix) rather than
-      // fail silently on the unique constraint or create a duplicate.
-      const existing = await sb('proxy_invoices', {
-        filter: `proxy_id=eq.${p.proxy_id}&year=eq.${year}&month=eq.${month}`,
-        select: 'id,invoice_number,status,payment_date'
-      });
-
-      let invoiceNumber, prevStatus = 'draft', prevPaymentDate = null;
-      if (existing.length > 0) {
-        // Reuse the existing invoice number so other invoices' sequence numbers
-        // for this month don't shift around. Also preserve paid/payment_date —
-        // re-importing to fix a parser bug shouldn't undo a "Mark Paid" that
-        // already happened.
-        invoiceNumber = existing[0].invoice_number;
-        prevStatus = existing[0].status || 'draft';
-        prevPaymentDate = existing[0].payment_date || null;
-        await sbDelete('proxy_invoices', `id=eq.${existing[0].id}`);
-        await sbDelete('nec_payslip_breakdown', `proxy_id=eq.${p.proxy_id}&year=eq.${year}&month=eq.${month}`);
-        updated++;
-      } else {
-        invoiceNumber = `NEC-${year}-${String(month).padStart(2,'0')}-${String(seq).padStart(3,'0')}`;
-        seq++;
-        created++;
-      }
-
       const code = p.distributor_code || p.filename;
       const proxyTeam = _teamMap[code] || 'New Era';
       const ordersWithTeam = (p.new_orders || []).map(o => ({
@@ -9526,34 +9524,72 @@ async function confirmBulkSave() {
         channel: _channelMap[`${code}|${o.order_no}`] ?? null
       }));
       // Accounts flagged "Payroll" (own_proxy_id-linked, settled via Payroll
-      // netting) are excluded from the global % adjustment — that % exists
-      // to set what the company invoices/collects from a proxy vs PIC, and
-      // Payroll-owned accounts never go through that PIC flow, so shaving
-      // their invoice amount only creates a Coway Payslip vs Invoiced
-      // mismatch with no debt behind it. Save them at the full payslip
-      // amount instead.
+      // netting) never get a proxy_invoices row at all — whether the
+      // settlement ultimately lands as a payslip payout or an invoice
+      // owed back is only decided in Payroll after netting against the
+      // staff's commission, not here. Creating/adjusting an invoice for
+      // them here was what produced the confusing Coway Payslip vs
+      // Invoiced mismatch, since there's no real billing/PIC relationship
+      // behind that number for these accounts.
       const isPayrollAcct = !!_payrollMap[code];
-      const invoiceAmount = isPayrollAcct ? p.total_net_payable : Math.round(p.total_net_payable * (1 + deductPct/100) * 100) / 100;
-      // deductPct < 0 => deduct (invoice < payslip amount); deductPct > 0 => add on top
-      const adjLabel = isPayrollAcct ? 'Payroll — no % adjustment' : (deductPct === 0 ? '±0%' : (deductPct > 0 ? `+${deductPct}%` : `${deductPct}%`));
-      // Save invoice
-      await sb('proxy_invoices', {
-        method: 'POST',
-        body: {
-          proxy_id: p.proxy_id,
-          year, month,
-          coway_payslip_amount: p.total_net_payable,
-          invoice_amount: invoiceAmount,
-          invoice_number: invoiceNumber,
-          status: prevStatus,
-          payment_date: prevPaymentDate,
-          company_team: proxyTeam,
-          notes: `Auto-imported from PDF: ${p.filename} (${adjLabel})`,
-          passive_income: p.passive_and_tbc_total || 0
-        }
-      });
 
-      // Save breakdown data (include per-order team in categories_json)
+      // Check if an invoice already exists for this proxy/year/month — if so,
+      // re-upload should OVERWRITE it (e.g. after a parser bug fix) rather than
+      // fail silently on the unique constraint or create a duplicate. For a
+      // Payroll account this existing row (if any — e.g. left over from
+      // before this account was flagged, or from before this feature
+      // existed) is simply removed instead of overwritten.
+      const existing = await sb('proxy_invoices', {
+        filter: `proxy_id=eq.${p.proxy_id}&year=eq.${year}&month=eq.${month}`,
+        select: 'id,invoice_number,status,payment_date'
+      });
+      await sbDelete('nec_payslip_breakdown', `proxy_id=eq.${p.proxy_id}&year=eq.${year}&month=eq.${month}`);
+
+      if (isPayrollAcct) {
+        if (existing.length > 0) await sbDelete('proxy_invoices', `id=eq.${existing[0].id}`);
+        updated++;
+      } else {
+        let invoiceNumber, prevStatus = 'draft', prevPaymentDate = null;
+        if (existing.length > 0) {
+          // Reuse the existing invoice number so other invoices' sequence numbers
+          // for this month don't shift around. Also preserve paid/payment_date —
+          // re-importing to fix a parser bug shouldn't undo a "Mark Paid" that
+          // already happened.
+          invoiceNumber = existing[0].invoice_number;
+          prevStatus = existing[0].status || 'draft';
+          prevPaymentDate = existing[0].payment_date || null;
+          await sbDelete('proxy_invoices', `id=eq.${existing[0].id}`);
+          updated++;
+        } else {
+          invoiceNumber = `NEC-${year}-${String(month).padStart(2,'0')}-${String(seq).padStart(3,'0')}`;
+          seq++;
+          created++;
+        }
+
+        const invoiceAmount = Math.round(p.total_net_payable * (1 + deductPct/100) * 100) / 100;
+        // deductPct < 0 => deduct (invoice < payslip amount); deductPct > 0 => add on top
+        const adjLabel = deductPct === 0 ? '±0%' : (deductPct > 0 ? `+${deductPct}%` : `${deductPct}%`);
+        await sb('proxy_invoices', {
+          method: 'POST',
+          body: {
+            proxy_id: p.proxy_id,
+            year, month,
+            coway_payslip_amount: p.total_net_payable,
+            invoice_amount: invoiceAmount,
+            invoice_number: invoiceNumber,
+            status: prevStatus,
+            payment_date: prevPaymentDate,
+            company_team: proxyTeam,
+            notes: `Auto-imported from PDF: ${p.filename} (${adjLabel})`,
+            passive_income: p.passive_and_tbc_total || 0
+          }
+        });
+      }
+
+      // Save breakdown data (include per-order team in categories_json) —
+      // always, regardless of Payroll flag: Payroll's own-proxy netting
+      // (getOwnProxyPayslipAmount) reads total_net_payable straight from
+      // this table, not from proxy_invoices.
       await sb('nec_payslip_breakdown', {
         method: 'POST',
         body: {
@@ -9571,7 +9607,7 @@ async function confirmBulkSave() {
         }
       });
 
-      await logAudit('CREATE', 'proxy_invoices', `Bulk import: ${p.distributor_name} — ${MONTHS[month]} ${year} — RM${p.total_net_payable}`);
+      await logAudit('CREATE', 'proxy_invoices', `Bulk import: ${p.distributor_name} — ${MONTHS[month]} ${year} — RM${p.total_net_payable}${isPayrollAcct ? ' (Payroll — no invoice created)' : ''}`);
 
       // Save each order's Team/Channel classification (+ staff, if picked)
       // to nec_order_assignments. This MUST run for every order regardless
