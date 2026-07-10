@@ -1046,7 +1046,10 @@
         <div class="stat-label">Total Revenue</div>
         <div class="stat-value green" id="plTotalRev">—</div>
         <div class="stat-sub">Coway payslip total (actual money paid out)</div>
-        <div style="margin-top:4px;font-size:12px;color:var(--muted)">Passive: <span id="plPassiveAmt" style="color:var(--yellow);font-weight:600">—</span></div>
+        <div style="margin-top:4px;font-size:12px;color:var(--muted)">
+          <span id="plPassiveLabel" style="cursor:help;border-bottom:1px dotted var(--muted)">Passive</span>:
+          <span id="plPassiveAmt" style="color:var(--yellow);font-weight:600">—</span>
+        </div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Total Costs</div>
@@ -6884,7 +6887,7 @@ async function loadPL() {
     // (Not invoice_amount: proxies don't reliably pay the invoiced amount
     // at face value, so that's not real collected revenue.)
     const invoices = await sb('proxy_invoices', { filter: invFilter, select: 'proxy_id,year,month,coway_payslip_amount,company_team,passive_income' });
-    const proxies = await sb('proxy_accounts', { select: 'id,channel,company_team' });
+    const proxies = await sb('proxy_accounts', { select: 'id,name,channel,company_team' });
     const costs = await sb('nec_pl_costs', { filter: invFilter });
     // Ensure ccCards is loaded so we can determine which card belongs to NE vs AC
     if (!ccCards.length) ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true', select: 'id,card_name,bank,owner_team,gift_team,ads_team' }).catch(() => []);
@@ -7290,6 +7293,19 @@ async function loadPL() {
     // Headline: total payslip (NE + AC combined, actual money received)
     const totalPayslip = r2(invoices.reduce((s,i) => s + parseFloat(i.coway_payslip_amount || 0), 0));
     const passiveTotal = r2(invoices.reduce((s,i) => s + parseFloat(i.passive_income || 0), 0));
+    // Per-proxy breakdown of the Passive figure above, for the "Passive:"
+    // hover tooltip — same plain-title-attribute pattern used for the cost
+    // breakdown tooltips elsewhere on this page (see tooltipDetails/ttLines
+    // below), just keyed by proxy name instead of cost label.
+    const proxyNameById = {};
+    proxies.forEach(p => { proxyNameById[p.id] = p.name; });
+    const passiveByProxy = {};
+    invoices.forEach(i => {
+      const amt = parseFloat(i.passive_income || 0);
+      if (Math.abs(amt) < 0.005) return;
+      const name = proxyNameById[i.proxy_id] || 'Unknown';
+      passiveByProxy[name] = r2((passiveByProxy[name] || 0) + amt);
+    });
     const totalRevFinal = totalPayslip;
     const totalCost = r2(BUCKETS8.reduce((s,b) => s + costByBucket8[b], 0));
     const netProfit = r2(totalRevFinal - totalCost);
@@ -7300,6 +7316,14 @@ async function loadPL() {
         document.getElementById('plTotalRev').textContent = fmt(totalRevFinal);
         const plPassiveEl = document.getElementById('plPassiveAmt');
         if (plPassiveEl) plPassiveEl.textContent = fmt(passiveTotal);
+        const plPassiveLabelEl = document.getElementById('plPassiveLabel');
+        if (plPassiveLabelEl) {
+          const passiveEntries = Object.entries(passiveByProxy).sort((a,b2) => b2[1]-a[1]);
+          const ttLines = passiveEntries.length
+            ? passiveEntries.map(([name, amt]) => `${name}: RM ${fmtNum(amt)}`).join('\n')
+            : 'No passive income this period';
+          plPassiveLabelEl.title = ttLines;
+        }
     document.getElementById('plTotalCost').textContent = fmt(totalCost);
     const npEl = document.getElementById('plNetProfit');
     npEl.textContent = fmt(netProfit);
