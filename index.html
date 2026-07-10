@@ -196,6 +196,17 @@
   .toast.success { border-color: rgba(22,163,74,0.4); }
   .toast.error { border-color: rgba(220,38,38,0.4); }
 
+  /* GENERIC HOVER POPOVER (see #hoverPopover in the body) */
+  .hover-popover {
+    position: fixed; top: -9999px; left: -9999px; z-index: 3000; background: var(--surface);
+    border: 1px solid var(--border2); border-radius: 8px; padding: 10px 14px; font-size: 12px;
+    box-shadow: var(--shadow-lg); max-width: 320px; max-height: 70vh; overflow-y: auto; line-height: 1.6;
+  }
+  .hover-popover-row { display: flex; justify-content: space-between; gap: 14px; padding: 2px 0; border-bottom: 1px solid var(--border); }
+  .hover-popover-row:last-child { border-bottom: none; }
+  .hover-popover-name { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hover-popover-amt { font-family: var(--mono); font-weight: 600; flex-shrink: 0; }
+
   /* SETUP BANNER */
   .setup-banner { background: rgba(37,99,235,0.08); border: 1px solid rgba(37,99,235,0.2); border-radius: 10px; padding: 20px; margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
   .setup-banner-text { font-size: 13px; color: var(--text); }
@@ -1047,7 +1058,9 @@
         <div class="stat-value green" id="plTotalRev">—</div>
         <div class="stat-sub">Coway payslip total (actual money paid out)</div>
         <div style="margin-top:4px;font-size:12px;color:var(--muted)">
-          <span id="plPassiveLabel" style="cursor:help;border-bottom:1px dotted var(--muted)">Passive</span>:
+          <span id="plPassiveLabel" style="cursor:help;border-bottom:1px dotted var(--muted)"
+                onmouseenter="showHoverPopover(this, buildPassivePopoverHTML())"
+                onmouseleave="hideHoverPopoverSoon()">Passive</span>:
           <span id="plPassiveAmt" style="color:var(--yellow);font-weight:600">—</span>
         </div>
       </div>
@@ -2549,6 +2562,17 @@
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
+<!-- Generic hover popover — used for detail breakdowns (e.g. P&L's Passive
+     figure) that are too long/variable-length to trust the native `title`
+     attribute with, since the browser positions that automatically and
+     clips it when it doesn't fit the viewport. This one is positioned in
+     JS (see positionHoverPopover) with a fallback chain: below the
+     trigger -> right of the trigger -> clamped to stay fully on-screen,
+     with a max-height + internal scroll as the last-resort safety net. -->
+<div id="hoverPopover" class="hover-popover hidden"
+     onmouseenter="_hoverPopoverOverPopover = true"
+     onmouseleave="_hoverPopoverOverPopover = false; hideHoverPopoverSoon()"></div>
+
 
 <script>
 
@@ -2899,6 +2923,84 @@ function showToast(msg, type = 'success') {
   t.textContent = type === 'success' ? '✓ ' + msg : '✗ ' + msg;
   t.className = `toast ${type} show`;
   setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ── GENERIC HOVER POPOVER ────────────────────────────────────────────
+// Positions #hoverPopover next to a trigger element, always fully inside
+// the viewport, instead of relying on the browser's automatic (and
+// sometimes off-screen-clipping) placement of a native `title` tooltip.
+// Fallback order per the intended behavior: below the trigger first;
+// if it doesn't fit vertically below, try to its right instead (full
+// viewport height to work with there); then clamp horizontally so it
+// never runs off either edge. max-height + internal scroll (see CSS) is
+// the last-resort safety net if the content is taller than the screen.
+let _hoverPopoverOverPopover = false; // true while the mouse is over the popover itself
+let _hoverPopoverHideTimer = null;
+
+function showHoverPopover(triggerEl, html) {
+  clearTimeout(_hoverPopoverHideTimer);
+  const pop = document.getElementById('hoverPopover');
+  pop.innerHTML = html;
+  pop.classList.remove('hidden');
+  positionHoverPopover(triggerEl);
+}
+
+function positionHoverPopover(triggerEl) {
+  const pop = document.getElementById('hoverPopover');
+  const trigRect = triggerEl.getBoundingClientRect();
+  const popRect = pop.getBoundingClientRect(); // already visible (hidden→removed above), so real size
+  const margin = 8;
+  const vw = window.innerWidth, vh = window.innerHeight;
+
+  const spaceBelow = vh - trigRect.bottom - margin;
+  const fitsBelow = popRect.height <= spaceBelow;
+
+  let top, left;
+  if (fitsBelow) {
+    top = trigRect.bottom + margin;
+    left = trigRect.left;
+  } else {
+    // Doesn't fit below — try to the right, using the full viewport height
+    // instead of whatever sliver was left below the trigger.
+    top = Math.max(margin, trigRect.top);
+    left = trigRect.right + margin;
+    // If it also doesn't fit to the right, fall back to the left side.
+    if (left + popRect.width + margin > vw) {
+      left = trigRect.left - popRect.width - margin;
+    }
+  }
+  // Final clamp — never let any edge run off-screen, regardless of which
+  // branch above was taken.
+  left = Math.min(Math.max(margin, left), vw - popRect.width - margin);
+  top = Math.min(Math.max(margin, top), vh - popRect.height - margin);
+
+  pop.style.left = `${left}px`;
+  pop.style.top = `${top}px`;
+}
+
+// Hides after a short delay rather than instantly, so moving the mouse
+// from the trigger onto the popover itself (to scroll a long list) doesn't
+// cause it to disappear mid-transition.
+function hideHoverPopoverSoon() {
+  clearTimeout(_hoverPopoverHideTimer);
+  _hoverPopoverHideTimer = setTimeout(() => {
+    if (_hoverPopoverOverPopover) return;
+    document.getElementById('hoverPopover').classList.add('hidden');
+  }, 150);
+}
+
+// P&L "Passive" breakdown — set by loadPL() on every render (see
+// _plPassiveByProxy assignment there), read here when the label is
+// hovered. { proxyName: amount }
+let _plPassiveByProxy = {};
+function buildPassivePopoverHTML() {
+  const entries = Object.entries(_plPassiveByProxy || {}).sort((a,b) => b[1]-a[1]);
+  if (!entries.length) return `<div style="color:var(--muted)">No passive income this period</div>`;
+  return entries.map(([name, amt]) => `
+    <div class="hover-popover-row">
+      <span class="hover-popover-name">${name}</span>
+      <span class="hover-popover-amt" style="color:${amt >= 0 ? 'var(--green)' : 'var(--red)'}">RM ${fmtNum(amt)}</span>
+    </div>`).join('');
 }
 
 function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
@@ -7316,14 +7418,9 @@ async function loadPL() {
         document.getElementById('plTotalRev').textContent = fmt(totalRevFinal);
         const plPassiveEl = document.getElementById('plPassiveAmt');
         if (plPassiveEl) plPassiveEl.textContent = fmt(passiveTotal);
-        const plPassiveLabelEl = document.getElementById('plPassiveLabel');
-        if (plPassiveLabelEl) {
-          const passiveEntries = Object.entries(passiveByProxy).sort((a,b2) => b2[1]-a[1]);
-          const ttLines = passiveEntries.length
-            ? passiveEntries.map(([name, amt]) => `${name}: RM ${fmtNum(amt)}`).join('\n')
-            : 'No passive income this period';
-          plPassiveLabelEl.title = ttLines;
-        }
+        // Stashed for buildPassivePopoverHTML() to read when the "Passive"
+        // label is hovered (see showHoverPopover wiring on plPassiveLabel).
+        _plPassiveByProxy = passiveByProxy;
     document.getElementById('plTotalCost').textContent = fmt(totalCost);
     const npEl = document.getElementById('plNetProfit');
     npEl.textContent = fmt(netProfit);
