@@ -9019,6 +9019,24 @@ function setOrderStaff(code, orderNo, staffId) {
   _staffMap[`${code}|${orderNo}`] = staffId || null;
 }
 
+// Per-proxy "Payroll" flag for the current bulk upload batch:
+// { [distributor_code]: true|false }. When true, this account is settled
+// through Payroll netting (its own_proxy_id links back to a staff member),
+// so the "Adjust % for everyone" deduction below must NOT apply to it —
+// there's no PIC/debt purpose for shaving its invoice amount, and doing so
+// only produced a confusing Coway Payslip vs Invoiced mismatch for an
+// account that was never going to be chased for that difference. Defaults
+// to auto-checked when the matched proxy is a known staff-owned account
+// (see _bulkOwnedProxyIds / parsePayslipPDF), but the admin can still
+// toggle it manually for any account.
+const _payrollMap = {};
+function setPayrollFlag(code, isPayroll) {
+  _payrollMap[code] = !!isPayroll;
+}
+// Set of proxy_ids that are a staff member's own proxy (nec_staff.own_proxy_id),
+// refreshed once per bulk-upload batch in handlePDFFiles.
+let _bulkOwnedProxyIds = new Set();
+
 // Single source of truth for turning an order's Team + Channel choice into
 // the `commission_algo` value nec_order_assignments/P&L understand ('dm' |
 // 'tm' | 'outsider'). Used by every place that writes an order assignment
@@ -9118,6 +9136,12 @@ async function handlePDFFiles(files) {
   const parseErrors = [];
   // Ensure staff list is ready so per-order staff dropdowns can be populated
   if (!staffList.length) await loadStaff();
+  // Refresh the staff-owned-proxy set so the Payroll toggle can auto-check
+  // itself on match (see parsePayslipPDF / buildParseResultHTML).
+  try {
+    const ownerRows = await sb('nec_staff', { filter: 'is_active=eq.true&own_proxy_id=not.is.null', select: 'own_proxy_id' });
+    _bulkOwnedProxyIds = new Set(ownerRows.map(r => r.own_proxy_id));
+  } catch(e) { _bulkOwnedProxyIds = new Set(); }
   document.getElementById('uploadProgress').style.display = 'block';
   document.getElementById('uploadResults').innerHTML = '';
   document.getElementById('uploadConfirmBar').style.display = 'none';
@@ -9193,7 +9217,8 @@ async function parsePayslipPDF(file) {
     filename: file.name,
     matched: !!match,
     proxy: match || null,
-    proxy_id: match?.id || null
+    proxy_id: match?.id || null,
+    isOwnProxy: !!(match && _bulkOwnedProxyIds.has(match.id))
   };
 }
 
@@ -9213,6 +9238,11 @@ function buildParseResultHTML(result) {
   // Default channel: use proxy's channel field (DM/TM/XHS) if set, else DM
   const defaultChannel = (['DM','TM','XHS'].includes(result.proxy?.channel)) ? result.proxy.channel : 'DM';
   _teamMap[code] = defaultTeam;
+  // Payroll flag defaults to on when this proxy is a known staff-owned
+  // account (own_proxy_id) — see _bulkOwnedProxyIds — but stays whatever
+  // the admin already toggled if this card is being re-rendered.
+  if (!(code in _payrollMap)) _payrollMap[code] = !!result.isOwnProxy;
+  const isPayroll = !!_payrollMap[code];
 
   const orderRows = (result.new_orders || []).map(o => {
     const oKey = `${code}|${o.order_no}`;
@@ -9258,6 +9288,10 @@ function buildParseResultHTML(result) {
         <div>
           <div class="parse-result-name">${result.distributor_name || result.filename}</div>
           <div style="font-size:11px;color:var(--muted);margin-top:2px">Code: ${result.distributor_code || '—'} | ${result.member_level || '—'} | ${result.period_date || '—'}</div>
+          <label style="display:flex;align-items:center;gap:5px;margin-top:6px;font-size:11px;${isPayroll ? 'color:var(--accent);font-weight:600' : 'color:var(--muted)'};cursor:pointer" title="This account settles through Payroll (own_proxy_id) — check this so the 'Adjust % for everyone' below is ignored for it and it saves at the full Coway Payslip amount, no PIC shortfall implied.">
+            <input type="checkbox" id="payrollFlag_${code}" ${isPayroll ? 'checked' : ''} onchange="setPayrollFlag('${code}',this.checked);document.getElementById('payrollFlag_${code}').closest('label').style.color=this.checked?'var(--accent)':'var(--muted)';document.getElementById('payrollFlag_${code}').closest('label').style.fontWeight=this.checked?'600':'400'">
+            🔗 Payroll (skip % adjustment)${result.isOwnProxy ? ' — auto-detected' : ''}
+          </label>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
           <div style="display:flex;flex-direction:column;gap:4px">
@@ -9491,9 +9525,17 @@ async function confirmBulkSave() {
         team: _teamMap[`${code}|${o.order_no}`] || proxyTeam,
         channel: _channelMap[`${code}|${o.order_no}`] ?? null
       }));
-      const invoiceAmount = Math.round(p.total_net_payable * (1 + deductPct/100) * 100) / 100;
+      // Accounts flagged "Payroll" (own_proxy_id-linked, settled via Payroll
+      // netting) are excluded from the global % adjustment — that % exists
+      // to set what the company invoices/collects from a proxy vs PIC, and
+      // Payroll-owned accounts never go through that PIC flow, so shaving
+      // their invoice amount only creates a Coway Payslip vs Invoiced
+      // mismatch with no debt behind it. Save them at the full payslip
+      // amount instead.
+      const isPayrollAcct = !!_payrollMap[code];
+      const invoiceAmount = isPayrollAcct ? p.total_net_payable : Math.round(p.total_net_payable * (1 + deductPct/100) * 100) / 100;
       // deductPct < 0 => deduct (invoice < payslip amount); deductPct > 0 => add on top
-      const adjLabel = deductPct === 0 ? '±0%' : (deductPct > 0 ? `+${deductPct}%` : `${deductPct}%`);
+      const adjLabel = isPayrollAcct ? 'Payroll — no % adjustment' : (deductPct === 0 ? '±0%' : (deductPct > 0 ? `+${deductPct}%` : `${deductPct}%`));
       // Save invoice
       await sb('proxy_invoices', {
         method: 'POST',
