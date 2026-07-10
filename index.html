@@ -7026,7 +7026,7 @@ async function loadPL() {
     const costs = await sb('nec_pl_costs', { filter: invFilter });
     // Ensure ccCards is loaded so we can determine which card belongs to NE vs AC
     if (!ccCards.length) ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true', select: 'id,card_name,bank,owner_team,gift_team,ads_team' }).catch(() => []);
-    const breakdowns = await sb('nec_payslip_breakdown', { filter: invFilter, select: 'proxy_id,year,month,categories_json' });
+    const breakdowns = await sb('nec_payslip_breakdown', { filter: invFilter, select: 'proxy_id,year,month,categories_json,total_net_payable,passive_income' });
     // Fetch order assignments + staff to correctly bucket Outsider/TM orders
     const plAssignments = await sb('nec_order_assignments', { filter: invFilter, select: 'proxy_id,order_no,commission_algo,staff_id,staff_name,team' }).catch(() => []);
     console.log('[PL] assignments fetched:', plAssignments.length, 'filter:', invFilter);
@@ -7425,9 +7425,16 @@ async function loadPL() {
     const neNet = r2(neRevFromBuckets - neCost);
     const acNet = r2(acRevFromBuckets - acCost);
 
-    // Headline: total payslip (NE + AC combined, actual money received)
-    const totalPayslip = r2(invoices.reduce((s,i) => s + parseFloat(i.coway_payslip_amount || 0), 0));
-    const passiveTotal = r2(invoices.reduce((s,i) => s + parseFloat(i.passive_income || 0), 0));
+    // Headline: total payslip (NE + AC combined, actual money received).
+    // Sourced from nec_payslip_breakdown, not proxy_invoices — a Payroll-
+    // owned proxy (own_proxy_id, settled via Payroll netting) has no
+    // invoice row at all, but Coway still paid that proxy directly and
+    // that money — including its Passive income — belongs to the company
+    // exactly the same as any other proxy's, so it must still count here.
+    // breakdown rows exist for every uploaded proxy regardless of Payroll
+    // flag (see confirmBulkSave), so this is the correct universal source.
+    const totalPayslip = r2(breakdowns.reduce((s,b) => s + parseFloat(b.total_net_payable || 0), 0));
+    const passiveTotal = r2(breakdowns.reduce((s,b) => s + parseFloat(b.passive_income || 0), 0));
     // Per-proxy breakdown of the Passive figure above, for the "Passive:"
     // hover tooltip — same plain-title-attribute pattern used for the cost
     // breakdown tooltips elsewhere on this page (see tooltipDetails/ttLines
@@ -7435,10 +7442,10 @@ async function loadPL() {
     const proxyNameById = {};
     proxies.forEach(p => { proxyNameById[p.id] = p.name; });
     const passiveByProxy = {};
-    invoices.forEach(i => {
-      const amt = parseFloat(i.passive_income || 0);
+    breakdowns.forEach(b => {
+      const amt = parseFloat(b.passive_income || 0);
       if (Math.abs(amt) < 0.005) return;
-      const name = proxyNameById[i.proxy_id] || 'Unknown';
+      const name = proxyNameById[b.proxy_id] || 'Unknown';
       passiveByProxy[name] = r2((passiveByProxy[name] || 0) + amt);
     });
     const totalRevFinal = totalPayslip;
