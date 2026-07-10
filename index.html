@@ -2620,7 +2620,7 @@ function initUserUI() {
     checkSimCardAlerts();
     // Set all month selectors to current month on login
     const _curMonth = new Date().getMonth() + 1;
-    ['filterMonth','payrollMonth','mgrMonth','plMonth','bdMonth','bdirMonth','dirMonth','uploadMonth'].forEach(id => {
+    ['filterMonth','payrollMonth','mgrMonth','plMonth','bdMonth','bdirMonth','dirMonth','uploadMonth','acMonth'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = _curMonth;
     });
@@ -6159,8 +6159,15 @@ async function getManagerTotalForPeriod(m, year, month) {
 
   const proxyIds = new Set(proxyList.filter(p => p.manager === m.name).map(p => p.id));
   const invoices = await sb('proxy_invoices', { filter: `year=eq.${year}&month=eq.${month}`, select: 'proxy_id,coway_payslip_amount,invoice_amount' });
+  // Exclude proxies that ARE a staff member's own account (nec_staff.own_proxy_id)
+  // — those are settled net through Payroll instead, same exclusion Directory's
+  // PIC column applies, so this stays equal to Directory's "PIC" total for the
+  // manager's group instead of double-counting a shortfall that isn't really
+  // owed back separately.
+  const ownerStaffRows = await sb('nec_staff', { filter: 'is_active=eq.true&own_proxy_id=not.is.null', select: 'own_proxy_id' });
+  const ownedProxyIds = new Set(ownerStaffRows.map(s => s.own_proxy_id));
   const accBelowAmt = r2(invoices
-    .filter(inv => proxyIds.has(inv.proxy_id))
+    .filter(inv => proxyIds.has(inv.proxy_id) && !ownedProxyIds.has(inv.proxy_id))
     .reduce((s,inv) => s + Math.max(0, parseFloat(inv.coway_payslip_amount||0) - parseFloat(inv.invoice_amount||0)), 0));
 
   const mp = await sb('nec_manager_payslips', { filter: `manager_id=eq.${m.id}&year=eq.${year}&month=eq.${month}` });
@@ -6578,9 +6585,17 @@ async function loadMgrAdjustments() {
     });
     const proxyManagerMap = {};
     proxyList.forEach(p => { proxyManagerMap[p.id] = p.manager; });
+    // Same exclusion as Directory's PIC column and getManagerTotalForPeriod
+    // above — a proxy that IS a staff member's own account settles net
+    // through Payroll, not as an Acc Below shortfall, so it must not be
+    // counted here either (this table used to double-count it, which is why
+    // it drifted out of sync with Directory's total).
+    const ownerStaffRowsMgr = await sb('nec_staff', { filter: 'is_active=eq.true&own_proxy_id=not.is.null', select: 'own_proxy_id' });
+    const ownedProxyIdsMgr = new Set(ownerStaffRowsMgr.map(s => s.own_proxy_id));
     const accBelowTotals = {};
     MANAGER_ORDER.forEach(m => accBelowTotals[m] = 0);
     invoices.forEach(inv => {
+      if (ownedProxyIdsMgr.has(inv.proxy_id)) return;
       const mgrName = proxyManagerMap[inv.proxy_id];
       if (mgrName && MANAGER_ORDER.includes(mgrName)) {
         const picAmt = Math.max(0, parseFloat(inv.coway_payslip_amount||0) - parseFloat(inv.invoice_amount||0));
