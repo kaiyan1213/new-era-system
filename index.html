@@ -1937,6 +1937,7 @@
             <option value="outsider">Outsider</option>
             <option value="editor">Editor</option>
             <option value="content_creator">Content Creator</option>
+            <option value="other">Other</option>
           </select>
         </div>
       </div>
@@ -3742,28 +3743,51 @@ function filterBankDirTable() {
 function inferStaffTypeFromTeam(team) {
   if (team === 'NE-DM' || team === 'AC-DM' || team === 'Digital Marketing Team') return { staff_type: 'sales', channel: 'DM', company_team: team.startsWith('AC') ? 'Alpha C' : 'New Era' };
   if (team === 'NE-TM' || team === 'AC-TM' || team === 'Telemarketing Team') return { staff_type: 'sales', channel: 'TM', company_team: team.startsWith('AC') ? 'Alpha C' : 'New Era' };
-  if (team.startsWith('AC-')) return { staff_type: 'admin', channel: null, company_team: 'Alpha C' };
-  if (team.startsWith('Shared-')) return { staff_type: 'admin', channel: null, company_team: 'Shared' };
-  return { staff_type: 'admin', channel: null, company_team: 'New Era' };
+  // Admin-type staff: also derive `position` straight from the Bank
+  // Details team label when it already spells out the sub-role (Editor /
+  // Content Creator / Other) — without this, everyone lands on the
+  // default `position: 'admin'` and P&L lumps their cost into "Admin
+  // Salary" regardless of which team they were actually placed in (e.g.
+  // "Other" people showing up as Admin Salary). Existing/explicitly-set
+  // positions can still be corrected manually afterwards in Edit Staff.
+  const position = /editor/i.test(team) ? 'editor'
+    : /content creator/i.test(team) ? 'content_creator'
+    : (team === 'Other' || team === 'Others') ? 'other'
+    : null;
+  if (team.startsWith('AC-')) return { staff_type: 'admin', channel: null, company_team: 'Alpha C', position };
+  if (team.startsWith('Shared-')) return { staff_type: 'admin', channel: null, company_team: 'Shared', position };
+  return { staff_type: 'admin', channel: null, company_team: 'New Era', position };
 }
 
 async function syncStaffFromBankEntry(bankId, name, team) {
   if (!bankId) return;
   try {
-    const linked = await sb('nec_staff', { filter: `bank_directory_id=eq.${bankId}`, select: 'id,name' });
+    const { position: inferredPosition } = inferStaffTypeFromTeam(team);
+    const linked = await sb('nec_staff', { filter: `bank_directory_id=eq.${bankId}`, select: 'id,name,position' });
     if (linked.length) {
-      // Already synced — update name AND channel/company_team/staff_type from Bank Details
+      // Already synced — update name AND channel/company_team/staff_type from Bank Details.
+      // `position` is only auto-set when the team implies a specific
+      // sub-role (Editor/Content Creator/Other) AND the staff record is
+      // still on the untouched default ('admin' or unset) — this fixes
+      // people like a Bank Details "Other" entry that never got a real
+      // position (so P&L wrongly lumped their cost into "Admin Salary"),
+      // without clobbering someone who was manually corrected afterwards
+      // in Edit Staff (e.g. set to Outsider).
       const { staff_type, channel, company_team } = inferStaffTypeFromTeam(team);
-      await sb('nec_staff', { method: 'PATCH', filter: `id=eq.${linked[0].id}`, body: { name, staff_type, channel: channel || null, company_team: company_team || 'New Era' } });
+      const body = { name, staff_type, channel: channel || null, company_team: company_team || 'New Era' };
+      if (inferredPosition && (!linked[0].position || linked[0].position === 'admin')) body.position = inferredPosition;
+      await sb('nec_staff', { method: 'PATCH', filter: `id=eq.${linked[0].id}`, body });
       return;
     }
     // Not linked yet — check for a pre-existing nec_staff row with the
     // same name (covers people seeded into nec_staff before this
     // linkage existed) before creating a brand-new duplicate.
-    const byName = await sb('nec_staff', { filter: `name=eq.${encodeURIComponent(name)}`, select: 'id' });
+    const byName = await sb('nec_staff', { filter: `name=eq.${encodeURIComponent(name)}`, select: 'id,position' });
     if (byName.length) {
       const { channel, company_team } = inferStaffTypeFromTeam(team);
-      await sb('nec_staff', { method: 'PATCH', filter: `id=eq.${byName[0].id}`, body: { bank_directory_id: bankId, channel: channel || null, company_team: company_team || 'New Era' } });
+      const body = { bank_directory_id: bankId, channel: channel || null, company_team: company_team || 'New Era' };
+      if (inferredPosition && (!byName[0].position || byName[0].position === 'admin')) body.position = inferredPosition;
+      await sb('nec_staff', { method: 'PATCH', filter: `id=eq.${byName[0].id}`, body });
       return;
     }
     const { staff_type, channel } = inferStaffTypeFromTeam(team);
@@ -3776,7 +3800,7 @@ async function syncStaffFromBankEntry(bankId, name, team) {
       const proxyMatch = await sb('proxy_accounts', { filter: `name=eq.${encodeURIComponent(name)}&is_active=eq.true&is_manager_account=eq.false`, select: 'id' });
       if (proxyMatch.length) ownProxyId = proxyMatch[0].id;
     } catch(e) { /* non-fatal — leave unlinked */ }
-    await sb('nec_staff', { method: 'POST', body: { name, staff_type, channel, company_team: inferStaffTypeFromTeam(team).company_team || 'New Era', base_salary: 0, bank_directory_id: bankId, own_proxy_id: ownProxyId, is_active: true } });
+    await sb('nec_staff', { method: 'POST', body: { name, staff_type, position: inferredPosition || 'admin', channel, company_team: inferStaffTypeFromTeam(team).company_team || 'New Era', base_salary: 0, bank_directory_id: bankId, own_proxy_id: ownProxyId, is_active: true } });
   } catch(e) {
     console.error('Staff sync from Bank Details failed:', e);
   }
@@ -4709,6 +4733,7 @@ function renderStaffList() {
     outsider: { label: 'Outsider', color: 'var(--yellow)' },
     editor: { label: 'Editor', color: '#06b6d4' },
     content_creator: { label: 'Content Creator', color: '#ec4899' },
+    other: { label: 'Other', color: '#a3a3a3' },
   };
   const getStaffType = (s) => {
     if (managerStaffIds.has(s.id)) return { label: 'Manager', color: 'var(--accent)' };
@@ -7422,7 +7447,7 @@ async function loadPL() {
         const nePct = bankEntry?.salary_split_ne != null ? bankEntry.salary_split_ne / 100 : 0.5;
         const acPct = 1 - nePct;
         const pos = (staff?.position || staff?.staff_type || '').toLowerCase();
-        const roleLabel = pos.includes('editor') ? 'Editor Salary' : pos.includes('content') ? 'Content Creator Salary' : 'Admin Salary';
+        const roleLabel = pos.includes('editor') ? 'Editor Salary' : pos.includes('content') ? 'Content Creator Salary' : pos.includes('other') ? 'Other Salary' : 'Admin Salary';
         const outlay = r2(sal + bon + claim - ded - epf);
         if (outlay !== 0) {
           if (nePct > 0) { addCost('NE-Shared', roleLabel + ' (Shared)', r2(outlay * nePct)); addTooltipDetail('NE-Shared', roleLabel + ' (Shared)', staffName, r2(outlay * nePct)); }
@@ -7436,7 +7461,7 @@ async function loadPL() {
       const outlay = r2(comm + sal + bon + claim - ded - epf);
       if (outlay !== 0) {
         const pos = (staff?.position || staff?.staff_type || '').toLowerCase();
-        const roleLabel = pos.includes('editor') ? 'Editor Salary' : pos.includes('content') ? 'Content Creator Salary' : 'Admin Salary';
+        const roleLabel = pos.includes('editor') ? 'Editor Salary' : pos.includes('content') ? 'Content Creator Salary' : pos.includes('other') ? 'Other Salary' : 'Admin Salary';
         addCost(sharedBucket, roleLabel, outlay);
         addTooltipDetail(sharedBucket, roleLabel, staffName, outlay);
       }
