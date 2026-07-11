@@ -1790,6 +1790,44 @@
   </div>
 </div>
 
+<!-- Edit Invoice Modal — lets admin correct an already-saved invoice's
+     Coway Payslip / Invoice Amount without re-uploading the PDF. Changes
+     write straight to proxy_invoices, so Directory (and every other page
+     that reads it) picks up the new numbers automatically the next time
+     it loads — there's no separate cache to sync. -->
+<div class="modal-bg hidden" id="modalEditInvoice">
+  <div class="modal">
+    <div class="modal-title">Edit Invoice</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px" id="editInvSubtitle">—</div>
+    <div class="form-grid">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Coway Payslip Amount (RM)</label>
+          <input type="number" id="editInvPayslip" class="form-input" step="0.01" oninput="updateEditInvoicePreview()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Invoice Amount to NEC (RM)</label>
+          <input type="number" id="editInvAmount" class="form-input" step="0.01" oninput="updateEditInvoicePreview()">
+        </div>
+      </div>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12px">
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:var(--muted)">PIC (diff)</span>
+          <span style="font-family:var(--mono);font-weight:700" id="editInvPicDiff">RM 0.00</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes</label>
+        <input type="text" id="editInvNotes" class="form-input" placeholder="Optional notes...">
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalEditInvoice')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEditInvoice()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
 <!-- Add Staff Modal -->
 <div class="modal-bg hidden" id="modalAddStaff">
   <div class="modal">
@@ -3097,11 +3135,9 @@ async function loadInvoices() {
           <td class="td-mono">${MONTHS[inv.month]} ${inv.year}</td>
           <td class="td-mono">
             <span id="cp-${inv.id}">${fmt(inv.coway_payslip_amount)}</span>
-            <button class="icon-btn" title="Edit Coway Payslip amount" onclick="editInvoiceField('${inv.id}','coway_payslip_amount','cp-${inv.id}')">✎</button>
           </td>
           <td class="td-mono" style="color:var(--accent)">
             <span id="ia-${inv.id}">${fmt(inv.invoice_amount)}</span>
-            <button class="icon-btn" title="Edit Invoice amount" onclick="editInvoiceField('${inv.id}','invoice_amount','ia-${inv.id}')">✎</button>
           </td>
           <td class="td-mono" style="color:${picDiff > 0 ? 'var(--red)' : 'var(--muted)'}">${fmt(picDiff)}</td>
           <td>
@@ -3116,6 +3152,7 @@ async function loadInvoices() {
           <td>
             <div style="display:flex;gap:4px">
               <button class="btn btn-ghost btn-sm" onclick="previewInvoice('${inv.id}')">Preview</button>
+              <button class="btn btn-ghost btn-sm" title="Edit amounts without re-uploading the PDF" onclick="openEditInvoiceModal('${inv.id}')">✎ Edit</button>
               <button class="btn btn-danger btn-sm" onclick="deleteInvoice('${inv.id}')">✕</button>
             </div>
           </td>
@@ -3191,6 +3228,62 @@ async function editInvoiceField(invoiceId, field, spanId) {
     showToast('Updated ✓');
     loadInvoices();
   } catch(e) { showToast('Error updating', 'error'); }
+}
+
+// Holds the invoice currently open in the Edit modal (id + proxy name +
+// period), so saveEditInvoice() doesn't need to re-derive it from the DOM.
+let _editingInvoice = null;
+
+async function openEditInvoiceModal(invoiceId) {
+  try {
+    const rows = await sb('proxy_invoices', {
+      filter: `id=eq.${invoiceId}`,
+      select: 'id,proxy_id,year,month,coway_payslip_amount,invoice_amount,notes'
+    });
+    if (!rows.length) return showToast('Invoice not found', 'error');
+    const inv = rows[0];
+    const proxy = proxyList.find(p => p.id === inv.proxy_id);
+    _editingInvoice = inv;
+    document.getElementById('editInvSubtitle').textContent = `${proxy?.name || 'Unknown proxy'} — ${MONTHS[inv.month]} ${inv.year}`;
+    document.getElementById('editInvPayslip').value = inv.coway_payslip_amount ?? '';
+    document.getElementById('editInvAmount').value = inv.invoice_amount ?? '';
+    document.getElementById('editInvNotes').value = inv.notes || '';
+    updateEditInvoicePreview();
+    openModal('modalEditInvoice');
+  } catch(e) { showToast('Error loading invoice: ' + e.message, 'error'); }
+}
+
+function updateEditInvoicePreview() {
+  const payslip = parseFloat(document.getElementById('editInvPayslip').value) || 0;
+  const amount = parseFloat(document.getElementById('editInvAmount').value) || 0;
+  const diff = Math.max(0, payslip - amount);
+  const el = document.getElementById('editInvPicDiff');
+  el.textContent = fmt(diff);
+  el.style.color = diff > 0 ? 'var(--red)' : 'var(--muted)';
+}
+
+// Saves both amounts in one PATCH. Nothing else needs to be told about
+// this change — Directory, P&L, Manager, etc. all query proxy_invoices
+// fresh every time their page loads, so the corrected numbers just show
+// up everywhere the next time each page is opened.
+async function saveEditInvoice() {
+  if (!_editingInvoice) return;
+  const payslip = parseFloat(document.getElementById('editInvPayslip').value);
+  const amount = parseFloat(document.getElementById('editInvAmount').value);
+  if (isNaN(payslip) || isNaN(amount)) return showToast('Enter valid numbers for both amounts', 'error');
+  const notes = document.getElementById('editInvNotes').value;
+  try {
+    await sb('proxy_invoices', {
+      method: 'PATCH',
+      filter: `id=eq.${_editingInvoice.id}`,
+      body: { coway_payslip_amount: payslip, invoice_amount: amount, notes }
+    });
+    await logAudit('UPDATE', 'proxy_invoices', `Edited invoice ${_editingInvoice.id}: payslip RM${payslip}, invoice RM${amount}`);
+    closeModal('modalEditInvoice');
+    showToast('Invoice updated ✓');
+    _editingInvoice = null;
+    loadInvoices();
+  } catch(e) { showToast('Error saving: ' + e.message, 'error'); }
 }
 
 async function openAddProxyModal() {
@@ -7426,15 +7519,42 @@ async function loadPL() {
     const acNet = r2(acRevFromBuckets - acCost);
 
     // Headline: total payslip (NE + AC combined, actual money received).
-    // Sourced from nec_payslip_breakdown, not proxy_invoices — a Payroll-
-    // owned proxy (own_proxy_id, settled via Payroll netting) has no
-    // invoice row at all, but Coway still paid that proxy directly and
-    // that money — including its Passive income — belongs to the company
-    // exactly the same as any other proxy's, so it must still count here.
-    // breakdown rows exist for every uploaded proxy regardless of Payroll
-    // flag (see confirmBulkSave), so this is the correct universal source.
-    const totalPayslip = r2(breakdowns.reduce((s,b) => s + parseFloat(b.total_net_payable || 0), 0));
-    const passiveTotal = r2(breakdowns.reduce((s,b) => s + parseFloat(b.passive_income || 0), 0));
+    // Per proxy/year/month, prefer the proxy_invoices figure when one
+    // exists (that's the number the admin sees/edits on the Inv tab, via
+    // the Edit modal — must stay the single source of truth for that
+    // proxy) and only fall back to nec_payslip_breakdown when there's no
+    // invoice at all. That fallback is what makes a Payroll-owned proxy's
+    // (own_proxy_id, settled via Payroll netting, no invoice row by
+    // design) payslip + Passive income still count here — Coway paid that
+    // proxy directly and that money belongs to the company exactly the
+    // same as any other proxy's. Keyed by proxy_id + year + month (not
+    // just proxy_id) — the P&L page can be viewed as "Full Year" (month
+    // filter blank), in which case invoices/breakdowns span all 12 months
+    // for this proxy and must each be counted separately, not collapsed
+    // into one.
+    const periodPayslipByProxy = {}; // "proxyId|year|month" -> { proxyId, payslip, passive }
+    breakdowns.forEach(b => {
+      const key = `${b.proxy_id}|${b.year}|${b.month}`;
+      periodPayslipByProxy[key] = {
+        proxyId: b.proxy_id,
+        payslip: parseFloat(b.total_net_payable || 0),
+        passive: parseFloat(b.passive_income || 0)
+      };
+    });
+    invoices.forEach(i => {
+      // Overwrites (rather than adds to) any breakdown-sourced entry for
+      // this proxy/period — invoices win when both exist, so an admin's
+      // manual Edit-modal correction is reflected here without double
+      // counting.
+      const key = `${i.proxy_id}|${i.year}|${i.month}`;
+      periodPayslipByProxy[key] = {
+        proxyId: i.proxy_id,
+        payslip: parseFloat(i.coway_payslip_amount || 0),
+        passive: parseFloat(i.passive_income || 0)
+      };
+    });
+    const totalPayslip = r2(Object.values(periodPayslipByProxy).reduce((s,v) => s + v.payslip, 0));
+    const passiveTotal = r2(Object.values(periodPayslipByProxy).reduce((s,v) => s + v.passive, 0));
     // Per-proxy breakdown of the Passive figure above, for the "Passive:"
     // hover tooltip — same plain-title-attribute pattern used for the cost
     // breakdown tooltips elsewhere on this page (see tooltipDetails/ttLines
@@ -7442,11 +7562,10 @@ async function loadPL() {
     const proxyNameById = {};
     proxies.forEach(p => { proxyNameById[p.id] = p.name; });
     const passiveByProxy = {};
-    breakdowns.forEach(b => {
-      const amt = parseFloat(b.passive_income || 0);
-      if (Math.abs(amt) < 0.005) return;
-      const name = proxyNameById[b.proxy_id] || 'Unknown';
-      passiveByProxy[name] = r2((passiveByProxy[name] || 0) + amt);
+    Object.values(periodPayslipByProxy).forEach(v => {
+      if (Math.abs(v.passive) < 0.005) return;
+      const name = proxyNameById[v.proxyId] || 'Unknown';
+      passiveByProxy[name] = r2((passiveByProxy[name] || 0) + v.passive);
     });
     const totalRevFinal = totalPayslip;
     const totalCost = r2(BUCKETS8.reduce((s,b) => s + costByBucket8[b], 0));
