@@ -7332,6 +7332,20 @@ async function loadPL() {
     const outsiderComByStaff = {};    // staff_id -> sum of total_com for outsider (for revenue ratio)
     const tmComByStaff = {};          // staff_id -> sum of total_com for TM (for revenue ratio)
     const allComByStaff = {};         // staff_id -> sum of total_com for all orders
+    // Which bucket (DM/TM) + which company (NE/AC) a staff's Staff Commission
+    // cost lands in for THIS period — derived from what was actually picked
+    // per order (Team + Channel/Algo, set in Bulk Upload/Breakdown/Auto
+    // Commission Matching), not from the staff's static profile fields.
+    // A staff's profile channel/company_team can go stale or simply not
+    // reflect a one-off assignment (e.g. a Manager-categorized person who
+    // also personally worked some TM orders this month) — the order-level
+    // choice is always the source of truth, same principle already applied
+    // to revenue bucketing (assignToBucket) below. Per the "DM and TM never
+    // mix on one staff" business rule this is just counting which algo (if
+    // any) actually shows up on this staff's orders this period.
+    const dmCountByStaff = {};
+    const tmCountByStaff = {};
+    const algoTeamCountByStaff = {}; // staff_id -> { 'New Era': n, 'Alpha C': m }
     plAssignments.forEach(a => {
       const orderData = orderComMap[String(a.order_no)];
       const totalCom = parseFloat(orderData?.total_com || 0);
@@ -7346,7 +7360,23 @@ async function loadPL() {
         if (totalCom > 0) tmComByStaff[a.staff_id] = (tmComByStaff[a.staff_id] || 0) + totalCom;
         if (earnedCom > 0) tmEarnedByStaff[a.staff_id] = (tmEarnedByStaff[a.staff_id] || 0) + earnedCom;
       }
+      if (a.commission_algo === 'dm' || a.commission_algo === 'tm') {
+        const map = a.commission_algo === 'dm' ? dmCountByStaff : tmCountByStaff;
+        map[a.staff_id] = (map[a.staff_id] || 0) + 1;
+        const t = a.team || 'New Era';
+        if (!algoTeamCountByStaff[a.staff_id]) algoTeamCountByStaff[a.staff_id] = {};
+        algoTeamCountByStaff[a.staff_id][t] = (algoTeamCountByStaff[a.staff_id][t] || 0) + 1;
+      }
     });
+    // Majority team among a staff's dm/tm orders this period — falls back
+    // to their profile company_team when they have no dm/tm orders at all.
+    function liveTeamForStaff(staffId, fallbackTeam) {
+      const counts = algoTeamCountByStaff[staffId];
+      if (!counts) return fallbackTeam;
+      let best = fallbackTeam, bestN = -1;
+      Object.entries(counts).forEach(([t, n]) => { if (n > bestN) { best = t; bestN = n; } });
+      return best;
+    }
 
     // tooltip detail maps: bucket -> label -> [{name, amount}]
     const tooltipDetails = {};
@@ -7522,11 +7552,20 @@ async function loadPL() {
         return;
       }
 
-      const team = staff?.company_team || 'New Era';
-      const ch = (staff?.channel || 'DM').toUpperCase();
+      // Whether THIS staff's own orders this period actually carried a
+      // dm/tm commission_algo — the live, order-level source of truth for
+      // "is this person's commission this month a DM or TM bucket item"
+      // (see dmCountByStaff/tmCountByStaff above). Falls back to the
+      // staff's static profile (staff_type/channel) only when they have
+      // no dm/tm orders at all this period (e.g. a pure-salary month).
+      const dmCount = dmCountByStaff[p.staff_id] || 0;
+      const tmCount = tmCountByStaff[p.staff_id] || 0;
+      const hasSalesOrders = dmCount > 0 || tmCount > 0;
+      const team = liveTeamForStaff(p.staff_id, staff?.company_team || 'New Era');
+      const ch = hasSalesOrders ? (tmCount >= dmCount ? 'TM' : 'DM') : (staff?.channel || 'DM').toUpperCase();
 
       // 3 & 4. Sales staff (DM or TM)
-      if (staff?.staff_type === 'sales') {
+      if (staff?.staff_type === 'sales' || hasSalesOrders) {
         const bucket = team === 'Alpha C' ? (ch === 'TM' ? 'AC-TM' : 'AC-DM') : (ch === 'TM' ? 'NE-TM' : 'NE-DM');
         // commission_earned: deductions REDUCE commission cost (e.g. staff repay advance)
         const netComm = r2(comm - ded);
