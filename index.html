@@ -1666,6 +1666,7 @@
             <optgroup label="Other">
               <option value="Manager">Manager</option>
               <option value="Other">Other</option>
+              <option value="Excluded">📁 Data Account (excluded from P&amp;L)</option>
             </optgroup>
           </select>
         </div>
@@ -1849,6 +1850,7 @@
           <select id="staffType" class="form-input" onchange="toggleStaffFields()">
             <option value="sales">Sales (Commission-based)</option>
             <option value="admin">Admin (Fixed Salary)</option>
+            <option value="excluded">📁 Data Account (excluded from P&amp;L)</option>
           </select>
         </div>
         <div class="form-group" id="channelField">
@@ -1921,6 +1923,7 @@
           <select id="editStaffType" class="form-input" onchange="toggleEditStaffFields()">
             <option value="sales">Sales (Commission-based)</option>
             <option value="admin">Admin (Fixed Salary)</option>
+            <option value="excluded">📁 Data Account (excluded from P&amp;L)</option>
           </select>
         </div>
         <div class="form-group" id="editChannelField">
@@ -3695,7 +3698,7 @@ const BANK_TEAM_ORDER = [
   'NE-DM','NE-TM','NE-Admin','NE-Editor','NE-Content Creator',
   'AC-DM','AC-TM','AC-Admin','AC-Editor','AC-Content Creator',
   'Shared-Admin','Shared-Editor','Shared-Content Creator',
-  'Manager','Other',
+  'Manager','Other','Excluded',
   // Legacy values for backward compat
   'NEW ERA ADMIN','NEW ERA EDITOR TEAM','Digital Marketing Team','Telemarketing Team','Others'
 ];
@@ -3706,6 +3709,7 @@ const BANK_TEAM_LABELS = {
   'AC-Admin':'AC — Admin','AC-Editor':'AC — Editor','AC-Content Creator':'AC — Content Creator',
   'Shared-Admin':'Shared — Admin','Shared-Editor':'Shared — Editor','Shared-Content Creator':'Shared — Content Creator',
   'Manager':'Manager','Other':'Other',
+  'Excluded':'📁 Data Account (excluded from P&L)',
   'NEW ERA ADMIN':'NE — Admin (legacy)','NEW ERA EDITOR TEAM':'NE — Editor (legacy)',
   'Digital Marketing Team':'NE — DM (legacy)','Telemarketing Team':'NE — TM (legacy)','Others':'Other (legacy)'
 };
@@ -3794,6 +3798,10 @@ function filterBankDirTable() {
 function inferStaffTypeFromTeam(team) {
   if (team === 'NE-DM' || team === 'AC-DM' || team === 'Digital Marketing Team') return { staff_type: 'sales', channel: 'DM', company_team: team.startsWith('AC') ? 'Alpha C' : 'New Era' };
   if (team === 'NE-TM' || team === 'AC-TM' || team === 'Telemarketing Team') return { staff_type: 'sales', channel: 'TM', company_team: team.startsWith('AC') ? 'Alpha C' : 'New Era' };
+  // Data-only account — own Coway proxy exists purely for distributor
+  // requirements, not real business. No channel/team/position/payslip of
+  // theirs is ever meant to hit P&L (see loadPL()'s excludedProxyIds).
+  if (team === 'Excluded') return { staff_type: 'excluded', channel: null, company_team: null, position: null };
   // Admin-type staff: also derive `position` straight from the Bank
   // Details team label when it already spells out the sub-role (Editor /
   // Content Creator / Other) — without this, everyone lands on the
@@ -4810,6 +4818,7 @@ function renderStaffList() {
   };
   const getStaffType = (s) => {
     if (managerStaffIds.has(s.id)) return { label: 'Manager', color: 'var(--accent)' };
+    if (s.staff_type === 'excluded') return { label: '📁 Data Only', color: '#6b7280' };
     if (s.staff_type === 'admin') return POSITION_LABELS[s.position] || POSITION_LABELS.admin;
     if (s.channel === 'TM') return { label: 'TM', color: '#f97316' };
     if (s.channel === 'DM') return { label: 'DM', color: '#16a34a' };
@@ -7279,6 +7288,14 @@ async function loadPL() {
     // at face value, so that's not real collected revenue.)
     const invoices = await sb('proxy_invoices', { filter: invFilter, select: 'proxy_id,year,month,coway_payslip_amount,company_team,passive_income' });
     const proxies = await sb('proxy_accounts', { select: 'id,name,channel,company_team' });
+    // "Excluded" staff (Bank Details team = a data/资料-only account, marked
+    // staff_type='excluded') have their own Coway proxy linked purely to
+    // satisfy distributor requirements — not real business. Whatever that
+    // proxy's payslip comes out to, it must never touch P&L (no revenue, no
+    // passive, no cost), regardless of the amount. Build the set of proxy
+    // ids to skip everywhere below.
+    const excludedStaffRows = await sb('nec_staff', { filter: 'staff_type=eq.excluded&own_proxy_id=not.is.null', select: 'own_proxy_id' }).catch(() => []);
+    const excludedProxyIds = new Set(excludedStaffRows.map(s => s.own_proxy_id));
     const costs = await sb('nec_pl_costs', { filter: invFilter });
     // Ensure ccCards is loaded so we can determine which card belongs to NE vs AC
     if (!ccCards.length) ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true', select: 'id,card_name,bank,owner_team,gift_team,ads_team' }).catch(() => []);
@@ -7434,6 +7451,7 @@ async function loadPL() {
     const outsiderCostByStaff = {}; // display_name -> com_from_payslip total
 
     for (const bd of breakdowns) {
+      if (excludedProxyIds.has(bd.proxy_id)) continue; // excluded/data-only account — never touches P&L
       try {
         const orders = JSON.parse(bd.categories_json || '[]');
         const inv = invoices.find(i => i.proxy_id === bd.proxy_id && i.year === bd.year && i.month === bd.month);
@@ -7536,6 +7554,7 @@ async function loadPL() {
       const epf = parseFloat(p.epf_employee || 0);
 
       const staff = staffMap[p.staff_id];
+      if (staff?.staff_type === 'excluded') return; // data-only account — never a P&L cost either
       const staffRec = allStaff.find(s => s.id === p.staff_id) || {};
       const staffName = staffRec.name || p.staff_name || 'Unknown';
 
@@ -7736,6 +7755,7 @@ async function loadPL() {
     // into one.
     const periodPayslipByProxy = {}; // "proxyId|year|month" -> { proxyId, payslip, passive }
     breakdowns.forEach(b => {
+      if (excludedProxyIds.has(b.proxy_id)) return; // excluded/data-only account — never touches P&L
       const key = `${b.proxy_id}|${b.year}|${b.month}`;
       periodPayslipByProxy[key] = {
         proxyId: b.proxy_id,
@@ -7744,6 +7764,7 @@ async function loadPL() {
       };
     });
     invoices.forEach(i => {
+      if (excludedProxyIds.has(i.proxy_id)) return; // excluded/data-only account — never touches P&L
       // Overwrites (rather than adds to) any breakdown-sourced entry for
       // this proxy/period — invoices win when both exist, so an admin's
       // manual Edit-modal correction is reflected here without double
