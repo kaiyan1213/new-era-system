@@ -2811,6 +2811,30 @@ function r2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
 // Outsider are always visually distinct, never two teams sharing a color.
 function teamColorHex(t) { return t === 'Alpha C' ? '#f97316' : t === 'Outsider' ? '#b45309' : '#2563eb'; }
 
+// Sentinel values for every "Owner"/"Assign To" staff dropdown across the
+// app (Bulk Upload, Breakdown, Auto Commission unmatched orders, Bulk
+// Manual Match). Some orders are real company-direct sales with no
+// individual commission-earning salesperson behind them — picking one of
+// these resolves the order (satisfies "every order must belong to
+// someone") without forcing a fake staff pick. staff_id is saved as null
+// in nec_order_assignments; staff_name records which company bucket it
+// belongs to so it still displays clearly instead of a blank "—".
+const COMPANY_SALES_NE = '__NE_COMPANY__';
+const COMPANY_SALES_AC = '__AC_COMPANY__';
+function companySalesOptionsHtml() {
+  return `<option value="${COMPANY_SALES_NE}" data-algo="dm">— NE Company Sales (no salesman) —</option>`
+       + `<option value="${COMPANY_SALES_AC}" data-algo="dm">— AC Company Sales (no salesman) —</option>`;
+}
+// Resolves a dropdown's raw selected value into { staffId, staffName } —
+// null staffId + a friendly staffName for the two Company Sales
+// sentinels, otherwise the real staff id (caller looks up the real name
+// as before) with staffName left null.
+function resolveOwnerSelection(rawValue) {
+  if (rawValue === COMPANY_SALES_NE) return { staffId: null, staffName: 'NE Company Sales' };
+  if (rawValue === COMPANY_SALES_AC) return { staffId: null, staffName: 'AC Company Sales' };
+  return { staffId: rawValue || null, staffName: null };
+}
+
 function showPage(page) {
   ['proxy','payroll','manager','pl','export','audit','upload','breakdown','setup','directory','bankdir','cctracker'].forEach(p => {
     const el = document.getElementById(`page-${p}`);
@@ -3337,6 +3361,33 @@ async function getNextInvoiceNumber(year, month) {
     return `NEC-${year}-${String(month).padStart(2,'0')}-${String(next).padStart(3,'0')}`;
   } catch(e) {
     return `NEC-${year}-${String(month).padStart(2,'0')}-001`;
+  }
+}
+
+// Sequential invoice number for staff SETTLEMENT invoices (Payroll ->
+// "Invoice" button, when a staff/manager's net settlement is negative,
+// i.e. they owe New Era money back) — a separate NEC-S-YYYY-MM-### pool
+// from proxy invoices' NEC-YYYY-MM-###, since these come from a
+// different table (nec_payroll) and aren't billing the same kind of
+// relationship. Persisted on nec_payroll.invoice_number the first time
+// it's generated (see generatePayrollRecordPayslip) so re-printing the
+// same record always shows the same number, and it survives a page
+// reload instead of being recomputed from scratch each time.
+async function getNextStaffInvoiceNumber(year, month) {
+  try {
+    const records = await sb('nec_payroll', {
+      filter: `year=eq.${year}&month=eq.${month}&invoice_number=not.is.null`,
+      select: 'invoice_number'
+    });
+    let maxSeq = 0;
+    records.forEach(r => {
+      const m = (r.invoice_number || '').match(/-(\d{3})$/);
+      if (m) maxSeq = Math.max(maxSeq, parseInt(m[1]));
+    });
+    const next = maxSeq + 1;
+    return `NEC-S-${year}-${String(month).padStart(2,'0')}-${String(next).padStart(3,'0')}`;
+  } catch(e) {
+    return `NEC-S-${year}-${String(month).padStart(2,'0')}-001`;
   }
 }
 
@@ -4646,7 +4697,7 @@ async function loadPayroll() {
         })()}</td>
         <td>
           <span class="badge badge-other" style="${typeBadgeColor}">${typeLabel}</span>
-          ${isInvoice ? '<span class="badge badge-other" style="color:var(--red)" title="Staff owes New Era back">Invoice</span>' : ''}
+          ${isInvoice ? `<span class="badge badge-other" style="color:var(--red)" title="Staff owes New Era back">Invoice</span>${r.invoice_number ? `<div style="font-size:9px;color:var(--muted);font-family:var(--mono);margin-top:2px">${r.invoice_number}</div>` : ''}` : ''}
         </td>
         <td class="td-mono">${MONTHS[r.month]} ${r.year}</td>
         <td class="td-mono">${r.orders_count || 0}</td>
@@ -5043,6 +5094,17 @@ async function previewAutoCommission() {
 
       if (manualAssign) {
         staff = staffList.find(s => s.id === manualAssign.staff_id);
+        if (!staff && manualAssign.staff_id == null && manualAssign.staff_name) {
+          // Deliberately assigned to "Company Sales" (no individual
+          // salesperson — see COMPANY_SALES_NE/AC) rather than left
+          // unassigned by mistake. Synthesize a pseudo-staff with an id
+          // that never matches a real staffList entry, so this order
+          // counts as resolved (drops out of the Unmatched list below)
+          // without generating a fake payroll row for it — there's no one
+          // to pay, the order's revenue is already fully counted via
+          // nec_order_assignments/P&L.
+          staff = { id: `__company__${manualAssign.staff_name}`, name: manualAssign.staff_name, isCompanySales: true };
+        }
       } else {
         const claims = leadsByNormName[po.norm_name];
         if (claims && claims.length) {
@@ -5256,7 +5318,7 @@ async function previewAutoCommission() {
               <div style="display:flex;align-items:center;gap:6px">
                 <span style="font-size:11px;color:var(--muted);min-width:52px">Owner:</span>
                 <select id="${pgId}_staff" style="font-size:11px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text)">
-                  <option value="">— pick owner —</option>${staffOptsHtml}
+                  <option value="">— pick owner —</option>${companySalesOptionsHtml()}${staffOptsHtml}
                 </select>
                 <button onclick="setAllOrphanOwner('${pgId}',${indicesJson})" style="padding:2px 10px;font-size:11px;border-radius:4px;border:1px solid var(--accent);color:var(--accent);background:transparent;cursor:pointer">Set All</button>
               </div>
@@ -5277,7 +5339,7 @@ async function previewAutoCommission() {
               </select></td>
               <td style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
                 <select id="orphanAssign_${i}" style="font-size:12px;padding:4px 6px" onchange="updateOrphanAlgoDefault(${i})">
-                  <option value="">— select staff —</option>${staffOptsHtml}
+                  <option value="">— select staff —</option>${companySalesOptionsHtml()}${staffOptsHtml}
                 </select>
                 <select id="orphanAlgo_${i}" style="font-size:12px;padding:4px 6px">
                   <option value="dm">DM</option><option value="tm">TM</option><option value="outsider">Outsider</option>
@@ -5367,10 +5429,11 @@ async function assignOrphanOrder(i) {
   const sel = document.getElementById(`orphanAssign_${i}`);
   const algoSel = document.getElementById(`orphanAlgo_${i}`);
   const teamSel = document.getElementById(`orphanTeam_${i}`);
-  const staffId = sel?.value;
+  const rawValue = sel?.value;
   const commissionAlgo = algoSel?.value || 'dm';
   const selectedTeam = teamSel?.value || o.team || 'New Era';
-  if (!staffId) { showToast('Pick a staff member first', 'error'); return; }
+  if (!rawValue) { showToast('Pick a staff member first', 'error'); return; }
+  const { staffId, staffName } = resolveOwnerSelection(rawValue);
   const year = parseInt(document.getElementById('acYear').value);
   const month = parseInt(document.getElementById('acMonth').value);
   try {
@@ -5383,6 +5446,7 @@ async function assignOrphanOrder(i) {
         customer_name: o.customer_name,
         proxy_id: o.proxy_id,
         staff_id: staffId,
+        staff_name: staffName,
         source: 'manual',
         commission_algo: commissionAlgo
       }
@@ -5415,7 +5479,7 @@ function populateBulkMatchStaffSelect() {
   // batch of non-ad-sourced names could belong to an admin or manager
   // just as easily as a DM/TM sales staff.
   const sorted = [...staffList].sort((a,b) => a.name.localeCompare(b.name));
-  sel.innerHTML = `<option value="">— select staff —</option>` +
+  sel.innerHTML = `<option value="">— select staff —</option>${companySalesOptionsHtml()}` +
     sorted.map(s => `<option value="${s.id}" data-algo="${s.staff_type === 'sales' ? (s.channel || 'DM').toLowerCase() : 'outsider'}">${s.name}</option>`).join('');
 }
 
@@ -5436,16 +5500,17 @@ function updateBulkMatchAlgoDefault() {
 // assigns any match to the chosen staff via nec_order_assignments. Reports
 // back which names matched and which didn't.
 async function bulkManualMatch() {
-  const staffId = document.getElementById('bulkMatchStaff').value;
+  const rawValue = document.getElementById('bulkMatchStaff').value;
   const commissionAlgo = document.getElementById('bulkMatchAlgo')?.value || 'dm';
   const resultEl = document.getElementById('bulkMatchResult');
   const raw = document.getElementById('bulkMatchNames').value;
   const names = raw.split('\n').map(s => s.trim()).filter(Boolean);
 
-  if (!staffId) { showToast('Pick a staff member first', 'error'); return; }
+  if (!rawValue) { showToast('Pick a staff member first', 'error'); return; }
   if (!names.length) { showToast('Paste at least one customer name', 'error'); return; }
 
-  const staff = staffList.find(s => s.id === staffId);
+  const { staffId, staffName } = resolveOwnerSelection(rawValue);
+  const staff = staffId ? staffList.find(s => s.id === staffId) : { name: staffName };
   const year = parseInt(document.getElementById('acYear').value);
   const month = parseInt(document.getElementById('acMonth').value);
   resultEl.innerHTML = `<span style="color:var(--muted)">Searching this month's Coway payslips...</span>`;
@@ -5495,6 +5560,7 @@ async function bulkManualMatch() {
             customer_name: m.order.customer_name,
             proxy_id: m.order.proxy_id,
             staff_id: staffId,
+            staff_name: staffName,
             source: 'manual',
             commission_algo: commissionAlgo
           }
@@ -5890,7 +5956,7 @@ function buildStaffInvoiceHTML(staff, r) {
           </div>
           <div>
             <div class="inv-label">INVOICE</div>
-            <div class="inv-meta">No: ${genStaffDocNumber('S', r)}<br>Date: ${MONTH_FULL[r.month]} ${r.year}</div>
+            <div class="inv-meta">No: ${r.invoice_number || genStaffDocNumber('S', r)}<br>Date: ${MONTH_FULL[r.month]} ${r.year}</div>
           </div>
         </div>
         <div class="inv-divider"></div>
@@ -6061,7 +6127,7 @@ function generatePayrollCalculation(recordId) {
 </body></html>`);
 }
 
-function generatePayrollRecordPayslip(recordId) {
+async function generatePayrollRecordPayslip(recordId) {
   const r = payrollRecords?.find(x => x.id === recordId);
   if (!r) { showToast('Record not found', 'error'); return; }
   const staff = staffList.find(s => s.id === r.staff_id) || { name: 'Unknown', role: '', channel: '' };
@@ -6071,6 +6137,19 @@ function generatePayrollRecordPayslip(recordId) {
   // generate an invoice billing them for the difference instead of a
   // payslip.
   const isInv = isInvoiceRecord(r);
+  if (isInv && !r.invoice_number) {
+    // First time this settlement invoice is opened — assign it a real,
+    // sequential, persisted number (NEC-S-YYYY-MM-###) instead of the old
+    // UUID-derived hash, and save it on the record so it's a proper
+    // trackable invoice (same number every reprint, visible on the
+    // Payroll table) rather than a throwaway print preview.
+    try {
+      const num = await getNextStaffInvoiceNumber(r.year, r.month);
+      await sb('nec_payroll', { method: 'PATCH', filter: `id=eq.${r.id}`, body: { invoice_number: num } });
+      r.invoice_number = num;
+      await logAudit('UPDATE', 'nec_payroll', `Assigned invoice number ${num} to settlement invoice for ${staff.name} — ${MONTHS[r.month]} ${r.year}`);
+    } catch(e) { console.error('Failed to assign staff invoice number:', e); }
+  }
   const html = isInv ? buildStaffInvoiceHTML(staff, r) : buildStaffPayslipHTML(staff, r);
   const title = isInv ? 'Invoice' : 'Payslip';
   const win = window.open('', '_blank', 'width=700,height=800');
@@ -8884,6 +8963,7 @@ ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS settlement_type text;
 ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS record_type text DEFAULT 'staff';
 ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS notes text;
 ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS payment_date date;
+ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS invoice_number text; -- real, sequential (NEC-S-YYYY-MM-###) settlement-invoice number, assigned once on first print and reused after
 -- If nec_payroll already existed before epf_employee/own_proxy_offset/
 -- claim_amount were added, total_pay's generated formula won't include
 -- them automatically — drop and recreate the column so existing
@@ -9470,6 +9550,7 @@ function buildParseResultHTML(result) {
               onchange="setOrderStaff('${code}','${o.order_no}',this.value)"
               style="font-size:10px;padding:2px 4px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--accent);cursor:pointer">
         <option value="">— assign —</option>
+        ${companySalesOptionsHtml()}
         ${staffOpts}
       </select>
     </div>`;
@@ -9522,6 +9603,7 @@ function buildParseResultHTML(result) {
               <span style="font-size:11px;color:var(--muted);min-width:52px">Owner:</span>
               <select id="ownerSel_${code}" style="font-size:11px;padding:3px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text)">
                 <option value="">— pick owner —</option>
+                ${companySalesOptionsHtml()}
                 ${[...staffList].sort((a,b2)=>a.name.localeCompare(b2.name)).map(s=>'<option value="'+s.id+'">'+s.name+'</option>').join('')}
               </select>
               <button onclick="setAllUploadOwner('${code}')" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid var(--accent);color:var(--accent);background:transparent;cursor:pointer">Set All</button>
@@ -9790,7 +9872,8 @@ async function confirmBulkSave() {
       // all for that order and fell back to a hardcoded NE-DM default,
       // regardless of what was actually picked on screen.
       for (const o of ordersWithTeam) {
-        const staffId = _staffMap[`${code}|${o.order_no}`] || null;
+        const rawStaffValue = _staffMap[`${code}|${o.order_no}`] || null;
+        const { staffId, staffName: sentinelName } = resolveOwnerSelection(rawStaffValue);
         const staffObj = staffId ? staffList.find(s => String(s.id) === String(staffId)) : null;
         const orderTeam = o.team || proxyTeam;
         const commAlgo = deriveCommAlgo(orderTeam, o.channel);
@@ -9798,7 +9881,7 @@ async function confirmBulkSave() {
           await sbDelete('nec_order_assignments', `year=eq.${year}&month=eq.${month}&proxy_id=eq.${p.proxy_id}&order_no=eq.${o.order_no}&customer_name=eq.${encodeURIComponent(o.customer_name)}`);
           await sb('nec_order_assignments', {
             method: 'POST',
-            body: { year, month, order_no: o.order_no, customer_name: o.customer_name, proxy_id: p.proxy_id, staff_id: staffId, staff_name: staffObj?.name || null, source: 'bulk_upload', commission_algo: commAlgo, team: orderTeam }
+            body: { year, month, order_no: o.order_no, customer_name: o.customer_name, proxy_id: p.proxy_id, staff_id: staffId, staff_name: staffObj?.name || sentinelName || null, source: 'bulk_upload', commission_algo: commAlgo, team: orderTeam }
           });
         } catch(e) { /* non-fatal — assignment can be corrected manually in Auto Commission / Breakdown */ }
       }
@@ -9926,9 +10009,10 @@ function renderBreakdownSidebar() {
 // writes back, then re-renders the card so the dropdowns update visually.
 async function setAllBreakdownOwner(breakdownId, selectedOnly = false) {
   const sel = document.getElementById(`bdSetAllStaff_${breakdownId}`);
-  const staffId = sel?.value;
-  if (!staffId) return showToast('Pick a staff member first', 'error');
-  const staff = staffList.find(s => String(s.id) === String(staffId));
+  const rawValue = sel?.value;
+  if (!rawValue) return showToast('Pick a staff member first', 'error');
+  const { staffId, staffName: sentinelName } = resolveOwnerSelection(rawValue);
+  const staff = staffId ? staffList.find(s => String(s.id) === String(staffId)) : { name: sentinelName };
   const bdRows = await sb('nec_payslip_breakdown', { filter: `id=eq.${breakdownId}`, select: 'proxy_id,year,month,categories_json,distributor_code' });
   if (!bdRows.length) return;
   const b = bdRows[0];
@@ -10108,7 +10192,7 @@ function openBdAssignModal(event) {
     '<div style="font-weight:700;font-size:14px;margin-bottom:4px">Assign Sales Owner</div>' +
     '<div style="font-size:11px;color:var(--muted);margin-bottom:12px">' + (custname||orderno) + '</div>' +
     '<select id="bdAssignSel" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--input-bg);color:var(--text);font-size:13px;margin-bottom:12px">' +
-    '<option value="">— assign —</option>' + opts + '</select>' +
+    '<option value="">— assign —</option>' + companySalesOptionsHtml() + opts + '</select>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end">' +
     '<button class="btn btn-ghost" onclick="document.getElementById(\'bdAssignFloating\').remove()">Cancel</button>' +
     '<button class="btn btn-danger btn-sm" onclick="bdAssignClear(this)">Clear</button>' +
@@ -10128,9 +10212,10 @@ function openBdAssignModal(event) {
 async function bdAssignSave(btn) {
   const modal = document.getElementById('bdAssignFloating');
   const { proxyid, year, month, orderno, custname } = modal.dataset;
-  const staffId = document.getElementById('bdAssignSel')?.value;
-  if (!staffId) return showToast('Pick a staff member', 'error');
-  const staff = staffList.find(s => String(s.id) === String(staffId));
+  const rawValue = document.getElementById('bdAssignSel')?.value;
+  if (!rawValue) return showToast('Pick a staff member', 'error');
+  const { staffId, staffName: sentinelName } = resolveOwnerSelection(rawValue);
+  const staff = staffId ? staffList.find(s => String(s.id) === String(staffId)) : { name: sentinelName };
   const commAlgo = deriveCommAlgo(modal.dataset.orderteam, modal.dataset.orderchannel || staff?.channel);
   const proxyVal = isNaN(parseInt(proxyid)) ? proxyid : parseInt(proxyid);
   // Try to get the UUID from proxyList (to match how Bulk Upload stores proxy_id)
@@ -10374,7 +10459,7 @@ async function showBreakdown(id) {
         <div style="display:flex;align-items:center;gap:8px">
           <span style="font-size:11px;color:var(--muted);min-width:52px">Owner:</span>
           <select id="bdSetAllStaff_${bdId}" style="font-size:11px;padding:3px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text)">
-            <option value="">— pick owner —</option>${bdStaffOpts}
+            <option value="">— pick owner —</option>${companySalesOptionsHtml()}${bdStaffOpts}
           </select>
           <button onclick="setAllBreakdownOwner('${bdId}',false)" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid var(--accent);color:var(--accent);background:transparent;cursor:pointer">Set All</button>
           <button onclick="setAllBreakdownOwner('${bdId}',true)" style="padding:3px 12px;font-size:11px;border-radius:4px;border:1px solid #16a34a;color:#16a34a;background:transparent;cursor:pointer">✓ Set Selected</button>
