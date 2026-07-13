@@ -2050,7 +2050,7 @@
         <label class="form-label">Deductions (RM)</label>
         <input type="number" id="prDeduct" class="form-input" placeholder="0.00" oninput="calcPayroll()">
       </div>
-      <div id="prEpfNote" style="display:none;font-size:11px;color:var(--muted)">This staff member has EPF applicable — employee 11% of base salary will be deducted automatically below, employer 13% is recorded separately for company records.</div>
+      <div id="prEpfNote" style="display:none;font-size:11px;color:var(--muted)">This staff member has EPF applicable — employee 11% of (base salary − deductions) will be deducted automatically below, employer 13% is recorded separately for company records.</div>
       <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px">
         <div style="display:flex;justify-content:space-between;margin-bottom:6px">
           <span style="color:var(--muted);font-size:12px">EPF Employee Deduction (11%)</span>
@@ -6247,10 +6247,14 @@ async function openPayrollEntryModal() {
 
 // Standard Malaysia EPF rates: employee 11%, employer 13% — applied to
 // base salary only (not commission/bonus), and only when the staff
-// member has epf_applicable set.
-function calcEpf(baseSalary) {
-  const employee = baseSalary * 0.11;
-  const employer = baseSalary * 0.13;
+// member has epf_applicable set. If there are any deductions this period,
+// EPF is calculated on the base salary AFTER those deductions are taken
+// out (base salary − deductions), not on the raw base salary — deductions
+// reduce the salary the EPF % actually applies to.
+function calcEpf(baseSalary, deductions = 0) {
+  const epfBase = Math.max(0, (parseFloat(baseSalary) || 0) - (parseFloat(deductions) || 0));
+  const employee = epfBase * 0.11;
+  const employer = epfBase * 0.13;
   return { employee, employer };
 }
 
@@ -6300,7 +6304,7 @@ function calcPayroll() {
   const deduct = parseFloat(document.getElementById('prDeduct').value) || 0;
   let epfEmployee = 0;
   if (opt.dataset.epf === '1') {
-    epfEmployee = calcEpf(salary).employee;
+    epfEmployee = calcEpf(salary, deduct).employee;
   }
   document.getElementById('prEpfAmount').textContent = fmt(epfEmployee);
   const total = comm + salary + bonus - deduct - epfEmployee;
@@ -6314,15 +6318,15 @@ async function savePayroll() {
   const year = parseInt(document.getElementById('prYear').value);
   const month = parseInt(document.getElementById('prMonth').value);
   const salary = parseFloat(document.getElementById('prSalary').value) || 0;
-  let epfEmployee = 0, epfEmployer = 0;
-  if (opt?.dataset.epf === '1') {
-    const epf = calcEpf(salary);
-    epfEmployee = epf.employee;
-    epfEmployer = epf.employer;
-  }
   const commission = parseFloat(document.getElementById('prComm').value) || 0;
   const bonus = parseFloat(document.getElementById('prBonus').value) || 0;
   const deductions = parseFloat(document.getElementById('prDeduct').value) || 0;
+  let epfEmployee = 0, epfEmployer = 0;
+  if (opt?.dataset.epf === '1') {
+    const epf = calcEpf(salary, deductions);
+    epfEmployee = epf.employee;
+    epfEmployer = epf.employer;
+  }
   const staff = staffList.find(s => s.id === staffId);
   const ownProxyOffset = await getOwnProxyPayslipAmount(staff?.own_proxy_id, year, month);
   const netPay = r2(commission + salary + bonus - deductions - epfEmployee - ownProxyOffset);
@@ -6384,17 +6388,32 @@ async function saveEditPayroll() {
   // do that, since the admin is already re-confirming this record's
   // numbers. Managers never have an own-proxy offset (they're not proxy
   // accounts), so this only applies to staff-type records.
+  //
+  // Also recompute EPF here: EPF is calculated on base salary AFTER
+  // deductions, so if the admin changes deductions in this modal, the
+  // employee/employer EPF amounts need to be refreshed to match —
+  // otherwise editing deductions alone would leave a stale EPF figure
+  // that was computed against the wrong base.
   const r = payrollRecords?.find(x => x.id === id);
   if (r && r.record_type !== 'manager') {
     const staff = staffList.find(s => s.id === r.staff_id);
     const ownProxyOffset = await getOwnProxyPayslipAmount(staff?.own_proxy_id, r.year, r.month);
-    const netPay = r2(parseFloat(r.commission_earned||0) + parseFloat(r.base_salary||0) + body.bonus + body.claim_amount - body.deductions - parseFloat(r.epf_employee||0) - ownProxyOffset);
+    let epfEmployee = parseFloat(r.epf_employee || 0);
+    let epfEmployer = parseFloat(r.epf_employer || 0);
+    if (staff?.epf_applicable) {
+      const epf = calcEpf(parseFloat(r.base_salary || 0), body.deductions);
+      epfEmployee = epf.employee;
+      epfEmployer = epf.employer;
+    }
+    body.epf_employee = epfEmployee;
+    body.epf_employer = epfEmployer;
+    const netPay = r2(parseFloat(r.commission_earned||0) + parseFloat(r.base_salary||0) + body.bonus + body.claim_amount - body.deductions - epfEmployee - ownProxyOffset);
     body.own_proxy_offset = ownProxyOffset;
     body.settlement_type = ownProxyOffset > 0 ? (netPay >= 0 ? 'payslip' : 'invoice') : null;
   }
   try {
     await sb('nec_payroll', { method: 'PATCH', filter: `id=eq.${id}`, body });
-    await logAudit('UPDATE', 'nec_payroll', `Edited payroll record ${id} — claim RM${body.claim_amount.toFixed(2)}, bonus RM${body.bonus.toFixed(2)}, deductions RM${body.deductions.toFixed(2)}${body.own_proxy_offset != null ? `, own proxy offset refreshed to RM${body.own_proxy_offset.toFixed(2)}` : ''}`);
+    await logAudit('UPDATE', 'nec_payroll', `Edited payroll record ${id} — claim RM${body.claim_amount.toFixed(2)}, bonus RM${body.bonus.toFixed(2)}, deductions RM${body.deductions.toFixed(2)}${body.epf_employee != null ? `, EPF employee refreshed to RM${body.epf_employee.toFixed(2)}` : ''}${body.own_proxy_offset != null ? `, own proxy offset refreshed to RM${body.own_proxy_offset.toFixed(2)}` : ''}`);
     closeModal('modalEditPayroll');
     showToast('Saved ✓');
     loadPayroll();
