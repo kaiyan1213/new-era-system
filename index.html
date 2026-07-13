@@ -7646,8 +7646,21 @@ async function loadPL() {
       // 3 & 4. Sales staff (DM or TM)
       if (staff?.staff_type === 'sales' || hasSalesOrders) {
         const bucket = team === 'Alpha C' ? (ch === 'TM' ? 'AC-TM' : 'AC-DM') : (ch === 'TM' ? 'NE-TM' : 'NE-DM');
+        // commission_earned on the payroll row is a FLATTENED sum across
+        // this staff's DM/TM/Outsider sub-totals for the period (see
+        // saveAutoCommissionRow) — a staff who mixes mostly-DM orders with
+        // a few Outsider ones (e.g. Lim Ze Heng: RM4,500 DM + RM2,007.42
+        // Outsider = RM6,507.42 combined) would otherwise have that whole
+        // number booked as "Staff Commission (DM)" into AC-DM/NE-DM/etc.
+        // But the Outsider portion is ALREADY booked separately above (the
+        // breakdown loop's per-order 'Outsider Commission' cost, team-
+        // agnostic) — so it must be stripped back out here first, or it
+        // gets double-counted: once correctly in the Outsider bucket, and
+        // again incorrectly folded into this staff's DM/TM bucket.
+        const outsiderPortion = outsiderComByStaff[p.staff_id] || 0;
+        const dmTmComm = r2(comm - outsiderPortion);
         // commission_earned: deductions REDUCE commission cost (e.g. staff repay advance)
-        const netComm = r2(comm - ded);
+        const netComm = r2(dmTmComm - ded);
         if (netComm !== 0) { addCost(bucket, `Staff Commission (${ch})`, netComm); addTooltipDetail(bucket, `Staff Commission (${ch})`, staffName, netComm); }
         if (bon !== 0) { addCost(bucket, 'Staff Bonus', bon); addTooltipDetail(bucket, 'Staff Bonus', staffName, bon); }
         if (claim > 0) { addCost(bucket, 'Staff Claim', claim); addTooltipDetail(bucket, 'Staff Claim', staffName, claim); }
