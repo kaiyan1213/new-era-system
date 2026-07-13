@@ -7422,7 +7422,14 @@ async function loadPL() {
       if (a.commission_algo === 'dm' || a.commission_algo === 'tm') {
         const map = a.commission_algo === 'dm' ? dmCountByStaff : tmCountByStaff;
         map[a.staff_id] = (map[a.staff_id] || 0) + 1;
-        const t = a.team || 'New Era';
+        // Same fallback as the revenue-side plAssignMap above (line ~7337):
+        // legacy rows saved before the `team` column existed (a.team IS
+        // NULL) should fall back to the staff's own profile team, NOT get
+        // hardcoded to 'New Era'. Without this, a staff with a mix of
+        // properly-tagged AC orders and older untagged (team=null) orders
+        // could have the null ones outvote the real AC ones in the
+        // majority-count below and wrongly land the whole staff in NE.
+        const t = a.team || plStaffMap[a.staff_id]?.company_team || 'New Era';
         if (!algoTeamCountByStaff[a.staff_id]) algoTeamCountByStaff[a.staff_id] = {};
         algoTeamCountByStaff[a.staff_id][t] = (algoTeamCountByStaff[a.staff_id][t] || 0) + 1;
       }
