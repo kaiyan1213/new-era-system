@@ -6295,9 +6295,27 @@ async function saveEditPayroll() {
     bonus: parseFloat(document.getElementById('epBonus').value) || 0,
     deductions: parseFloat(document.getElementById('epDeduct').value) || 0,
   };
+  // Also refresh the own-proxy netting against this staff's Coway payslip
+  // breakdown for this period. own_proxy_offset is only computed once, at
+  // the moment a payroll record is first saved (savePayroll/
+  // saveAutoCommissionRow) — if that record was created before this
+  // staff's own proxy payslip got uploaded (or before own_proxy_id was
+  // linked at all), it's permanently stuck netting against RM0 unless
+  // something recomputes it later. Editing here is the natural point to
+  // do that, since the admin is already re-confirming this record's
+  // numbers. Managers never have an own-proxy offset (they're not proxy
+  // accounts), so this only applies to staff-type records.
+  const r = payrollRecords?.find(x => x.id === id);
+  if (r && r.record_type !== 'manager') {
+    const staff = staffList.find(s => s.id === r.staff_id);
+    const ownProxyOffset = await getOwnProxyPayslipAmount(staff?.own_proxy_id, r.year, r.month);
+    const netPay = r2(parseFloat(r.commission_earned||0) + parseFloat(r.base_salary||0) + body.bonus + body.claim_amount - body.deductions - parseFloat(r.epf_employee||0) - ownProxyOffset);
+    body.own_proxy_offset = ownProxyOffset;
+    body.settlement_type = ownProxyOffset > 0 ? (netPay >= 0 ? 'payslip' : 'invoice') : null;
+  }
   try {
     await sb('nec_payroll', { method: 'PATCH', filter: `id=eq.${id}`, body });
-    await logAudit('UPDATE', 'nec_payroll', `Edited payroll record ${id} — claim RM${body.claim_amount.toFixed(2)}, bonus RM${body.bonus.toFixed(2)}, deductions RM${body.deductions.toFixed(2)}`);
+    await logAudit('UPDATE', 'nec_payroll', `Edited payroll record ${id} — claim RM${body.claim_amount.toFixed(2)}, bonus RM${body.bonus.toFixed(2)}, deductions RM${body.deductions.toFixed(2)}${body.own_proxy_offset != null ? `, own proxy offset refreshed to RM${body.own_proxy_offset.toFixed(2)}` : ''}`);
     closeModal('modalEditPayroll');
     showToast('Saved ✓');
     loadPayroll();
