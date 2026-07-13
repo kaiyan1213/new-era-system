@@ -5220,6 +5220,7 @@ async function previewAutoCommission() {
           com_from_payslip: o.com_from_payslip,
           allowance_portion: o.allowance_portion,
           commission_algo: o.commission_algo,
+          team: o.team,
           cost: o.manualAssign?.cost ?? o.cost ?? 0
         }));
         // Split by per-order algorithm and compute each group with its own
