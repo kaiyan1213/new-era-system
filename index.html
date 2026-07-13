@@ -626,7 +626,7 @@
 
     <div id="unpaidListBox" style="display:none;margin-bottom:16px;padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="font-weight:600">Unpaid this month — by manager</div>
+        <div style="font-weight:600">Unpaid this month — by manager <span id="unpaidGrandTotalBadge" style="margin-left:8px;font-family:var(--mono);font-weight:700;color:var(--red)"></span></div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-ghost btn-sm" onclick="copyUnpaidList()">Copy</button>
           <button class="btn btn-ghost btn-sm" onclick="document.getElementById('unpaidListBox').style.display='none'">Close</button>
@@ -4185,29 +4185,51 @@ async function deletePicPayment(paymentId, invoiceId) {
 
 function generateUnpaidList() {
   const groups = {};
-  MANAGER_ORDER.forEach(m => groups[m] = []);
-  groups['Unassigned'] = [];
+  MANAGER_ORDER.forEach(m => groups[m] = { lines: [], outstanding: 0 });
+  groups['Unassigned'] = { lines: [], outstanding: 0 };
+  let grandTotal = 0;
 
   proxyList.forEach(p => {
     const inv = directoryInvoiceMap[p.id];
     if (!inv) return; // no invoice this month — not relevant to "unpaid this month"
     if (staffOwnedProxyMap[p.id]) return; // settled via Payroll netting, not tracked here
-    const isPaid = !!inv.payment_date;
-    if (!isPaid) {
-      const m = MANAGER_ORDER.includes(p.manager) ? p.manager : 'Unassigned';
-      groups[m].push(p.name);
-    }
+
+    // Same "how much is actually still owed" logic as the Directory table's
+    // Payment cell: realistic collectible amount is capped at the Coway
+    // payslip amount (can't collect more than Coway actually paid out),
+    // and partial bank-ins already recorded reduce what's still outstanding.
+    const paymentsForInv = invoicePaymentsByInvoice[inv.id] || [];
+    const totalPaid = r2(paymentsForInv.reduce((s, pmt) => s + parseFloat(pmt.amount || 0), 0));
+    const invAmt = parseFloat(inv.invoice_amount || 0);
+    const expectedAmt = Math.min(invAmt, parseFloat(inv.coway_payslip_amount || 0));
+    const fullyPaid = totalPaid >= expectedAmt - 0.01;
+    if (fullyPaid) return;
+
+    const outstanding = r2(Math.max(0, expectedAmt - totalPaid));
+    const m = MANAGER_ORDER.includes(p.manager) ? p.manager : 'Unassigned';
+    const line = totalPaid > 0.01
+      ? `${p.name} — RM${outstanding.toFixed(2)} left (RM${totalPaid.toFixed(2)} of RM${expectedAmt.toFixed(2)} paid)`
+      : `${p.name} — RM${outstanding.toFixed(2)}`;
+    groups[m].lines.push(line);
+    groups[m].outstanding += outstanding;
+    grandTotal = r2(grandTotal + outstanding);
   });
 
   let text = '';
   [...MANAGER_ORDER, 'Unassigned'].forEach(m => {
-    if (!groups[m].length) return;
-    text += `${m}:\n`;
-    groups[m].forEach(name => { text += `- ${name}\n`; });
+    if (!groups[m].lines.length) return;
+    text += `${m} — RM${groups[m].outstanding.toFixed(2)} outstanding:\n`;
+    groups[m].lines.forEach(line => { text += `- ${line}\n`; });
     text += `\n`;
   });
 
-  if (!text) text = 'Everyone has paid for this month. 🎉';
+  if (!text) {
+    text = 'Everyone has paid for this month. 🎉';
+    document.getElementById('unpaidGrandTotalBadge').textContent = '';
+  } else {
+    text = `TOTAL OUTSTANDING: RM${grandTotal.toFixed(2)}\n\n` + text;
+    document.getElementById('unpaidGrandTotalBadge').textContent = `RM${grandTotal.toFixed(2)} outstanding`;
+  }
 
   document.getElementById('unpaidListText').textContent = text.trim();
   document.getElementById('unpaidListBox').style.display = 'block';
