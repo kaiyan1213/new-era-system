@@ -5969,7 +5969,16 @@ function getCalculationBreakdown(r) {
   if (mistake) rows.push({ label: 'Mistake', amount: mistake });
   rows.push({ label: deductionLabel, amount: deduction > 0 ? -deduction : null });
   if (parseFloat(r.bonus||0) !== 0) rows.push({ label: 'Bonus', amount: parseFloat(r.bonus) });
-  if (parseFloat(r.deductions||0) > 0) rows.push({ label: 'Deductions', amount: -parseFloat(r.deductions) });
+  // For a manager record, r.deductions IS the Acc Below amount (see
+  // confirmManagerSettlement: `deductions: t.accBelowAmt`) — the same
+  // number already shown above as the "Acc Below" line via
+  // deductionLabel, just read from a different column. Showing it again
+  // here as a generic "Deductions" line double-lists the exact same
+  // figure. Staff records don't have this collision: deductionLabel is
+  // "Coway Money" (from own_proxy_offset), a genuinely different thing
+  // from r.deductions (a manual adjustment like an advance repayment), so
+  // both can legitimately appear together for staff.
+  if (r.record_type !== 'manager' && parseFloat(r.deductions||0) > 0) rows.push({ label: 'Deductions', amount: -parseFloat(r.deductions) });
   if (parseFloat(r.epf_employee||0) > 0) rows.push({ label: 'EPF Employee (11%)', amount: -parseFloat(r.epf_employee) });
   return rows;
 }
@@ -5995,7 +6004,10 @@ function getPayslipLineItems(r) {
   rows.push({ label: 'Claim', amount: claimShown || null });
   if (mistakeShown) rows.push({ label: 'Mistake', amount: mistakeShown });
   if (parseFloat(r.bonus||0) !== 0) rows.push({ label: 'Bonus', amount: parseFloat(r.bonus) });
-  if (parseFloat(r.deductions||0) > 0) rows.push({ label: 'Deductions', amount: -parseFloat(r.deductions) });
+  // Same reasoning as getCalculationBreakdown above — r.deductions for a
+  // manager record IS the Acc Below amount already absorbed into
+  // Com/Claim/Mistake above, not a separate deduction to list again.
+  if (r.record_type !== 'manager' && parseFloat(r.deductions||0) > 0) rows.push({ label: 'Deductions', amount: -parseFloat(r.deductions) });
   if (parseFloat(r.epf_employee||0) > 0) rows.push({ label: 'EPF Employee (11%)', amount: -parseFloat(r.epf_employee) });
   return rows;
 }
