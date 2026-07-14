@@ -6062,7 +6062,7 @@ function buildStaffInvoiceHTML(staff, r) {
 // component (commission vs bonus vs claim vs outsider, etc) as its own
 // line so it's never just one lump "Commission" figure; staff can check
 // exactly what they're being paid for directly on the payslip itself.
-function buildStaffPayslipHTML(staff, r) {
+function buildStaffPayslipHTML(staff, r, bankInfo) {
   const totalPay = parseFloat(r.total_pay || 0);
   const isOutsider = r.commission_type === 'outsider';
   const rows = getPayslipLineItems(r);
@@ -6100,7 +6100,12 @@ function buildStaffPayslipHTML(staff, r) {
         </div>
         ${parseFloat(r.epf_employer||0) > 0 ? `<div style="font-size:11px;color:#888;margin-top:-8px">Employer EPF contribution (13%, company record only, not deducted from staff pay): RM ${fmtNum(r.epf_employer)}</div>` : ''}
         <div class="inv-footer">
-          Payment will be credited to this staff's registered bank account.
+          ${bankInfo && (bankInfo.bank_name || bankInfo.bank_account) ? `
+          <strong>Payment Information</strong><br>
+          Bank: ${bankInfo.bank_name || '—'}<br>
+          Account Name: ${bankInfo.name || staff.name}<br>
+          Account No: ${bankInfo.bank_account || '—'}${bankInfo.ic_number ? `<br>IC: ${bankInfo.ic_number}` : ''}
+          ` : `Payment will be credited to this staff's registered bank account — no bank details on file yet (add them in Bank Details).`}
         </div>
       </div>`;
 }
@@ -6202,6 +6207,18 @@ async function generatePayrollRecordPayslip(recordId) {
   if (!r) { showToast('Record not found', 'error'); return; }
   const staff = staffList.find(s => s.id === r.staff_id) || { name: 'Unknown', role: '', channel: '' };
 
+  // Pull this staff's registered bank details (Bank Details Directory,
+  // linked via nec_staff.bank_directory_id) so the printed payslip shows
+  // exactly where the money is meant to go, instead of the generic
+  // "registered bank account" placeholder line.
+  let bankInfo = null;
+  if (staff.bank_directory_id) {
+    try {
+      const rows = await sb('nec_bank_directory', { filter: `id=eq.${staff.bank_directory_id}`, select: 'name,ic_number,bank_name,bank_account' });
+      if (rows.length) bankInfo = rows[0];
+    } catch(e) { /* fall back to the generic line below */ }
+  }
+
   // If the period nets out negative — whether from a staff's own-proxy
   // netting or a manager's Adjustments outweighing everything else —
   // generate an invoice billing them for the difference instead of a
@@ -6233,7 +6250,7 @@ async function generatePayrollRecordPayslip(recordId) {
       await logAudit('UPDATE', 'nec_payroll', `Assigned payslip number ${num} to payslip for ${staff.name} — ${MONTHS[r.month]} ${r.year}`);
     } catch(e) { console.error('Failed to assign staff payslip number:', e); }
   }
-  const html = isInv ? buildStaffInvoiceHTML(staff, r) : buildStaffPayslipHTML(staff, r);
+  const html = isInv ? buildStaffInvoiceHTML(staff, r) : buildStaffPayslipHTML(staff, r, bankInfo);
   const title = isInv ? 'Invoice' : 'Payslip';
   const win = window.open('', '_blank', 'width=700,height=800');
   win.document.write(`<html><head><title>${title} - ${staff.name} - ${MONTHS[r.month]} ${r.year}</title>
