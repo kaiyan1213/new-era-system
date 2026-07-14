@@ -3394,6 +3394,33 @@ async function getNextStaffInvoiceNumber(year, month) {
   }
 }
 
+// Sequential payslip number for staff/manager PAYSLIPS (Payroll -> Payslip
+// button, when a settlement is positive, i.e. New Era pays them) — same
+// idea as getNextStaffInvoiceNumber above but its own NEC-PS-YYYY-MM-###
+// pool, since payslips and settlement invoices are different document
+// types. Persisted on nec_payroll.payslip_number the first time it's
+// generated (see generatePayrollRecordPayslip) so re-printing the same
+// record always shows the same number instead of the old UUID-hash
+// fallback (genStaffDocNumber), which looked different on every record and
+// wasn't sequential or trackable.
+async function getNextStaffPayslipNumber(year, month) {
+  try {
+    const records = await sb('nec_payroll', {
+      filter: `year=eq.${year}&month=eq.${month}&payslip_number=not.is.null`,
+      select: 'payslip_number'
+    });
+    let maxSeq = 0;
+    records.forEach(r => {
+      const m = (r.payslip_number || '').match(/-(\d{3})$/);
+      if (m) maxSeq = Math.max(maxSeq, parseInt(m[1]));
+    });
+    const next = maxSeq + 1;
+    return `NEC-PS-${year}-${String(month).padStart(2,'0')}-${String(next).padStart(3,'0')}`;
+  } catch(e) {
+    return `NEC-PS-${year}-${String(month).padStart(2,'0')}-001`;
+  }
+}
+
 // Auto-fills the invoice number field in the New Invoice modal based on selected year/month
 async function refreshInvoiceNumber() {
   const year = parseInt(document.getElementById('invYear').value);
@@ -4738,7 +4765,7 @@ async function loadPayroll() {
         })()}</td>
         <td>
           <span class="badge badge-other" style="${typeBadgeColor}">${typeLabel}</span>
-          ${isInvoice ? `<span class="badge badge-other" style="color:var(--red)" title="Staff owes New Era back">Invoice</span>${r.invoice_number ? `<div style="font-size:9px;color:var(--muted);font-family:var(--mono);margin-top:2px">${r.invoice_number}</div>` : ''}` : ''}
+          ${isInvoice ? `<span class="badge badge-other" style="color:var(--red)" title="Staff owes New Era back">Invoice</span>${r.invoice_number ? `<div style="font-size:9px;color:var(--muted);font-family:var(--mono);margin-top:2px">${r.invoice_number}</div>` : ''}` : (r.payslip_number ? `<div style="font-size:9px;color:var(--muted);font-family:var(--mono);margin-top:2px">${r.payslip_number}</div>` : '')}
         </td>
         <td class="td-mono">${MONTHS[r.month]} ${r.year}</td>
         <td class="td-mono">${r.orders_count || 0}</td>
@@ -6054,7 +6081,7 @@ function buildStaffPayslipHTML(staff, r) {
           </div>
           <div>
             <div class="inv-label" style="color:#16a34a">PAYSLIP</div>
-            <div class="inv-meta">No: ${genStaffDocNumber('P', r)}<br>Date: ${MONTH_FULL[r.month]} ${r.year}</div>
+            <div class="inv-meta">No: ${r.payslip_number || genStaffDocNumber('P', r)}<br>Date: ${MONTH_FULL[r.month]} ${r.year}</div>
           </div>
         </div>
         <div class="inv-divider"></div>
@@ -6192,6 +6219,19 @@ async function generatePayrollRecordPayslip(recordId) {
       r.invoice_number = num;
       await logAudit('UPDATE', 'nec_payroll', `Assigned invoice number ${num} to settlement invoice for ${staff.name} — ${MONTHS[r.month]} ${r.year}`);
     } catch(e) { console.error('Failed to assign staff invoice number:', e); }
+  } else if (!isInv && !r.payslip_number) {
+    // Same idea, mirrored for the payslip side (positive settlements) —
+    // first time this record's payslip is opened, assign it a real,
+    // sequential, persisted number (NEC-PS-YYYY-MM-###) instead of the
+    // old UUID-hash fallback, so every payslip a staff/manager gets has a
+    // clean, stable, trackable number instead of a different-looking
+    // jumble each time.
+    try {
+      const num = await getNextStaffPayslipNumber(r.year, r.month);
+      await sb('nec_payroll', { method: 'PATCH', filter: `id=eq.${r.id}`, body: { payslip_number: num } });
+      r.payslip_number = num;
+      await logAudit('UPDATE', 'nec_payroll', `Assigned payslip number ${num} to payslip for ${staff.name} — ${MONTHS[r.month]} ${r.year}`);
+    } catch(e) { console.error('Failed to assign staff payslip number:', e); }
   }
   const html = isInv ? buildStaffInvoiceHTML(staff, r) : buildStaffPayslipHTML(staff, r);
   const title = isInv ? 'Invoice' : 'Payslip';
@@ -9098,6 +9138,7 @@ ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS record_type text DEFAULT 'staff
 ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS notes text;
 ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS payment_date date;
 ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS invoice_number text; -- real, sequential (NEC-S-YYYY-MM-###) settlement-invoice number, assigned once on first print and reused after
+ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS payslip_number text; -- real, sequential (NEC-PS-YYYY-MM-###) payslip number, assigned once on first print and reused after (mirrors invoice_number above)
 -- If nec_payroll already existed before epf_employee/own_proxy_offset/
 -- claim_amount were added, total_pay's generated formula won't include
 -- them automatically — drop and recreate the column so existing
