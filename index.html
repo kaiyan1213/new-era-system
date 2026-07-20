@@ -3578,6 +3578,31 @@ async function loadDirectory() {
       breakdownRows.forEach(r => { breakdownPayslipByProxy[r.proxy_id] = parseFloat(r.total_net_payable || 0); });
     }
 
+    // Whether each proxy actually had real Coway orders this period, vs
+    // just sat there collecting passive/team-building income with no
+    // orders of its own, vs having no payslip data at all this month —
+    // pulled from nec_payslip_breakdown.categories_json (the "New Orders"
+    // line items), fetched broadly across ALL proxies (not just
+    // staff-owned ones) since this is purely a per-manager activity count,
+    // unrelated to the Payroll-netting distinction elsewhere on this page.
+    const allBreakdowns = await sb('nec_payslip_breakdown', {
+      filter: `year=eq.${year}&month=eq.${month}`,
+      select: 'proxy_id,categories_json'
+    }).catch(() => []);
+    const orderCountByProxy = {};
+    const breakdownProxyIds = new Set();
+    allBreakdowns.forEach(b => {
+      breakdownProxyIds.add(b.proxy_id);
+      let cnt = 0;
+      try { cnt = JSON.parse(b.categories_json || '[]').length; } catch(e) {}
+      orderCountByProxy[b.proxy_id] = (orderCountByProxy[b.proxy_id] || 0) + cnt;
+    });
+    const proxyActivityStatus = (id) => {
+      if ((orderCountByProxy[id] || 0) > 0) return 'orders';
+      if (breakdownProxyIds.has(id) || directoryInvoiceMap[id]) return 'passive';
+      return 'none';
+    };
+
     // Group proxies by manager
     const groups = {};
     MANAGER_ORDER.forEach(m => groups[m] = []);
@@ -3586,6 +3611,26 @@ async function loadDirectory() {
       const m = MANAGER_ORDER.includes(p.manager) ? p.manager : 'Unassigned';
       groups[m].push(p);
     });
+
+    // Per-manager + overall counts for the activity summary (orders vs
+    // passive-only vs no data this month), shown as a header box and
+    // inline per manager below.
+    const mgrStats = {};
+    [...MANAGER_ORDER, 'Unassigned'].forEach(m => mgrStats[m] = { orders: 0, passive: 0, none: 0 });
+    proxyList.forEach(p => {
+      const m = MANAGER_ORDER.includes(p.manager) ? p.manager : 'Unassigned';
+      mgrStats[m][proxyActivityStatus(p.id)]++;
+    });
+    const totalStats = { orders: 0, passive: 0, none: 0 };
+    Object.values(mgrStats).forEach(s => { totalStats.orders += s.orders; totalStats.passive += s.passive; totalStats.none += s.none; });
+    const totalAccounts = totalStats.orders + totalStats.passive + totalStats.none;
+    const summaryBoxHtml = `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 20px;margin-bottom:16px;display:flex;gap:32px;flex-wrap:wrap">
+        <div><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:2px">Total Accounts</div><div style="font-size:22px;font-weight:700">${totalAccounts}</div></div>
+        <div><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:2px">With Orders</div><div style="font-size:22px;font-weight:700;color:var(--green)">${totalStats.orders}</div></div>
+        <div><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:2px">Passive Only</div><div style="font-size:22px;font-weight:700;color:var(--yellow)">${totalStats.passive}</div></div>
+        <div><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:2px">No Data This Month</div><div style="font-size:22px;font-weight:700;color:var(--muted)">${totalStats.none}</div></div>
+      </div>`;
 
     const sections = [...MANAGER_ORDER, 'Unassigned'].map(m => {
       const people = groups[m];
@@ -3701,9 +3746,13 @@ async function loadDirectory() {
             <td></td>
           </tr>`;
 
+      const st = mgrStats[m];
       return `
         <div class="table-wrap" data-mgr-block="${m}" style="margin-bottom:20px">
-          <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">${m}</div>
+          <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+            <span>${m}</span>
+            <span style="font-size:11px;font-weight:400;color:var(--muted)"><span style="color:var(--green)">${st.orders} with orders</span> · <span style="color:var(--yellow)">${st.passive} passive-only</span>${st.none ? ` · ${st.none} no data` : ''}</span>
+          </div>
           <table>
             <thead>
               <tr>
@@ -3723,7 +3772,7 @@ async function loadDirectory() {
         </div>`;
     }).join('');
 
-    container.innerHTML = sections || `<div class="empty"><div class="empty-text">No proxies found. Add proxies with a Manager assigned.</div></div>`;
+    container.innerHTML = summaryBoxHtml + (sections || `<div class="empty"><div class="empty-text">No proxies found. Add proxies with a Manager assigned.</div></div>`);
     filterDirectoryTable(); // re-apply any active search after re-render
   } catch(e) {
     console.error(e);
