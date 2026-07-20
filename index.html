@@ -919,11 +919,11 @@
     <div id="mgrPane-comm" class="hidden">
       <div class="table-wrap" style="margin-bottom:20px">
         <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-          <span>Manager Payslips — pool inputs (Overriding 1st Install + Allowance)</span>
+          <span>Manager Payslips — pool inputs (Overriding 1st Install + Allowance + PI)</span>
           <button class="btn btn-primary btn-sm" onclick="openMgrPayslipUploadModal()">Upload Manager Payslip</button>
         </div>
         <div style="padding:10px 14px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)">
-          Only KY, Chloe, Carine, and Jess upload here — these are never treated as proxy accounts and never count toward PIC liability. The Manager Comm pool for a period = the sum of all 4 managers' (Overriding 1st Install total + Allowance total) here, split by each manager's share %.
+          Only KY, Chloe, Carine, and Jess upload here — these are never treated as proxy accounts and never count toward PIC liability. The Manager Comm pool for a period = the sum of all 4 managers' (Overriding 1st Install total + Allowance total + PI) here, split by each manager's share %. PI is manually entered (no PDF) — money each manager receives from Coway around the 25th.
         </div>
         <table>
           <thead>
@@ -932,13 +932,14 @@
               <th>Month</th>
               <th>Overriding 1st Install</th>
               <th>Allowance</th>
+              <th>PI</th>
               <th>Pool Contribution</th>
               <th>Source File</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody id="mgrPayslipTableBody">
-            <tr><td colspan="7"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+            <tr><td colspan="8"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -2170,9 +2171,14 @@
         <label class="form-label">Coway Payslip PDF</label>
         <input type="file" id="mpFile" class="form-input" accept="application/pdf">
       </div>
+      <div class="form-group">
+        <label class="form-label">PI Amount (RM) — manually entered, no PDF</label>
+        <input type="number" step="0.01" id="mpPI" class="form-input" placeholder="0.00" oninput="onMgrPayslipPIInput()">
+      </div>
       <div id="mpResult" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px">
         <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Overriding 1st Install Total</span><span id="mpOverriding" style="font-family:var(--mono)">RM 0.00</span></div>
         <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Allowance Total</span><span id="mpAllowance" style="font-family:var(--mono)">RM 0.00</span></div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>PI</span><span id="mpPIDisplay" style="font-family:var(--mono)">RM 0.00</span></div>
         <div style="display:flex;justify-content:space-between;font-weight:700;border-top:1px solid var(--border);margin-top:6px;padding-top:6px"><span>Pool Contribution</span><span id="mpPoolContrib" style="font-family:var(--mono)">RM 0.00</span></div>
       </div>
     </div>
@@ -6836,6 +6842,7 @@ async function openMgrPayslipUploadModal() {
   sel.innerHTML = '<option value="">Select manager...</option>' +
     poolManagers.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
   document.getElementById('mpFile').value = '';
+  document.getElementById('mpPI').value = '';
   document.getElementById('mpResult').style.display = 'none';
   document.getElementById('mpParseBtn').classList.remove('hidden');
   document.getElementById('mpSaveBtn').classList.add('hidden');
@@ -6843,6 +6850,19 @@ async function openMgrPayslipUploadModal() {
 }
 
 let mgrPayslipParsed = null;
+
+function onMgrPayslipPIInput() {
+  const piAmount = parseFloat(document.getElementById('mpPI').value) || 0;
+  const overriding = mgrPayslipParsed?.overriding_1st_install_total || 0;
+  const allowance = mgrPayslipParsed?.allowance_total || 0;
+  document.getElementById('mpPIDisplay').textContent = `RM ${fmtNum(piAmount)}`;
+  document.getElementById('mpPoolContrib').textContent = `RM ${fmtNum(overriding + allowance + piAmount)}`;
+  document.getElementById('mpResult').style.display = 'block';
+  // PI alone (no PDF) is a valid save — unhide Save once there's something to save
+  if (piAmount > 0 || mgrPayslipParsed) {
+    document.getElementById('mpSaveBtn').classList.remove('hidden');
+  }
+}
 
 async function parseMgrPayslip() {
   const file = document.getElementById('mpFile').files[0];
@@ -6871,9 +6891,11 @@ async function parseMgrPayslip() {
     }
     const { data } = await response.json();
     mgrPayslipParsed = { ...data, filename: file.name };
+    const piAmount = parseFloat(document.getElementById('mpPI').value) || 0;
     document.getElementById('mpOverriding').textContent = `RM ${fmtNum(data.overriding_1st_install_total || 0)}`;
     document.getElementById('mpAllowance').textContent = `RM ${fmtNum(data.allowance_total || 0)}`;
-    document.getElementById('mpPoolContrib').textContent = `RM ${fmtNum((data.overriding_1st_install_total || 0) + (data.allowance_total || 0))}`;
+    document.getElementById('mpPIDisplay').textContent = `RM ${fmtNum(piAmount)}`;
+    document.getElementById('mpPoolContrib').textContent = `RM ${fmtNum((data.overriding_1st_install_total || 0) + (data.allowance_total || 0) + piAmount)}`;
     document.getElementById('mpResult').style.display = 'block';
     document.getElementById('mpParseBtn').classList.add('hidden');
     document.getElementById('mpSaveBtn').classList.remove('hidden');
@@ -6882,7 +6904,8 @@ async function parseMgrPayslip() {
 }
 
 async function saveMgrPayslip() {
-  if (!mgrPayslipParsed) return showToast('Parse a PDF first', 'error');
+  const piAmount = parseFloat(document.getElementById('mpPI').value) || 0;
+  if (!mgrPayslipParsed && piAmount <= 0) return showToast('Parse a PDF or enter a PI amount first', 'error');
   const managerId = document.getElementById('mpManager').value;
   const year = parseInt(document.getElementById('mpYear').value);
   const month = parseInt(document.getElementById('mpMonth').value);
@@ -6890,18 +6913,19 @@ async function saveMgrPayslip() {
   const body = {
     manager_id: managerId,
     year, month,
-    overriding_total: mgrPayslipParsed.overriding_1st_install_total || 0,
-    allowance_total: mgrPayslipParsed.allowance_total || 0,
-    total_net_payable: mgrPayslipParsed.total_net_payable || 0,
-    distributor_code: mgrPayslipParsed.distributor_code || null,
-    raw_filename: mgrPayslipParsed.filename
+    overriding_total: mgrPayslipParsed?.overriding_1st_install_total || 0,
+    allowance_total: mgrPayslipParsed?.allowance_total || 0,
+    pi_amount: piAmount,
+    total_net_payable: mgrPayslipParsed?.total_net_payable || 0,
+    distributor_code: mgrPayslipParsed?.distributor_code || null,
+    raw_filename: mgrPayslipParsed?.filename || null
   };
   try {
     // Upsert: delete any existing row for this manager/year/month first (UNIQUE constraint)
     await sbDelete('nec_manager_payslips', `manager_id=eq.${managerId}&year=eq.${year}&month=eq.${month}`);
     await sb('nec_manager_payslips', { method: 'POST', body });
     const mgrName = managerList.find(m => m.id === managerId)?.name || managerId;
-    await logAudit('CREATE', 'nec_manager_payslips', `Uploaded manager payslip: ${mgrName} — ${MONTHS[month]} ${year} — pool contribution RM${(body.overriding_total + body.allowance_total).toFixed(2)}`);
+    await logAudit('CREATE', 'nec_manager_payslips', `Uploaded manager payslip: ${mgrName} — ${MONTHS[month]} ${year} — pool contribution RM${(body.overriding_total + body.allowance_total + body.pi_amount).toFixed(2)}`);
     closeModal('modalMgrPayslipUpload');
     showToast('Manager payslip saved ✓');
     loadMgrPayslips();
@@ -6934,7 +6958,7 @@ async function loadMgrPayslips() {
     if (month) filter += `&month=eq.${month}`;
     const rows = await sb('nec_manager_payslips', { filter });
     if (rows.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-text">No manager payslips uploaded for this period</div></div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-text">No manager payslips uploaded for this period</div></div></td></tr>`;
       return;
     }
     tbody.innerHTML = rows.map(r => {
@@ -6944,13 +6968,14 @@ async function loadMgrPayslips() {
         <td class="td-mono">${MONTHS[r.month]} ${r.year}</td>
         <td class="td-mono">${fmt(r.overriding_total)}</td>
         <td class="td-mono">${fmt(r.allowance_total)}</td>
+        <td class="td-mono">${fmt(r.pi_amount)}</td>
         <td class="td-mono" style="font-weight:600;color:var(--green)">${fmt(r.pool_contribution)}</td>
         <td class="td-muted" style="font-size:11px">${r.raw_filename || '—'}</td>
         <td><button class="btn btn-danger btn-sm" onclick="deleteMgrPayslip('${r.id}')">✕</button></td>
       </tr>`;
     }).join('');
   } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Table not set up yet. Go to Setup tab.</div></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Table not set up yet. Go to Setup tab.</div></div></td></tr>`;
   }
 }
 
@@ -7149,10 +7174,10 @@ async function loadMgrAdjustments() {
     const commRecords = await sb('nec_manager_sharing', { filter: commFilter });
 
     // Manager Invoice: NEGATIVE of each manager's own pool_contribution
-    // (nec_manager_payslips — the same Overriding+Allowance figure their
-    // own uploaded Coway payslip feeds into the Manager Comm pool). Coway
-    // already paid this amount directly to the manager via their own
-    // payslip, so it must be subtracted back out of their pooled Manager
+    // (nec_manager_payslips — the same Overriding+Allowance+PI figure their
+    // own uploaded Coway payslip / manually-entered PI feeds into the
+    // Manager Comm pool). Coway already paid this amount directly to the
+    // manager via their own payslip, so it must be subtracted back out of their pooled Manager
     // Comm share to avoid double-counting — e.g. KY's own payslip already
     // gave him RM1579.50 from Coway directly, so the company only needs to
     // top him up by (poolShare − 1579.50) to reach his full Manager Comm
@@ -9278,13 +9303,31 @@ CREATE TABLE IF NOT EXISTS nec_manager_payslips (
   month int NOT NULL,
   overriding_total numeric(10,2) DEFAULT 0,
   allowance_total numeric(10,2) DEFAULT 0,
-  pool_contribution numeric(10,2) GENERATED ALWAYS AS (overriding_total + allowance_total) STORED,
+  pi_amount numeric(10,2) DEFAULT 0, -- manually-entered PI (Coway money paid ~25th, no PDF)
+  pool_contribution numeric(10,2) GENERATED ALWAYS AS (overriding_total + allowance_total + pi_amount) STORED,
   total_net_payable numeric(10,2) DEFAULT 0,
   distributor_code text,
   raw_filename text,
   created_at timestamptz DEFAULT now(),
   UNIQUE(manager_id, year, month)
 );
+
+-- If nec_manager_payslips already existed before pi_amount was added,
+-- pool_contribution's generated formula won't include it automatically —
+-- add the column and drop/recreate pool_contribution so existing
+-- deployments pick up the new formula.
+ALTER TABLE nec_manager_payslips ADD COLUMN IF NOT EXISTS pi_amount numeric(10,2) DEFAULT 0;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'nec_manager_payslips' AND column_name = 'pool_contribution'
+  ) THEN
+    ALTER TABLE nec_manager_payslips DROP COLUMN pool_contribution;
+  END IF;
+  ALTER TABLE nec_manager_payslips ADD COLUMN pool_contribution numeric(10,2)
+    GENERATED ALWAYS AS (overriding_total + allowance_total + pi_amount) STORED;
+END $$;
 
 -- Acc Below manual adjustments: per-manager, per-period entries for items
 -- like Claim/Mistake/Gift/Both-Company-Loan-Claim/Alpha-C-Claim/Return-Back
