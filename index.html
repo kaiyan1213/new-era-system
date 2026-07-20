@@ -817,6 +817,7 @@
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost" onclick="openMgrAdjustmentModal()">Add Adjustment</button>
         <button class="btn btn-primary" onclick="openManagerEntryModal()">Split Manager Comm Pool</button>
+        <button class="btn btn-primary" onclick="openPISplitModal()">Split PI Pool</button>
       </div>
     </div>
 
@@ -866,6 +867,7 @@
       <div class="tab active" id="mgrTab-overview" onclick="switchManagerTab('overview')">Overview</div>
       <div class="tab" id="mgrTab-comm" onclick="switchManagerTab('comm')">Manager Comm</div>
       <div class="tab" id="mgrTab-accbelow" onclick="switchManagerTab('accbelow')">Acc Below & Adjustments</div>
+      <div class="tab" id="mgrTab-pi" onclick="switchManagerTab('pi')">PI</div>
     </div>
 
     <!-- OVERVIEW TAB: the answer — grand total per manager -->
@@ -919,11 +921,11 @@
     <div id="mgrPane-comm" class="hidden">
       <div class="table-wrap" style="margin-bottom:20px">
         <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-          <span>Manager Payslips — pool inputs (Overriding 1st Install + Allowance + PI)</span>
+          <span>Manager Payslips — pool inputs (Overriding 1st Install + Allowance)</span>
           <button class="btn btn-primary btn-sm" onclick="openMgrPayslipUploadModal()">Upload Manager Payslip</button>
         </div>
         <div style="padding:10px 14px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)">
-          Only KY, Chloe, Carine, and Jess upload here — these are never treated as proxy accounts and never count toward PIC liability. The Manager Comm pool for a period = the sum of all 4 managers' (Overriding 1st Install total + Allowance total + PI) here, split by each manager's share %. PI is manually entered (no PDF) — money each manager receives from Coway around the 25th.
+          Only KY, Chloe, Carine, and Jess upload here — these are never treated as proxy accounts and never count toward PIC liability. The Manager Comm pool for a period = the sum of all 4 managers' (Overriding 1st Install total + Allowance total) here, split by each manager's share %. PI is a separate pool — see the PI tab.
         </div>
         <table>
           <thead>
@@ -932,14 +934,13 @@
               <th>Month</th>
               <th>Overriding 1st Install</th>
               <th>Allowance</th>
-              <th>PI</th>
               <th>Pool Contribution</th>
               <th>Source File</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody id="mgrPayslipTableBody">
-            <tr><td colspan="8"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+            <tr><td colspan="7"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -1015,6 +1016,60 @@
           </thead>
           <tbody id="mgrAdjustmentTableBody">
             <tr><td colspan="6"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- PI TAB: completely separate pool from Manager Comm — own inputs, own split, own Invoice/Payslip documents -->
+    <div id="mgrPane-pi" class="hidden">
+      <div class="table-wrap" style="margin-bottom:20px">
+        <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <span>PI — pool inputs (money each manager personally received from Coway, ~25th)</span>
+          <button class="btn btn-primary btn-sm" onclick="openPIRecordModal()">Add PI Entry</button>
+        </div>
+        <div style="padding:10px 14px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)">
+          Only KY, Chloe, Carine, and Jess enter here — manually, no PDF. This pool is completely separate from Manager Comm (Overriding 1st Install + Allowance) — it never mixes with that pool's inputs, split, or settlement documents.
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Manager</th>
+              <th>Month</th>
+              <th>PI Amount</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="piRecordsTableBody">
+            <tr><td colspan="4"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-wrap">
+        <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <span>PI — recorded pooled splits & settlement</span>
+          <button class="btn btn-primary btn-sm" onclick="openPISplitModal()">Split PI Pool</button>
+        </div>
+        <div style="padding:10px 14px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)">
+          Net = Pool Share − Own PI. Positive net means the company still owes this manager more (Payslip). Negative net means this manager received more from Coway than their pool share and owes the difference back (Invoice).
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Manager</th>
+              <th>Month</th>
+              <th>PI Pool Total</th>
+              <th>Share %</th>
+              <th>Pool Share</th>
+              <th>Own PI</th>
+              <th>Net</th>
+              <th>Document</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="piSharingTableBody">
+            <tr><td colspan="9"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -2138,6 +2193,82 @@
   </div>
 </div>
 
+<!-- PI Split Modal — completely separate pool from Manager Comm -->
+<div class="modal-bg hidden" id="modalPISplit">
+  <div class="modal">
+    <div class="modal-title">Split PI Pool</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Pulls each manager's entered PI amount for this period (money personally received from Coway, ~25th), sums all 4 into one pool, then splits the pool by each manager's share %. Enter missing PI amounts first if any total below reads RM 0.00.</div>
+    <div class="form-grid">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Year</label>
+          <select id="psYear" class="form-input"><option value="2025">2025</option><option value="2026" selected>2026</option></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Month</label>
+          <select id="psMonth" class="form-input" onchange="loadPISplitPreview()">
+            <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
+            <option value="4">Apr</option><option value="5">May</option><option value="6">Jun</option>
+            <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
+            <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
+          </select>
+        </div>
+      </div>
+      <div id="piSplitFields" style="display:grid;gap:10px">
+        <!-- filled by JS -->
+      </div>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px">
+        <div style="display:flex;justify-content:space-between;font-weight:700"><span>Total PI Pool (sum of all 4 managers)</span><span id="psPoolTotal" style="font-family:var(--mono)">RM 0.00</span></div>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalPISplit')">Cancel</button>
+      <button class="btn btn-primary" onclick="savePISharing()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- PI Amount Entry Modal — per manager, per period, manually entered (no PDF) -->
+<div class="modal-bg hidden" id="modalPIRecord">
+  <div class="modal">
+    <div class="modal-title">Add PI Entry</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:14px">The PI amount this manager personally received from Coway this period. Manually entered — no PDF needed.</div>
+    <div class="form-grid">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Manager</label>
+          <select id="piManager" class="form-input">
+            <!-- filled by JS, restricted to KY/Chloe/Carine/Jess -->
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Year</label>
+          <select id="piYear" class="form-input"><option value="2025">2025</option><option value="2026" selected>2026</option></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Month</label>
+          <select id="piMonth" class="form-input">
+            <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
+            <option value="4">Apr</option><option value="5">May</option><option value="6">Jun</option>
+            <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
+            <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">PI Amount (RM)</label>
+        <input type="number" step="0.01" id="piAmount" class="form-input" placeholder="0.00">
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalPIRecord')">Cancel</button>
+      <button class="btn btn-primary" onclick="savePIRecord()">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Manager Payslip Upload Modal -->
 <div class="modal-bg hidden" id="modalMgrPayslipUpload">
   <div class="modal">
@@ -2171,14 +2302,9 @@
         <label class="form-label">Coway Payslip PDF</label>
         <input type="file" id="mpFile" class="form-input" accept="application/pdf">
       </div>
-      <div class="form-group">
-        <label class="form-label">PI Amount (RM) — manually entered, no PDF</label>
-        <input type="number" step="0.01" id="mpPI" class="form-input" placeholder="0.00" oninput="onMgrPayslipPIInput()">
-      </div>
       <div id="mpResult" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px">
         <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Overriding 1st Install Total</span><span id="mpOverriding" style="font-family:var(--mono)">RM 0.00</span></div>
         <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Allowance Total</span><span id="mpAllowance" style="font-family:var(--mono)">RM 0.00</span></div>
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>PI</span><span id="mpPIDisplay" style="font-family:var(--mono)">RM 0.00</span></div>
         <div style="display:flex;justify-content:space-between;font-weight:700;border-top:1px solid var(--border);margin-top:6px;padding-top:6px"><span>Pool Contribution</span><span id="mpPoolContrib" style="font-family:var(--mono)">RM 0.00</span></div>
       </div>
     </div>
@@ -6842,7 +6968,6 @@ async function openMgrPayslipUploadModal() {
   sel.innerHTML = '<option value="">Select manager...</option>' +
     poolManagers.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
   document.getElementById('mpFile').value = '';
-  document.getElementById('mpPI').value = '';
   document.getElementById('mpResult').style.display = 'none';
   document.getElementById('mpParseBtn').classList.remove('hidden');
   document.getElementById('mpSaveBtn').classList.add('hidden');
@@ -6850,19 +6975,6 @@ async function openMgrPayslipUploadModal() {
 }
 
 let mgrPayslipParsed = null;
-
-function onMgrPayslipPIInput() {
-  const piAmount = parseFloat(document.getElementById('mpPI').value) || 0;
-  const overriding = mgrPayslipParsed?.overriding_1st_install_total || 0;
-  const allowance = mgrPayslipParsed?.allowance_total || 0;
-  document.getElementById('mpPIDisplay').textContent = `RM ${fmtNum(piAmount)}`;
-  document.getElementById('mpPoolContrib').textContent = `RM ${fmtNum(overriding + allowance + piAmount)}`;
-  document.getElementById('mpResult').style.display = 'block';
-  // PI alone (no PDF) is a valid save — unhide Save once there's something to save
-  if (piAmount > 0 || mgrPayslipParsed) {
-    document.getElementById('mpSaveBtn').classList.remove('hidden');
-  }
-}
 
 async function parseMgrPayslip() {
   const file = document.getElementById('mpFile').files[0];
@@ -6891,11 +7003,9 @@ async function parseMgrPayslip() {
     }
     const { data } = await response.json();
     mgrPayslipParsed = { ...data, filename: file.name };
-    const piAmount = parseFloat(document.getElementById('mpPI').value) || 0;
     document.getElementById('mpOverriding').textContent = `RM ${fmtNum(data.overriding_1st_install_total || 0)}`;
     document.getElementById('mpAllowance').textContent = `RM ${fmtNum(data.allowance_total || 0)}`;
-    document.getElementById('mpPIDisplay').textContent = `RM ${fmtNum(piAmount)}`;
-    document.getElementById('mpPoolContrib').textContent = `RM ${fmtNum((data.overriding_1st_install_total || 0) + (data.allowance_total || 0) + piAmount)}`;
+    document.getElementById('mpPoolContrib').textContent = `RM ${fmtNum((data.overriding_1st_install_total || 0) + (data.allowance_total || 0))}`;
     document.getElementById('mpResult').style.display = 'block';
     document.getElementById('mpParseBtn').classList.add('hidden');
     document.getElementById('mpSaveBtn').classList.remove('hidden');
@@ -6904,8 +7014,7 @@ async function parseMgrPayslip() {
 }
 
 async function saveMgrPayslip() {
-  const piAmount = parseFloat(document.getElementById('mpPI').value) || 0;
-  if (!mgrPayslipParsed && piAmount <= 0) return showToast('Parse a PDF or enter a PI amount first', 'error');
+  if (!mgrPayslipParsed) return showToast('Parse a PDF first', 'error');
   const managerId = document.getElementById('mpManager').value;
   const year = parseInt(document.getElementById('mpYear').value);
   const month = parseInt(document.getElementById('mpMonth').value);
@@ -6913,19 +7022,18 @@ async function saveMgrPayslip() {
   const body = {
     manager_id: managerId,
     year, month,
-    overriding_total: mgrPayslipParsed?.overriding_1st_install_total || 0,
-    allowance_total: mgrPayslipParsed?.allowance_total || 0,
-    pi_amount: piAmount,
-    total_net_payable: mgrPayslipParsed?.total_net_payable || 0,
-    distributor_code: mgrPayslipParsed?.distributor_code || null,
-    raw_filename: mgrPayslipParsed?.filename || null
+    overriding_total: mgrPayslipParsed.overriding_1st_install_total || 0,
+    allowance_total: mgrPayslipParsed.allowance_total || 0,
+    total_net_payable: mgrPayslipParsed.total_net_payable || 0,
+    distributor_code: mgrPayslipParsed.distributor_code || null,
+    raw_filename: mgrPayslipParsed.filename
   };
   try {
     // Upsert: delete any existing row for this manager/year/month first (UNIQUE constraint)
     await sbDelete('nec_manager_payslips', `manager_id=eq.${managerId}&year=eq.${year}&month=eq.${month}`);
     await sb('nec_manager_payslips', { method: 'POST', body });
     const mgrName = managerList.find(m => m.id === managerId)?.name || managerId;
-    await logAudit('CREATE', 'nec_manager_payslips', `Uploaded manager payslip: ${mgrName} — ${MONTHS[month]} ${year} — pool contribution RM${(body.overriding_total + body.allowance_total + body.pi_amount).toFixed(2)}`);
+    await logAudit('CREATE', 'nec_manager_payslips', `Uploaded manager payslip: ${mgrName} — ${MONTHS[month]} ${year} — pool contribution RM${(body.overriding_total + body.allowance_total).toFixed(2)}`);
     closeModal('modalMgrPayslipUpload');
     showToast('Manager payslip saved ✓');
     loadMgrPayslips();
@@ -6958,7 +7066,7 @@ async function loadMgrPayslips() {
     if (month) filter += `&month=eq.${month}`;
     const rows = await sb('nec_manager_payslips', { filter });
     if (rows.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-text">No manager payslips uploaded for this period</div></div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-text">No manager payslips uploaded for this period</div></div></td></tr>`;
       return;
     }
     tbody.innerHTML = rows.map(r => {
@@ -6968,14 +7076,13 @@ async function loadMgrPayslips() {
         <td class="td-mono">${MONTHS[r.month]} ${r.year}</td>
         <td class="td-mono">${fmt(r.overriding_total)}</td>
         <td class="td-mono">${fmt(r.allowance_total)}</td>
-        <td class="td-mono">${fmt(r.pi_amount)}</td>
         <td class="td-mono" style="font-weight:600;color:var(--green)">${fmt(r.pool_contribution)}</td>
         <td class="td-muted" style="font-size:11px">${r.raw_filename || '—'}</td>
         <td><button class="btn btn-danger btn-sm" onclick="deleteMgrPayslip('${r.id}')">✕</button></td>
       </tr>`;
     }).join('');
   } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Table not set up yet. Go to Setup tab.</div></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Table not set up yet. Go to Setup tab.</div></div></td></tr>`;
   }
 }
 
@@ -6984,6 +7091,365 @@ async function deleteMgrPayslip(id) {
   await sbDelete('nec_manager_payslips', `id=eq.${id}`);
   showToast('Deleted');
   loadMgrPayslips();
+}
+
+// ============ PI (completely separate pool from Manager Comm) ============
+// Money each of the 4 pool managers (KY/Chloe/Carine/Jess) personally
+// receives from Coway around the 25th of each month — manually entered,
+// no PDF. nec_pi_records holds each manager's own PI amount for the
+// period; nec_pi_sharing holds the pooled split result. Net = Pool Share
+// − Own PI: positive means the company still owes the manager more
+// (settled as a Payslip), negative means they received more than their
+// share and owe the difference back (settled as an Invoice). Both the
+// inputs and the resulting documents are fully separate from Manager
+// Comm's Overriding+Allowance pool — they never mix.
+
+async function openPIRecordModal() {
+  await loadManagers();
+  const sel = document.getElementById('piManager');
+  const poolManagers = managerList.filter(m => isPoolManager(m.name));
+  sel.innerHTML = poolManagers.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+  document.getElementById('piAmount').value = '';
+  openModal('modalPIRecord');
+}
+
+async function savePIRecord() {
+  const managerId = document.getElementById('piManager').value;
+  const year = parseInt(document.getElementById('piYear').value);
+  const month = parseInt(document.getElementById('piMonth').value);
+  const amount = parseFloat(document.getElementById('piAmount').value);
+  if (!managerId) return showToast('Select a manager', 'error');
+  if (isNaN(amount) || amount <= 0) return showToast('Enter a PI amount greater than 0', 'error');
+  try {
+    // Upsert: delete any existing row for this manager/year/month first (UNIQUE constraint)
+    await sbDelete('nec_pi_records', `manager_id=eq.${managerId}&year=eq.${year}&month=eq.${month}`);
+    await sb('nec_pi_records', { method: 'POST', body: { manager_id: managerId, year, month, pi_amount: amount } });
+    const mgrName = managerList.find(m => m.id === managerId)?.name || managerId;
+    await logAudit('CREATE', 'nec_pi_records', `Entered PI for ${mgrName} — ${MONTHS[month]} ${year} — RM${amount.toFixed(2)}`);
+    closeModal('modalPIRecord');
+    showToast('PI entry saved ✓');
+    loadPIRecords();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function loadPIRecords() {
+  const year = document.getElementById('mgrYear')?.value;
+  const month = document.getElementById('mgrMonth')?.value;
+  const tbody = document.getElementById('piRecordsTableBody');
+  if (!tbody || !year) return;
+  try {
+    if (!managerList.length) await loadManagers();
+    let filter = `year=eq.${year}`;
+    if (month) filter += `&month=eq.${month}`;
+    const rows = await sb('nec_pi_records', { filter });
+    if (rows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4"><div class="empty"><div class="empty-text">No PI entries for this period</div></div></td></tr>`;
+      return;
+    }
+    tbody.innerHTML = rows.map(r => {
+      const mgr = managerList.find(m => m.id === r.manager_id) || { name: 'Unknown' };
+      return `<tr>
+        <td class="td-name">${mgr.name}</td>
+        <td class="td-mono">${MONTHS[r.month]} ${r.year}</td>
+        <td class="td-mono" style="font-weight:600">${fmt(r.pi_amount)}</td>
+        <td><button class="btn btn-danger btn-sm" onclick="deletePIRecord('${r.id}')">✕</button></td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="4"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Table not set up yet. Go to Setup tab.</div></div></td></tr>`;
+  }
+}
+
+async function deletePIRecord(id) {
+  if (!confirm('Delete this PI entry?')) return;
+  await sbDelete('nec_pi_records', `id=eq.${id}`);
+  showToast('Deleted');
+  loadPIRecords();
+}
+
+async function openPISplitModal() {
+  await loadManagers();
+  const poolManagers = managerList.filter(m => isPoolManager(m.name));
+  document.getElementById('piSplitFields').innerHTML = poolManagers.map(m => `
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="font-weight:500;min-width:100px">${m.name}</div>
+      <div style="font-size:11px;color:var(--muted);min-width:60px">${m.share_percentage}% share</div>
+      <div style="flex:1;display:flex;align-items:center;justify-content:space-between;gap:6px">
+        <span style="font-size:11px;color:var(--muted)" id="psOwnPI_${m.id}">Own PI: RM 0.00</span>
+        <span style="font-size:12px;color:var(--accent);font-weight:700" id="psResult_${m.id}">→ RM 0.00</span>
+      </div>
+    </div>`).join('');
+  openModal('modalPISplit');
+  loadPISplitPreview();
+}
+
+// Pulls each manager's entered PI amount for the selected period from
+// nec_pi_records, sums all 4 into one pool, then splits that pool by each
+// manager's share_percentage — same rule as the Manager Comm pool, but
+// this pool never mixes with it. Restricted to the 4 pool managers, same
+// as isPoolManager throughout this section.
+async function loadPISplitPreview() {
+  const year = parseInt(document.getElementById('psYear').value);
+  const month = parseInt(document.getElementById('psMonth').value);
+  if (!managerList.length) await loadManagers();
+  const poolManagers = managerList.filter(m => isPoolManager(m.name));
+  let records = [];
+  try {
+    records = await sb('nec_pi_records', { filter: `year=eq.${year}&month=eq.${month}` });
+  } catch(e) { /* table may not exist yet */ }
+
+  const pool = poolManagers.reduce((sum, m) => {
+    const rec = records.find(x => x.manager_id === m.id);
+    return sum + parseFloat(rec?.pi_amount || 0);
+  }, 0);
+
+  poolManagers.forEach(m => {
+    const rec = records.find(x => x.manager_id === m.id);
+    const own = parseFloat(rec?.pi_amount || 0);
+    const share = pool * (parseFloat(m.share_percentage) / 100);
+    const ownEl = document.getElementById(`psOwnPI_${m.id}`);
+    const resultEl = document.getElementById(`psResult_${m.id}`);
+    if (ownEl) ownEl.textContent = `Own PI: RM ${fmtNum(own)}${rec ? '' : ' (not entered)'}`;
+    if (resultEl) resultEl.textContent = `→ RM ${fmtNum(share)}`;
+  });
+  const poolTotalEl = document.getElementById('psPoolTotal');
+  if (poolTotalEl) poolTotalEl.textContent = `RM ${fmtNum(pool)}`;
+}
+
+async function savePISharing() {
+  const year = parseInt(document.getElementById('psYear').value);
+  const month = parseInt(document.getElementById('psMonth').value);
+  const poolManagers = managerList.filter(m => isPoolManager(m.name));
+  try {
+    const records = await sb('nec_pi_records', { filter: `year=eq.${year}&month=eq.${month}` });
+    const pool = poolManagers.reduce((sum, m) => {
+      const rec = records.find(x => x.manager_id === m.id);
+      return sum + parseFloat(rec?.pi_amount || 0);
+    }, 0);
+    if (pool <= 0) return showToast('No PI entries for this period yet', 'error');
+    for (const m of poolManagers) {
+      const rec = records.find(x => x.manager_id === m.id);
+      const own = parseFloat(rec?.pi_amount || 0);
+      const share = pool * (m.share_percentage / 100);
+      // Preserve any already-assigned doc_number — re-splitting (e.g. after
+      // a late PI entry correction) shouldn't orphan a previously-printed
+      // document's number.
+      const existing = await sb('nec_pi_sharing', { filter: `manager_id=eq.${m.id}&year=eq.${year}&month=eq.${month}`, select: 'doc_number' });
+      const keepDocNumber = existing[0]?.doc_number || null;
+      await sbDelete('nec_pi_sharing', `manager_id=eq.${m.id}&year=eq.${year}&month=eq.${month}`);
+      await sb('nec_pi_sharing', {
+        method: 'POST',
+        body: { manager_id: m.id, year, month, pi_pool_total: pool, share_percentage: m.share_percentage, pool_share_amount: share, own_amount: own, doc_number: keepDocNumber }
+      });
+    }
+    closeModal('modalPISplit');
+    showToast('PI pool split saved ✓');
+    await logAudit('CREATE', 'nec_pi_sharing', `Recorded pooled PI sharing for ${MONTHS[month]} ${year} — pool RM${pool.toFixed(2)}`);
+    loadPISharing();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function loadPISharing() {
+  const year = document.getElementById('mgrYear')?.value;
+  const month = document.getElementById('mgrMonth')?.value;
+  const tbody = document.getElementById('piSharingTableBody');
+  if (!tbody || !year) return;
+  try {
+    if (!managerList.length) await loadManagers();
+    let filter = `year=eq.${year}`;
+    if (month) filter += `&month=eq.${month}`;
+    const rows = await sb('nec_pi_sharing', { filter });
+    if (rows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="9"><div class="empty"><div class="empty-text">No PI splits recorded for this period</div></div></td></tr>`;
+      return;
+    }
+    tbody.innerHTML = rows.map(r => {
+      const mgr = managerList.find(m => m.id === r.manager_id) || { name: 'Unknown' };
+      const net = parseFloat(r.net_amount || 0);
+      const isInv = net < 0;
+      return `<tr>
+        <td class="td-name">${mgr.name}</td>
+        <td class="td-mono">${MONTHS[r.month]} ${r.year}</td>
+        <td class="td-mono">${fmt(r.pi_pool_total)}</td>
+        <td class="td-mono">${r.share_percentage}%</td>
+        <td class="td-mono">${fmt(r.pool_share_amount)}</td>
+        <td class="td-mono">${fmt(r.own_amount)}</td>
+        <td class="td-mono" style="font-weight:700;color:${isInv ? 'var(--red)' : 'var(--green)'}">${isInv ? '−' : '+'}RM ${fmtNum(Math.abs(net))} (${isInv ? 'Invoice' : 'Payslip'})</td>
+        <td class="td-muted" style="font-size:11px">${r.doc_number || '—'}</td>
+        <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="generatePIDocument('${r.id}')">🖨 Print</button> <button class="btn btn-danger btn-sm" onclick="deletePISharing('${r.id}')">✕</button></td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="9"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Table not set up yet. Go to Setup tab.</div></div></td></tr>`;
+  }
+}
+
+async function deletePISharing(id) {
+  if (!confirm('Delete this PI split record?')) return;
+  await sbDelete('nec_pi_sharing', `id=eq.${id}`);
+  showToast('Deleted');
+  loadPISharing();
+}
+
+// Sequential document number for PI settlement docs (NEC-PI-YYYY-MM-###)
+// — its own pool, separate from staff invoice/payslip numbering, assigned
+// once on first print and reused after (same pattern as
+// getNextStaffInvoiceNumber/getNextStaffPayslipNumber).
+async function getNextPIDocNumber(year, month) {
+  try {
+    const records = await sb('nec_pi_sharing', {
+      filter: `year=eq.${year}&month=eq.${month}&doc_number=not.is.null`,
+      select: 'doc_number'
+    });
+    let maxSeq = 0;
+    records.forEach(r => {
+      const m = (r.doc_number || '').match(/-(\d{3})$/);
+      if (m) maxSeq = Math.max(maxSeq, parseInt(m[1]));
+    });
+    const next = maxSeq + 1;
+    return `NEC-PI-${year}-${String(month).padStart(2,'0')}-${String(next).padStart(3,'0')}`;
+  } catch(e) {
+    return `NEC-PI-${year}-${String(month).padStart(2,'0')}-001`;
+  }
+}
+
+// Builds a standalone PI settlement document — an Invoice (manager owes
+// New Era) if net_amount < 0, or a Payslip (New Era owes the manager) if
+// net_amount >= 0. Completely separate document from the staff/manager
+// settlement Invoice/Payslip and from Manager Comm — its own letterhead
+// section, its own numbering series, its own line item explaining the
+// pool math.
+function buildPIDocumentHTML(mgr, row, bankInfo) {
+  const net = parseFloat(row.net_amount || 0);
+  const isInv = net < 0;
+  const amount = Math.abs(net);
+  const poolMathNote = `Pool Total RM ${fmtNum(row.pi_pool_total)} × ${row.share_percentage}% share = RM ${fmtNum(row.pool_share_amount)} pool share. Already received RM ${fmtNum(row.own_amount)} directly from Coway this period.`;
+  if (isInv) {
+    return `
+      <div class="invoice-preview">
+        <div class="inv-header">
+          <div>
+            <div class="inv-company-name">NEW ERA CONSULTING ENTERPRISE</div>
+            <div class="inv-reg">202503018811 (MA0326725-T)</div>
+            <div class="inv-address">No 21, Jalan Villa Puncak Desa 3,<br>Villa Puncak Desa, Taman Desa Petaling,<br>57100 Kuala Lumpur, W.P.</div>
+          </div>
+          <div>
+            <div class="inv-label">INVOICE — PI</div>
+            <div class="inv-meta">No: ${row.doc_number}<br>Date: ${MONTH_FULL[row.month]} ${row.year}</div>
+          </div>
+        </div>
+        <div class="inv-divider"></div>
+        <div class="inv-bill-to">Bill To</div>
+        <div class="inv-bill-name">${mgr.name}</div>
+        <div class="inv-bill-sub">PI Settlement</div>
+        <table class="inv-table">
+          <thead><tr><th>Description</th><th>Amount</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>PI Pool Share for ${MONTH_FULL[row.month]} ${row.year}<br>
+              <span style="font-size:11px;color:#888">${poolMathNote} Received more than the pool share — the difference is owed back to New Era.</span></td>
+              <td style="font-weight:700">RM ${fmtNum(amount)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="inv-total-row">
+          <div class="inv-total-box">
+            <div class="inv-total-label">Total Amount Due to New Era</div>
+            <div class="inv-total-amount">RM ${fmtNum(amount)}</div>
+          </div>
+        </div>
+        <div class="inv-footer">
+          <strong>Payment Information</strong><br>
+          Bank: Public Bank Berhad<br>
+          Account Name: New Era Consulting Enterprise<br>
+          Account No: 3243542608
+        </div>
+      </div>`;
+  }
+  return `
+      <div class="invoice-preview">
+        <div class="inv-header">
+          <div>
+            <div class="inv-company-name">NEW ERA CONSULTING ENTERPRISE</div>
+            <div class="inv-reg">202503018811 (MA0326725-T)</div>
+            <div class="inv-address">No 21, Jalan Villa Puncak Desa 3,<br>Villa Puncak Desa, Taman Desa Petaling,<br>57100 Kuala Lumpur, W.P.</div>
+          </div>
+          <div>
+            <div class="inv-label" style="color:#16a34a">PAYSLIP — PI</div>
+            <div class="inv-meta">No: ${row.doc_number}<br>Date: ${MONTH_FULL[row.month]} ${row.year}</div>
+          </div>
+        </div>
+        <div class="inv-divider"></div>
+        <div class="inv-bill-to">Pay To</div>
+        <div class="inv-bill-name">${mgr.name}</div>
+        <div class="inv-bill-sub">PI Settlement</div>
+        <table class="inv-table">
+          <thead><tr><th>Description</th><th>Amount</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>PI Pool Share for ${MONTH_FULL[row.month]} ${row.year}<br>
+              <span style="font-size:11px;color:#888">${poolMathNote} This pays the balance owed to reach the full pool share.</span></td>
+              <td style="font-weight:700">RM ${fmtNum(amount)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="inv-total-row">
+          <div class="inv-total-box">
+            <div class="inv-total-label">Total Pay</div>
+            <div class="inv-total-amount" style="color:#16a34a">RM ${fmtNum(amount)}</div>
+          </div>
+        </div>
+        <div class="inv-footer">
+          ${bankInfo && (bankInfo.bank_name || bankInfo.bank_account) ? `
+          <strong>Payment Information</strong><br>
+          Bank: ${bankInfo.bank_name || '—'}<br>
+          Account Name: ${bankInfo.name || mgr.name}<br>
+          Account No: ${bankInfo.bank_account || '—'}${bankInfo.ic_number ? `<br>IC: ${bankInfo.ic_number}` : ''}
+          ` : `Payment will be credited to this manager's registered bank account — no bank details on file yet (add them in Bank Details).`}
+        </div>
+      </div>`;
+}
+
+async function generatePIDocument(id) {
+  if (!managerList.length) await loadManagers();
+  const rows = await sb('nec_pi_sharing', { filter: `id=eq.${id}` });
+  const row = rows[0];
+  if (!row) return showToast('PI record not found', 'error');
+  const mgr = managerList.find(m => m.id === row.manager_id) || { name: 'Unknown' };
+
+  if (!row.doc_number) {
+    try {
+      const num = await getNextPIDocNumber(row.year, row.month);
+      await sb('nec_pi_sharing', { method: 'PATCH', filter: `id=eq.${row.id}`, body: { doc_number: num } });
+      row.doc_number = num;
+      await logAudit('UPDATE', 'nec_pi_sharing', `Assigned PI document number ${num} for ${mgr.name} — ${MONTHS[row.month]} ${row.year}`);
+    } catch(e) { console.error('Failed to assign PI doc number:', e); }
+  }
+
+  let bankInfo = null;
+  if (mgr.staff_id) {
+    try {
+      const staffRows = await sb('nec_staff', { filter: `id=eq.${mgr.staff_id}`, select: 'bank_directory_id' });
+      const bdId = staffRows[0]?.bank_directory_id;
+      if (bdId) {
+        const bd = await sb('nec_bank_directory', { filter: `id=eq.${bdId}`, select: 'name,ic_number,bank_name,bank_account' });
+        if (bd.length) bankInfo = bd[0];
+      }
+    } catch(e) { /* fall back to the generic line */ }
+  }
+
+  const isInv = parseFloat(row.net_amount || 0) < 0;
+  const html = buildPIDocumentHTML(mgr, row, bankInfo);
+  const title = isInv ? 'PI Invoice' : 'PI Payslip';
+  const win = window.open('', '_blank', 'width=700,height=800');
+  win.document.write(`<html><head><title>${title} - ${mgr.name} - ${MONTHS[row.month]} ${row.year}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <style>body{margin:40px;background:#f5f5f5;font-family:Inter,sans-serif}
+    ${INVOICE_PRINT_STYLE}
+    @media print{body{margin:0;background:#fff}.invoice-preview{box-shadow:none}}
+    </style></head><body>${html}<br><button onclick="window.print()" style="margin:20px auto;display:block;padding:10px 24px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button>
+  </body></html>`);
+  loadPISharing();
 }
 
 // ---- Acc Below: Manager Invoice (auto) + manual adjustments ----
@@ -7174,10 +7640,10 @@ async function loadMgrAdjustments() {
     const commRecords = await sb('nec_manager_sharing', { filter: commFilter });
 
     // Manager Invoice: NEGATIVE of each manager's own pool_contribution
-    // (nec_manager_payslips — the same Overriding+Allowance+PI figure their
-    // own uploaded Coway payslip / manually-entered PI feeds into the
-    // Manager Comm pool). Coway already paid this amount directly to the
-    // manager via their own payslip, so it must be subtracted back out of their pooled Manager
+    // (nec_manager_payslips — the same Overriding+Allowance figure their
+    // own uploaded Coway payslip feeds into the Manager Comm pool). Coway
+    // already paid this amount directly to the manager via their own
+    // payslip, so it must be subtracted back out of their pooled Manager
     // Comm share to avoid double-counting — e.g. KY's own payslip already
     // gave him RM1579.50 from Coway directly, so the company only needs to
     // top him up by (poolShare − 1579.50) to reach his full Manager Comm
@@ -7345,12 +7811,13 @@ async function loadMgrAdjustments() {
 // Below (auto Manager Invoice + manual adjustments). Splitting these into
 // tabs instead of stacking ~6 full-width tables keeps each view focused.
 function switchManagerTab(tab) {
-  ['overview', 'comm', 'accbelow'].forEach(t => {
+  ['overview', 'comm', 'accbelow', 'pi'].forEach(t => {
     const pane = document.getElementById(`mgrPane-${t}`);
     const tabEl = document.getElementById(`mgrTab-${t}`);
     if (t === tab) { pane.classList.remove('hidden'); tabEl.classList.add('active'); }
     else { pane.classList.add('hidden'); tabEl.classList.remove('active'); }
   });
+  if (tab === 'pi') { loadPIRecords(); loadPISharing(); }
 }
 
 // Sub-tabs on the Payroll page: "Payroll" (staff list + payroll records —
@@ -7386,6 +7853,8 @@ function loadAllManagerData() {
   loadManagerSharing();
   loadMgrPayslips();
   loadMgrAdjustments();
+  loadPIRecords();
+  loadPISharing();
 }
 
 async function loadManagerSharing() {
@@ -9303,8 +9772,7 @@ CREATE TABLE IF NOT EXISTS nec_manager_payslips (
   month int NOT NULL,
   overriding_total numeric(10,2) DEFAULT 0,
   allowance_total numeric(10,2) DEFAULT 0,
-  pi_amount numeric(10,2) DEFAULT 0, -- manually-entered PI (Coway money paid ~25th, no PDF)
-  pool_contribution numeric(10,2) GENERATED ALWAYS AS (overriding_total + allowance_total + pi_amount) STORED,
+  pool_contribution numeric(10,2) GENERATED ALWAYS AS (overriding_total + allowance_total) STORED,
   total_net_payable numeric(10,2) DEFAULT 0,
   distributor_code text,
   raw_filename text,
@@ -9312,22 +9780,48 @@ CREATE TABLE IF NOT EXISTS nec_manager_payslips (
   UNIQUE(manager_id, year, month)
 );
 
--- If nec_manager_payslips already existed before pi_amount was added,
--- pool_contribution's generated formula won't include it automatically —
--- add the column and drop/recreate pool_contribution so existing
--- deployments pick up the new formula.
-ALTER TABLE nec_manager_payslips ADD COLUMN IF NOT EXISTS pi_amount numeric(10,2) DEFAULT 0;
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'nec_manager_payslips' AND column_name = 'pool_contribution'
-  ) THEN
-    ALTER TABLE nec_manager_payslips DROP COLUMN pool_contribution;
-  END IF;
-  ALTER TABLE nec_manager_payslips ADD COLUMN pool_contribution numeric(10,2)
-    GENERATED ALWAYS AS (overriding_total + allowance_total + pi_amount) STORED;
-END $$;
+-- PI: a completely separate pool from Manager Comm (Overriding+Allowance).
+-- Money each of the 4 pool managers (KY/Chloe/Carine/Jess) personally
+-- receives from Coway around the 25th of each month — manually entered,
+-- no PDF. nec_pi_records holds each manager's own PI amount for the
+-- period. The PI pool for a period = sum of all 4 managers' pi_amount,
+-- split by each manager's share_percentage — same rule as Manager Comm,
+-- but tracked and settled entirely separately (own PI tab, own
+-- Invoice/Payslip documents) so the two pools never mix.
+CREATE TABLE IF NOT EXISTS nec_pi_records (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  manager_id uuid REFERENCES nec_managers(id),
+  year int NOT NULL,
+  month int NOT NULL,
+  pi_amount numeric(10,2) DEFAULT 0,
+  created_at timestamptz DEFAULT now(),
+  UNIQUE(manager_id, year, month)
+);
+
+-- The pooled PI split result per manager per period. pool_share_amount is
+-- this manager's share_percentage of the period's total PI pool.
+-- own_amount is what they personally already received from Coway
+-- (nec_pi_records.pi_amount for that manager/period). net_amount =
+-- pool_share_amount − own_amount: positive means the company still owes
+-- them more (settled as a Payslip), negative means they received more
+-- than their pool share and owe it back (settled as an Invoice).
+-- doc_number is a real, sequential NEC-PI-YYYY-MM-### number assigned
+-- once on first print and reused after (mirrors invoice/payslip numbering
+-- elsewhere in the app).
+CREATE TABLE IF NOT EXISTS nec_pi_sharing (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  manager_id uuid REFERENCES nec_managers(id),
+  year int NOT NULL,
+  month int NOT NULL,
+  pi_pool_total numeric(10,2) NOT NULL DEFAULT 0,
+  share_percentage numeric(5,2) NOT NULL DEFAULT 0,
+  pool_share_amount numeric(10,2) NOT NULL DEFAULT 0,
+  own_amount numeric(10,2) NOT NULL DEFAULT 0,
+  net_amount numeric(10,2) GENERATED ALWAYS AS (pool_share_amount - own_amount) STORED,
+  doc_number text,
+  created_at timestamptz DEFAULT now(),
+  UNIQUE(manager_id, year, month)
+);
 
 -- Acc Below manual adjustments: per-manager, per-period entries for items
 -- like Claim/Mistake/Gift/Both-Company-Loan-Claim/Alpha-C-Claim/Return-Back
@@ -9555,7 +10049,7 @@ async function saveManagers() {
 async function testConnection() {
   const result = document.getElementById('connTestResult');
   result.textContent = 'Testing...';
-  const tables = ['proxy_accounts','proxy_invoices','proxy_invoice_payments','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_manager_payslips','nec_manager_adjustments','nec_pl_costs','nec_cost_categories','nec_credit_cards','nec_cc_statements','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads','nec_order_assignments','monthly_config'];
+  const tables = ['proxy_accounts','proxy_invoices','proxy_invoice_payments','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_manager_payslips','nec_manager_adjustments','nec_pi_records','nec_pi_sharing','nec_pl_costs','nec_cost_categories','nec_credit_cards','nec_cc_statements','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads','nec_order_assignments','monthly_config'];
   const results = [];
   for (const t of tables) {
     try {
