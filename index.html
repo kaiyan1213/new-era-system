@@ -1065,11 +1065,12 @@
               <th>Own PI</th>
               <th>Net</th>
               <th>Document</th>
+              <th>Paid</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody id="piSharingTableBody">
-            <tr><td colspan="9"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+            <tr><td colspan="10"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -7231,15 +7232,17 @@ async function savePISharing() {
       const rec = records.find(x => x.manager_id === m.id);
       const own = parseFloat(rec?.pi_amount || 0);
       const share = pool * (m.share_percentage / 100);
-      // Preserve any already-assigned doc_number — re-splitting (e.g. after
-      // a late PI entry correction) shouldn't orphan a previously-printed
-      // document's number.
-      const existing = await sb('nec_pi_sharing', { filter: `manager_id=eq.${m.id}&year=eq.${year}&month=eq.${month}`, select: 'doc_number' });
+      // Preserve any already-assigned doc_number and payment_date —
+      // re-splitting (e.g. after a late PI entry correction) shouldn't
+      // orphan a previously-printed document's number or wipe out a
+      // recorded payment.
+      const existing = await sb('nec_pi_sharing', { filter: `manager_id=eq.${m.id}&year=eq.${year}&month=eq.${month}`, select: 'doc_number,payment_date' });
       const keepDocNumber = existing[0]?.doc_number || null;
+      const keepPaymentDate = existing[0]?.payment_date || null;
       await sbDelete('nec_pi_sharing', `manager_id=eq.${m.id}&year=eq.${year}&month=eq.${month}`);
       await sb('nec_pi_sharing', {
         method: 'POST',
-        body: { manager_id: m.id, year, month, pi_pool_total: pool, share_percentage: m.share_percentage, pool_share_amount: share, own_amount: own, doc_number: keepDocNumber }
+        body: { manager_id: m.id, year, month, pi_pool_total: pool, share_percentage: m.share_percentage, pool_share_amount: share, own_amount: own, doc_number: keepDocNumber, payment_date: keepPaymentDate }
       });
     }
     closeModal('modalPISplit');
@@ -7260,7 +7263,7 @@ async function loadPISharing() {
     if (month) filter += `&month=eq.${month}`;
     const rows = await sb('nec_pi_sharing', { filter });
     if (rows.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="9"><div class="empty"><div class="empty-text">No PI splits recorded for this period</div></div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="10"><div class="empty"><div class="empty-text">No PI splits recorded for this period</div></div></td></tr>`;
       return;
     }
     tbody.innerHTML = rows.map(r => {
@@ -7276,11 +7279,14 @@ async function loadPISharing() {
         <td class="td-mono">${fmt(r.own_amount)}</td>
         <td class="td-mono" style="font-weight:700;color:${isInv ? 'var(--red)' : 'var(--green)'}">${isInv ? '−' : '+'}RM ${fmtNum(Math.abs(net))} (${isInv ? 'Invoice' : 'Payslip'})</td>
         <td class="td-muted" style="font-size:11px">${r.doc_number || '—'}</td>
+        <td>${r.payment_date
+          ? `<span class="badge badge-paid" style="cursor:pointer" onclick="markPISharingPaid('${r.id}')">${r.payment_date}</span>`
+          : `<button class="btn btn-ghost btn-sm" onclick="markPISharingPaid('${r.id}')">Mark Paid</button>`}</td>
         <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="generatePIDocument('${r.id}')">🖨 Print</button> <button class="btn btn-danger btn-sm" onclick="deletePISharing('${r.id}')">✕</button></td>
       </tr>`;
     }).join('');
   } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="9"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Table not set up yet. Go to Setup tab.</div></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Table not set up yet. Go to Setup tab.</div></div></td></tr>`;
   }
 }
 
@@ -7289,6 +7295,25 @@ async function deletePISharing(id) {
   await sbDelete('nec_pi_sharing', `id=eq.${id}`);
   showToast('Deleted');
   loadPISharing();
+}
+
+// Click a "Mark Paid" button to set today's date (editable in the
+// prompt), or click an already-paid badge to correct/clear the date —
+// mirrors markPayrollPaid's UX for the staff/manager settlement table.
+async function markPISharingPaid(id) {
+  const today = new Date().toISOString().slice(0,10);
+  const input = prompt('Payment date (YYYY-MM-DD), or clear the field to mark unpaid:', today);
+  if (input === null) return; // cancelled
+  const trimmed = input.trim();
+  if (trimmed && !/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return showToast('Invalid date format — use YYYY-MM-DD', 'error');
+  }
+  try {
+    await sb('nec_pi_sharing', { method: 'PATCH', filter: `id=eq.${id}`, body: { payment_date: trimmed || null } });
+    await logAudit('UPDATE', 'nec_pi_sharing', `${trimmed ? `Marked PI settlement ${id} as paid (payment date: ${trimmed})` : `Marked PI settlement ${id} as unpaid`}`);
+    showToast(trimmed ? 'Marked as paid' : 'Marked as unpaid');
+    loadPISharing();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
 // Sequential document number for PI settlement docs (NEC-PI-YYYY-MM-###)
@@ -9819,6 +9844,7 @@ CREATE TABLE IF NOT EXISTS nec_pi_sharing (
   own_amount numeric(10,2) NOT NULL DEFAULT 0,
   net_amount numeric(10,2) GENERATED ALWAYS AS (pool_share_amount - own_amount) STORED,
   doc_number text,
+  payment_date date, -- set once this settlement (Invoice or Payslip) is actually paid
   created_at timestamptz DEFAULT now(),
   UNIQUE(manager_id, year, month)
 );
