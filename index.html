@@ -1383,7 +1383,7 @@
       <!-- Step 2 -->
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:24px">
         <div style="font-weight:600;margin-bottom:6px">Step 2 — Initialize Managers</div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Set up the 4 co-founders and their profit share %. Total must = 100%</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Set up (or update) each manager's profit share %. Zehao stays at 0% — he's included here for Acc Below/Adjustments but doesn't participate in the pool. Total must = 100%</div>
         <div id="managerSetupList" style="display:grid;gap:10px;margin-bottom:16px">
           <!-- filled by JS -->
         </div>
@@ -10042,10 +10042,22 @@ const DEFAULT_MANAGERS = [
   { name: 'Zehao', share_percentage: 0 },
 ];
 
-function loadSetup() {
+// Renders one input row per DEFAULT_MANAGERS entry, but pre-fills each
+// with the LIVE share_percentage from nec_managers when that manager
+// already exists (matched by name) — previously this always reset to the
+// hardcoded DEFAULT_MANAGERS values on every page load regardless of what
+// was actually saved, which made this screen look "stuck" on stale %s
+// even right after a real update.
+async function loadSetup() {
   document.getElementById('setupSQL').textContent = SETUP_SQL;
   const container = document.getElementById('managerSetupList');
-  container.innerHTML = DEFAULT_MANAGERS.map((m,i) => `
+  let liveManagers = [];
+  try { liveManagers = await sb('nec_managers', {}); } catch(e) { /* table may not exist yet */ }
+  const rows = DEFAULT_MANAGERS.map(dm => {
+    const live = liveManagers.find(x => (x.name||'').toLowerCase() === dm.name.toLowerCase());
+    return live ? { name: live.name, share_percentage: parseFloat(live.share_percentage) } : dm;
+  });
+  container.innerHTML = rows.map((m,i) => `
     <div style="display:flex;align-items:center;gap:10px">
       <input type="text" value="${m.name}" id="mgSetupName${i}" style="flex:1" class="form-input" placeholder="Name">
       <input type="number" value="${m.share_percentage}" id="mgSetupPct${i}" style="width:80px" class="form-input" oninput="updateSetupTotal()" placeholder="%">
@@ -10056,7 +10068,7 @@ function loadSetup() {
 
 function updateSetupTotal() {
   let total = 0;
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < DEFAULT_MANAGERS.length; i++) {
     total += parseFloat(document.getElementById(`mgSetupPct${i}`)?.value || 0);
   }
   const el = document.getElementById('setupPctTotal');
@@ -10064,25 +10076,44 @@ function updateSetupTotal() {
   el.style.color = Math.abs(total - 100) < 0.1 ? 'var(--green)' : 'var(--red)';
 }
 
+// Updates each existing manager's share_percentage IN PLACE (matched by
+// name) instead of deleting and re-inserting every manager row. The old
+// delete-then-recreate approach broke once real history existed: manager
+// rows are referenced by staff_id (link to nec_staff) and by every
+// downstream table (nec_manager_sharing, nec_manager_payslips,
+// nec_manager_adjustments, nec_pi_records, nec_pi_sharing) via manager_id
+// foreign keys, so deleting a manager with any of that history now fails
+// outright — which is exactly the "duplicate key value violates unique
+// constraint" error this produced (the delete for a referenced manager
+// silently failed, so the following insert collided with the still-there
+// old row). Even when the delete did succeed, re-inserting created a
+// brand-new id with no staff_id, orphaning all that manager's history and
+// recreating the exact duplicate-row problem fixed earlier. PATCH-in-place
+// keeps the same id/staff_id/history intact and only ever INSERTs for a
+// name that doesn't exist yet (first-time setup).
 async function saveManagers() {
   let total = 0;
   const entries = [];
-  for (let i = 0; i < 4; i++) {
-    const name = document.getElementById(`mgSetupName${i}`).value;
+  for (let i = 0; i < DEFAULT_MANAGERS.length; i++) {
+    const name = document.getElementById(`mgSetupName${i}`).value.trim();
     const pct = parseFloat(document.getElementById(`mgSetupPct${i}`).value);
+    if (!name) continue;
     total += pct;
     entries.push({ name, share_percentage: pct });
   }
   if (Math.abs(total - 100) > 0.1) return showToast('Total % must equal 100%', 'error');
   try {
-    // Check if managers exist
     const existing = await sb('nec_managers', {});
-    if (existing.length > 0) {
-      if (!confirm('Managers already exist. Replace them?')) return;
-      for (const m of existing) await sbDelete('nec_managers', `id=eq.${m.id}`);
+    for (const m of entries) {
+      const match = existing.find(x => (x.name||'').toLowerCase() === m.name.toLowerCase());
+      if (match) {
+        await sb('nec_managers', { method: 'PATCH', filter: `id=eq.${match.id}`, body: { share_percentage: m.share_percentage } });
+      } else {
+        await sb('nec_managers', { method: 'POST', body: m });
+      }
     }
-    for (const m of entries) await sb('nec_managers', { method: 'POST', body: m });
-    showToast('Managers saved! ✓');
+    await logAudit('UPDATE', 'nec_managers', `Updated manager share percentages: ${entries.map(e => `${e.name} ${e.share_percentage}%`).join(', ')}`);
+    showToast('Managers saved ✓');
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
