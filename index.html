@@ -9768,6 +9768,20 @@ CREATE TABLE IF NOT EXISTS nec_managers (
 -- for everyone — staff, admin, and managers alike.
 ALTER TABLE nec_managers ADD COLUMN IF NOT EXISTS staff_id uuid REFERENCES nec_staff(id);
 
+-- One row per manager, period. A stale duplicate set (re-running Setup's
+-- "Save Managers" without deleting the old rows first, or manually adding
+-- a manager whose name already existed) previously caused every pool-split
+-- preview/modal to render each manager twice with two different share %s.
+-- This constraint makes that impossible going forward — enforced directly
+-- at the DB level rather than relying on every dropdown/filter in the app
+-- to dedupe by name on its own.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'nec_managers_name_unique') THEN
+    ALTER TABLE nec_managers ADD CONSTRAINT nec_managers_name_unique UNIQUE (name);
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS nec_manager_sharing (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   year int NOT NULL,
