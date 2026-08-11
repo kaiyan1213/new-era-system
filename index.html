@@ -10953,17 +10953,51 @@ function toggleAllBdChk(bdId, checked) {
   document.querySelectorAll(`.bd-order-chk[data-bdid="${bdId}"]`).forEach(c => { c.checked = checked; });
 }
 
+// Keeps nec_order_assignments.team/commission_algo in sync whenever an
+// order's Team or Channel is changed on the Breakdown page AFTER it was
+// already assigned to a staff member. bdAssignSave derives commission_algo
+// from whatever Team/Channel the order had AT THE MOMENT it was assigned
+// — if Team/Channel is edited afterward (via the per-order dropdowns or
+// Set All buttons here), that assignment row previously kept computing
+// commission under the OLD algo forever, since nothing re-synced it. E.g.
+// an order moved to Outsider after being assigned would silently keep
+// paying DM's flat RM50/order instead of Outsider's 100%-of-com on the
+// staff's Calculation Sheet/Payslip — even though the Breakdown page's
+// own revenue totals (NE/AC/Outsider) and dropdown correctly showed the
+// new Team. A no-op if the order was never assigned to anyone (nothing to
+// sync — bdAssignSave will read the then-current Team/Channel whenever it
+// eventually is assigned).
+async function syncOrderAssignmentAlgo(bd, orderNo, team, channel) {
+  try {
+    const proxyListEntry = proxyList.find(p => String(p.id) === String(bd.proxy_id))
+      || proxyList.find(p => p.coway_id === String(bd.distributor_code));
+    const proxyUUID = proxyListEntry?.id || bd.proxy_id;
+    const existing = await sb('nec_order_assignments', {
+      filter: `year=eq.${bd.year}&month=eq.${bd.month}&order_no=eq.${encodeURIComponent(orderNo)}`,
+      select: 'id,proxy_id,commission_algo,team'
+    });
+    const match = existing.find(a => String(a.proxy_id) === String(proxyUUID) || String(a.proxy_id) === String(bd.proxy_id));
+    if (!match) return; // not assigned to anyone yet — nothing to sync
+    const commAlgo = deriveCommAlgo(team, channel);
+    if (match.team === team && match.commission_algo === commAlgo) return; // already in sync
+    await sb('nec_order_assignments', { method: 'PATCH', filter: `id=eq.${match.id}`, body: { team, commission_algo: commAlgo } });
+  } catch(e) { console.error('syncOrderAssignmentAlgo error:', e); }
+}
+
 async function setAllBreakdownTeams(breakdownId, team) {
   try {
-    const [rec] = await sb('nec_payslip_breakdown', { filter: `id=eq.${breakdownId}`, select: 'id,categories_json' });
+    const [rec] = await sb('nec_payslip_breakdown', { filter: `id=eq.${breakdownId}`, select: 'id,categories_json,proxy_id,year,month,distributor_code' });
     if (!rec) return showToast('Record not found', 'error');
     const orders = JSON.parse(rec.categories_json || '[]');
-    const updated = orders.map(o => ({ ...o, team }));
+    const updated = orders.map(o => ({ ...o, team, channel: team === 'Outsider' ? null : (o.channel || 'DM') }));
     await fetch(`${SUPABASE_URL}/rest/v1/nec_payslip_breakdown?id=eq.${breakdownId}`, {
       method: 'PATCH',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
       body: JSON.stringify({ categories_json: JSON.stringify(updated) })
     });
+    for (const o of updated) {
+      await syncOrderAssignmentAlgo(rec, o.order_no, team, o.channel);
+    }
     await logAudit('UPDATE', 'nec_payslip_breakdown', `All orders in breakdown ${breakdownId} → ${team}`);
     showToast(`All orders → ${team} ✓`);
     showBreakdown(breakdownId); // re-render the card to reflect all dropdowns updated
@@ -10975,17 +11009,19 @@ async function setAllBreakdownTeams(breakdownId, team) {
 // Called from per-order Team dropdowns in the Breakdown page.
 async function updateOrderTeam(breakdownId, orderNo, team) {
   try {
-    const [rec] = await sb('nec_payslip_breakdown', { filter: `id=eq.${breakdownId}`, select: 'id,categories_json' });
+    const [rec] = await sb('nec_payslip_breakdown', { filter: `id=eq.${breakdownId}`, select: 'id,categories_json,proxy_id,year,month,distributor_code' });
     if (!rec) return showToast('Breakdown record not found', 'error');
     const orders = JSON.parse(rec.categories_json || '[]');
+    const newChannel = team === 'Outsider' ? null : (orders.find(o => o.order_no === orderNo)?.channel || 'DM');
     const updated = orders.map(o => o.order_no === orderNo
-      ? { ...o, team, channel: team === 'Outsider' ? null : (o.channel || 'DM') }
+      ? { ...o, team, channel: newChannel }
       : o);
     await fetch(`${SUPABASE_URL}/rest/v1/nec_payslip_breakdown?id=eq.${breakdownId}`, {
       method: 'PATCH',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
       body: JSON.stringify({ categories_json: JSON.stringify(updated) })
     });
+    await syncOrderAssignmentAlgo(rec, orderNo, team, newChannel);
     await logAudit('UPDATE', 'nec_payslip_breakdown', `Order ${orderNo} team → ${team}`);
     showToast(`${orderNo} → ${team} ✓`);
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
@@ -11008,7 +11044,7 @@ function syncBdChannel(breakdownId, orderNo, team) {
 
 async function updateOrderChannel(breakdownId, orderNo, channel) {
   try {
-    const [rec] = await sb('nec_payslip_breakdown', { filter: `id=eq.${breakdownId}`, select: 'id,categories_json' });
+    const [rec] = await sb('nec_payslip_breakdown', { filter: `id=eq.${breakdownId}`, select: 'id,categories_json,proxy_id,year,month,distributor_code' });
     if (!rec) return showToast('Breakdown record not found', 'error');
     const orders = JSON.parse(rec.categories_json || '[]');
     const updated = orders.map(o => o.order_no === orderNo ? { ...o, channel } : o);
@@ -11017,6 +11053,8 @@ async function updateOrderChannel(breakdownId, orderNo, channel) {
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
       body: JSON.stringify({ categories_json: JSON.stringify(updated) })
     });
+    const currentTeam = orders.find(o => o.order_no === orderNo)?.team || 'New Era';
+    await syncOrderAssignmentAlgo(rec, orderNo, currentTeam, channel);
     showToast(`${orderNo} → ${channel} ✓`);
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
@@ -11164,7 +11202,7 @@ async function assignBdOrderStaff(breakdownId, orderNo, staffId, proxyId, year, 
 
 async function setAllBreakdownChannels(breakdownId, channel) {
   try {
-    const [rec] = await sb('nec_payslip_breakdown', { filter: `id=eq.${breakdownId}`, select: 'id,categories_json' });
+    const [rec] = await sb('nec_payslip_breakdown', { filter: `id=eq.${breakdownId}`, select: 'id,categories_json,proxy_id,year,month,distributor_code' });
     if (!rec) return showToast('Record not found', 'error');
     const orders = JSON.parse(rec.categories_json || '[]');
     const updated = orders.map(o => o.team === 'Outsider' ? o : { ...o, channel });
@@ -11173,6 +11211,10 @@ async function setAllBreakdownChannels(breakdownId, channel) {
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
       body: JSON.stringify({ categories_json: JSON.stringify(updated) })
     });
+    for (const o of updated) {
+      if (o.team === 'Outsider') continue; // channel is moot for Outsider orders — nothing to sync
+      await syncOrderAssignmentAlgo(rec, o.order_no, o.team || 'New Era', channel);
+    }
     await logAudit('UPDATE', 'nec_payslip_breakdown', `All orders in breakdown ${breakdownId} channel → ${channel}`);
     showToast(`All orders → ${channel} ✓`);
     showBreakdown(breakdownId);
