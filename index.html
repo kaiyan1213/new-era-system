@@ -9669,11 +9669,32 @@ async function exportProxyFullYear(proxyId, proxyName, year) {
     }
 
     // ── Annual income summary ──
-    const totalCoway = r2(invoices.reduce((s, i) => s + parseFloat(i.coway_payslip_amount || 0), 0));
+    // Coway money for this person can arrive via TWO different paths that
+    // are mutually exclusive per proxy (see nec_staff.own_proxy_id note /
+    // task history "Stop creating invoices for Payroll-owned proxies"):
+    //  1. Plain proxy_invoices flow — coway_payslip_amount per month.
+    //  2. Staff-linked (own_proxy_id) flow — proxy_invoices rows are never
+    //     created here; instead the Coway money that hit THIS PERSON'S OWN
+    //     bank account is recorded as nec_payroll.own_proxy_offset and
+    //     already netted OUT of total_pay (see getOwnProxyPayslipAmount /
+    //     saveAutoCommissionRow: total_pay = commission + salary - epf -
+    //     own_proxy_offset). Only reading proxy_invoices here would show
+    //     RM0 Coway money even though real Coway money did land in their
+    //     account — own_proxy_offset is the only place that amount is
+    //     recorded, so it must be added back in for an accurate summary.
+    const totalCowayInvoiced = r2(invoices.reduce((s, i) => s + parseFloat(i.coway_payslip_amount || 0), 0));
+    const totalCowayOwnProxy = r2(payrollRows.reduce((s, r) => s + parseFloat(r.own_proxy_offset || 0), 0));
+    const totalCoway = r2(totalCowayInvoiced + totalCowayOwnProxy);
     const totalInvoiced = r2(invoices.reduce((s, i) => s + parseFloat(i.invoice_amount || 0), 0));
     const totalPayslipIncome = r2(payrollRows.filter(r => !isInvoiceRecord(r)).reduce((s, r) => s + parseFloat(r.total_pay || 0), 0));
     const totalOwedBack = r2(payrollRows.filter(r => isInvoiceRecord(r)).reduce((s, r) => s + Math.abs(parseFloat(r.total_pay || 0)), 0));
-    const netIncome = r2((totalCoway - totalInvoiced) + totalPayslipIncome - totalOwedBack);
+    // totalCowayOwnProxy is already netted OUT of totalPayslipIncome (it's
+    // subtracted when computing total_pay), so both are real, non-
+    // overlapping money that landed in this person's own bank account —
+    // safe to add directly. totalCowayInvoiced is different: that money
+    // sits in the proxy account and totalInvoiced is forwarded back out of
+    // it, so only the (coway - invoiced) difference is this person's own.
+    const netIncome = r2((totalCowayInvoiced - totalInvoiced) + totalCowayOwnProxy + totalPayslipIncome - totalOwedBack);
 
     const summaryLines = [
       'New Era Consulting Enterprise — Annual Record',
@@ -9686,14 +9707,15 @@ async function exportProxyFullYear(proxyId, proxyName, year) {
       if (!inv && !pr) continue;
       const parts = [];
       if (inv) parts.push(`Coway RM${fmtNum(inv.coway_payslip_amount)}`, `Invoiced RM${fmtNum(inv.invoice_amount)}`);
+      if (pr && parseFloat(pr.own_proxy_offset || 0) > 0) parts.push(`Coway (own proxy) RM${fmtNum(pr.own_proxy_offset)}`);
       if (pr) parts.push(`${isInvoiceRecord(pr) ? 'Owed back' : 'Payslip'} RM${fmtNum(Math.abs(pr.total_pay))}`);
       summaryLines.push(`  ${MONTH_FULL[m]}: ${parts.join(' | ')}`);
     }
     summaryLines.push('', 'Annual totals:');
     summaryLines.push(`  Total Coway Money (received into proxy account): RM ${fmtNum(totalCoway)}`);
-    summaryLines.push(`  Total Invoiced back to company: RM ${fmtNum(totalInvoiced)}`);
+    if (totalCowayInvoiced > 0) summaryLines.push(`  Total Invoiced back to company: RM ${fmtNum(totalInvoiced)}`);
     if (staff) {
-      summaryLines.push(`  Total Payslip income (paid by New Era as staff): RM ${fmtNum(totalPayslipIncome)}`);
+      summaryLines.push(`  Total Payslip income (paid by New Era as staff, already excludes the Coway money above): RM ${fmtNum(totalPayslipIncome)}`);
       if (totalOwedBack > 0) summaryLines.push(`  Total owed back to New Era (negative settlement months): RM ${fmtNum(totalOwedBack)}`);
     }
     summaryLines.push(`  Net Income for the year: RM ${fmtNum(netIncome)}`);
@@ -9723,7 +9745,7 @@ function showProxyYearSummary(proxy, year, totalCoway, totalInvoiced, totalPaysl
     <div class="modal-title">${proxy.name} — ${year} Summary</div>
     <div style="display:flex;flex-direction:column;gap:8px;font-size:13px;margin-top:8px">
       <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Coway Money (into proxy account)</span><span class="td-mono">RM ${fmtNum(totalCoway)}</span></div>
-      <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Invoiced back to company</span><span class="td-mono">RM ${fmtNum(totalInvoiced)}</span></div>
+      ${totalInvoiced > 0 ? `<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Invoiced back to company</span><span class="td-mono">RM ${fmtNum(totalInvoiced)}</span></div>` : ''}
       ${staff ? `<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Payslip income (as staff)</span><span class="td-mono">RM ${fmtNum(totalPayslipIncome)}</span></div>` : ''}
       ${totalOwedBack > 0 ? `<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Owed back (negative months)</span><span class="td-mono" style="color:var(--red)">-RM ${fmtNum(totalOwedBack)}</span></div>` : ''}
       <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:8px;font-weight:700"><span>Net Income (${year})</span><span class="td-mono" style="color:var(--green)">RM ${fmtNum(netIncome)}</span></div>
