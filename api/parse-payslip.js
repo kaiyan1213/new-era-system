@@ -532,12 +532,20 @@ function parseCowayPayslip(text) {
   }
 
   // ── 4. Build new orders detail ──────────────────────────────
-  const DIVISIBLE_ALLOWANCE_TYPES = ['special ws', 'hp new pi', 'monthly hp multiplier', 'hp multiplier'];
+  // The ENTIRE Allowance section (every line item — Cash Incentive, HP New
+  // PI, Monthly HP Multiplier, Special WS, or any other type Coway prints
+  // here) gets divided evenly across this month's new orders. Previously
+  // only a curated whitelist of allowance descriptions (DIVISIBLE_ALLOWANCE_TYPES)
+  // was divided per-order, silently excluding types like "Cash Incentive" —
+  // that money was still counted correctly in the overall passive/total
+  // reconciliation, but never made it into any individual order's total_com,
+  // undercounting the per-order commission shown on the Breakdown page and
+  // used for DM/TM/Outsider calculation. E.g. CHAN QIAN TONG's Aug payslip:
+  // Cash Incentive 200 + HP New PI 4,100 + Monthly HP Multiplier 1,600 =
+  // 5,900 total allowance ÷ 15 orders = RM393.33/order (previously only
+  // 4,100+1,600=5,700 ÷ 15 = RM380.00/order, missing the 200 entirely).
   const allowanceTotal = r2(allowances.reduce((s,a) => s + a.amount, 0));
-  const divisibleAllowanceTotal = allowances
-    .filter(a => DIVISIBLE_ALLOWANCE_TYPES.some(t => (a.description || '').toLowerCase().includes(t)))
-    .reduce((s, a) => s + (a.amount || 0), 0);
-  const allowancePerOrder = bonusOrders.length > 0 ? r2(divisibleAllowanceTotal / bonusOrders.length) : 0;
+  const allowancePerOrder = bonusOrders.length > 0 ? r2(allowanceTotal / bonusOrders.length) : 0;
 
   let new_orders_total = 0;
   for (const o of bonusOrders) {
