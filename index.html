@@ -1272,6 +1272,7 @@
           </select>
           <button class="btn btn-primary" onclick="loadExportProxies()">Load</button>
         </div>
+        <input type="text" id="exportProxySearch" placeholder="🔍 Search name…" oninput="renderExportProxyList(this.value)" style="width:100%;margin-bottom:16px;padding:9px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
         <div id="exportProxyList">
           <div class="empty"><div class="empty-icon">📁</div><div class="empty-text">Select year and click Load</div></div>
         </div>
@@ -9532,8 +9533,14 @@ function showCCReminderModal(due) {
 
 // ============ EXPORT ============
 
+// Computed once per Load click, then re-filtered/re-grouped locally by the
+// search bar (renderExportProxyList) without re-fetching.
+let _exportProxyRows = [];
+let _exportProxyYear = null;
+
 async function loadExportProxies() {
   const year = document.getElementById('exportYear').value;
+  _exportProxyYear = year;
   await loadProxies();
   const container = document.getElementById('exportProxyList');
   if (proxyList.length === 0) {
@@ -9556,7 +9563,7 @@ async function loadExportProxies() {
     pr.forEach(r => { (payrollByStaff[r.staff_id] = payrollByStaff[r.staff_id] || []).push(r); });
   }
 
-  container.innerHTML = proxyList.map(p => {
+  _exportProxyRows = proxyList.map(p => {
     const pInv = invoices.filter(i => i.proxy_id === p.id);
     const linkedStaffId = staffIdByProxy[p.id];
     const pPayroll = linkedStaffId ? (payrollByStaff[linkedStaffId] || []) : [];
@@ -9568,22 +9575,56 @@ async function loadExportProxies() {
     const monthsRecorded = new Set([...pInv.map(i => i.month), ...pPayroll.map(r => r.month)]).size;
     const netLabel = linkedStaffId ? 'Payslip' : 'Profit';
     const netAmt = linkedStaffId ? ytdPayslip : (ytdCoway - ytdInvoiced);
-    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center">
+    return {
+      id: p.id, name: p.name, ic_number: p.ic_number,
+      manager: MANAGER_ORDER.includes(p.manager) ? p.manager : 'Unassigned',
+      ytdCoway, ytdInvoiced, netLabel, netAmt, monthsRecorded
+    };
+  });
+
+  document.getElementById('exportProxySearch').value = '';
+  renderExportProxyList('');
+}
+
+// Groups the already-computed rows by manager (MANAGER_ORDER, then
+// Unassigned — same pattern used everywhere else in the app: Directory,
+// Inv, Breakdown sidebar) and filters by name against the search box,
+// without re-fetching from the DB.
+function renderExportProxyList(searchTerm) {
+  const container = document.getElementById('exportProxyList');
+  const year = _exportProxyYear;
+  const term = (searchTerm || '').trim().toLowerCase();
+  const filtered = term ? _exportProxyRows.filter(r => r.name.toLowerCase().includes(term)) : _exportProxyRows;
+
+  if (!filtered.length) {
+    container.innerHTML = `<div class="empty"><div class="empty-icon">🔍</div><div class="empty-text">No matching names</div></div>`;
+    return;
+  }
+
+  const groups = {};
+  [...MANAGER_ORDER, 'Unassigned'].forEach(m => groups[m] = []);
+  filtered.forEach(r => groups[r.manager].push(r));
+
+  const cardHtml = (r) => `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center">
       <div>
-        <div style="font-weight:600">${p.name}</div>
-        <div style="font-size:11px;color:var(--muted)">IC: ${p.ic_number || '—'} | ${monthsRecorded} months recorded</div>
+        <div style="font-weight:600">${r.name}</div>
+        <div style="font-size:11px;color:var(--muted)">IC: ${r.ic_number || '—'} | ${r.monthsRecorded} months recorded</div>
         <div style="font-size:11px;margin-top:4px">
-          Coway Money: <span style="font-family:var(--mono);color:var(--accent)">${fmt(ytdCoway)}</span> |
-          ${ytdInvoiced > 0 ? `Invoiced: <span style="font-family:var(--mono);color:var(--green)">${fmt(ytdInvoiced)}</span> | ` : ''}
-          ${netLabel}: <span style="font-family:var(--mono);color:${netAmt>4500?'var(--yellow)':'var(--green)'}">${fmt(netAmt)}</span>
+          Coway Money: <span style="font-family:var(--mono);color:var(--accent)">${fmt(r.ytdCoway)}</span> |
+          ${r.ytdInvoiced > 0 ? `Invoiced: <span style="font-family:var(--mono);color:var(--green)">${fmt(r.ytdInvoiced)}</span> | ` : ''}
+          ${r.netLabel}: <span style="font-family:var(--mono);color:${r.netAmt>4500?'var(--yellow)':'var(--green)'}">${fmt(r.netAmt)}</span>
         </div>
       </div>
       <div style="display:flex;gap:6px">
-        <button class="btn btn-primary btn-sm" onclick="exportProxyFullYear('${p.id}','${(p.name||'').replace(/'/g,"\\'")}','${year}')">📦 Save All (PDF)</button>
-        <button class="btn btn-ghost btn-sm" onclick="exportProxy('${p.id}','${p.name}','${year}')">Export CSV</button>
+        <button class="btn btn-primary btn-sm" onclick="exportProxyFullYear('${r.id}','${(r.name||'').replace(/'/g,"\\'")}','${year}')">📦 Save All (PDF)</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportProxy('${r.id}','${(r.name||'').replace(/'/g,"\\'")}','${year}')">Export CSV</button>
       </div>
     </div>`;
-  }).join('');
+
+  container.innerHTML = [...MANAGER_ORDER, 'Unassigned'].filter(m => groups[m].length).map(m => `
+    <div style="font-size:12px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.05em;margin:18px 0 8px 0">${m} <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(${groups[m].length})</span></div>
+    ${groups[m].map(cardHtml).join('')}
+  `).join('');
 }
 
 // Plain CSV export for one person's year — reads BOTH possible sources of
