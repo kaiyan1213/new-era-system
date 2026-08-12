@@ -1170,6 +1170,11 @@
       <!-- filled by JS -->
     </div>
 
+    <!-- Unclassified orders (team not tagged, not guessed) -->
+    <div id="plUnclassified" style="margin-bottom:24px">
+      <!-- filled by JS -->
+    </div>
+
     <!-- Channel P&L -->
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:28px" id="plChannels">
       <!-- filled by JS -->
@@ -4652,6 +4657,52 @@ function loadJSZip() {
     s.onerror = () => reject(new Error('Failed to load JSZip'));
     document.head.appendChild(s);
   });
+}
+
+// Loads html2canvas from cdnjs on demand — used to rasterize document
+// types that don't have a hand-coded jsPDF drawer (like drawInvoiceOnPDF
+// has for the Proxy Invoice) into a PDF page. Staff Payslips/Settlement
+// Invoices have dynamic, itemized line items (see getPayslipLineItems) —
+// rendering the EXISTING buildStaffPayslipHTML/buildStaffInvoiceHTML output
+// via html2canvas keeps bulk-exported PDFs pixel-identical to what's shown
+// when printed individually, instead of a second hand-coded jsPDF
+// implementation that could drift out of sync with the real calculation.
+function loadHtml2Canvas() {
+  if (window.html2canvas) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('Failed to load html2canvas'));
+    document.head.appendChild(s);
+  });
+}
+
+// Renders an HTML string (styled with INVOICE_PRINT_STYLE, wrapped in
+// .invoice-preview like buildInvoiceHTML/buildStaffPayslipHTML/
+// buildStaffInvoiceHTML already produce) into a page of a jsPDF doc.
+async function renderHtmlIntoPdfPage(doc, htmlBody, addNewPage) {
+  const container = document.createElement('div');
+  container.style.position = 'fixed';
+  container.style.left = '-9999px';
+  container.style.top = '0';
+  container.style.width = '700px';
+  container.style.background = '#fff';
+  container.innerHTML = `<style>${INVOICE_PRINT_STYLE}</style>${htmlBody}`;
+  document.body.appendChild(container);
+  try {
+    const canvas = await window.html2canvas(container, { scale: 2, backgroundColor: '#ffffff' });
+    const imgData = canvas.toDataURL('image/jpeg', 0.92);
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 10;
+    const imgW = pageW - margin * 2;
+    const imgH = canvas.height * imgW / canvas.width;
+    if (addNewPage) doc.addPage();
+    doc.addImage(imgData, 'JPEG', margin, margin, imgW, Math.min(imgH, pageH - margin * 2));
+  } finally {
+    document.body.removeChild(container);
+  }
 }
 
 // Downloads ALL filtered invoices as a ZIP file.
@@ -8601,6 +8652,8 @@ async function loadPL() {
       </div>`;
     }).join('');
 
+    document.getElementById('plUnclassified').innerHTML = ''; // Unclassified flagging reverted — fallback logic restored per user's confirmation that current NE-DM/NE-TM counts are correct
+
     document.getElementById('plChannels').innerHTML = ''; // Channel section replaced by 8-bucket cards
 
     // Cost table — grouped card-by-card (mirrors the Inv page's
@@ -9503,7 +9556,10 @@ async function loadExportProxies() {
           Profit: <span style="font-family:var(--mono);color:${ytdProfit>4500?'var(--yellow)':'var(--green)'}">${fmt(ytdProfit)}</span>
         </div>
       </div>
-      <button class="btn btn-ghost btn-sm" onclick="exportProxy('${p.id}','${p.name}','${year}')">Export CSV</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-primary btn-sm" onclick="exportProxyFullYear('${p.id}','${(p.name||'').replace(/'/g,"\\'")}','${year}')">📦 Save All (PDF)</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportProxy('${p.id}','${p.name}','${year}')">Export CSV</button>
+      </div>
     </div>`;
   }).join('');
 }
@@ -9528,6 +9584,156 @@ async function exportProxy(proxyId, proxyName, year) {
   ];
   downloadCSV(rows, `NEC_Proxy_${proxyName.replace(/ /g,'_')}_${year}.csv`);
   showToast(`Exported ${proxyName} ${year}`);
+}
+
+// One-click bulk export for a single proxy's full year of documents —
+// every Invoice PDF (proxy_invoices) plus, if this proxy is also linked to
+// a staff member's own Coway account (nec_staff.own_proxy_id), every
+// Payslip/Settlement Invoice PDF (nec_payroll) that staff member received
+// that year — bundled into one ZIP, with a plain-language Coway/Invoiced/
+// Payslip income summary (both inside the ZIP and shown on-screen right
+// away) for LHDN annual filing.
+async function exportProxyFullYear(proxyId, proxyName, year) {
+  try {
+    showToast('Gathering documents…');
+    await loadJsPDF();
+    await loadJSZip();
+    await loadHtml2Canvas();
+
+    const proxyRows = await sb('proxy_accounts', { filter: `id=eq.${proxyId}` });
+    const proxy = proxyRows[0] || { name: proxyName };
+
+    const invoices = await sb('proxy_invoices', {
+      filter: `proxy_id=eq.${proxyId}&year=eq.${year}`,
+      select: 'id,month,coway_payslip_amount,invoice_amount,proxy_profit,invoice_number,status,notes'
+    });
+    invoices.sort((a, b) => a.month - b.month);
+
+    // Linked staff — if this proxy IS someone's own Coway account, their
+    // Payroll payslips are the other half of "this person's" documents
+    // (Payroll-owned proxies don't get separate proxy_invoices rows, see
+    // the note on nec_staff.own_proxy_id).
+    const staffRows = await sb('nec_staff', { filter: `own_proxy_id=eq.${proxyId}` });
+    const staff = staffRows[0] || null;
+
+    let payrollRows = [];
+    let bankInfo = null;
+    if (staff) {
+      payrollRows = await sb('nec_payroll', { filter: `staff_id=eq.${staff.id}&year=eq.${year}` });
+      payrollRows.sort((a, b) => a.month - b.month);
+      if (staff.bank_directory_id) {
+        try {
+          const bRows = await sb('nec_bank_directory', { filter: `id=eq.${staff.bank_directory_id}`, select: 'name,ic_number,bank_name,bank_account' });
+          if (bRows.length) bankInfo = bRows[0];
+        } catch(e) { /* fall back to generic line on the payslip itself */ }
+      }
+    }
+
+    if (!invoices.length && !payrollRows.length) {
+      return showToast(`No records for ${proxy.name} in ${year}`, 'error');
+    }
+
+    const zip = new JSZip();
+
+    // ── Invoices (proxy_invoices) — reuses the existing hand-coded jsPDF drawer ──
+    for (const inv of invoices) {
+      const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      drawInvoiceOnPDF(doc, inv, proxy);
+      zip.file(`Invoices/${MONTH_FULL[inv.month]} ${year}.pdf`, doc.output('arraybuffer'));
+    }
+
+    // ── Payroll Payslips / Settlement Invoices (nec_payroll), if staff-linked ──
+    for (const r of payrollRows) {
+      const isInv = isInvoiceRecord(r);
+      // Assign a real, persisted number the same way opening it individually
+      // would (generatePayrollRecordPayslip) — so a bulk export lines up
+      // with what a manual reprint later would show, not a throwaway number.
+      if (isInv && !r.invoice_number) {
+        try {
+          const num = await getNextStaffInvoiceNumber(r.year, r.month);
+          await sb('nec_payroll', { method: 'PATCH', filter: `id=eq.${r.id}`, body: { invoice_number: num } });
+          r.invoice_number = num;
+        } catch(e) {}
+      } else if (!isInv && !r.payslip_number) {
+        try {
+          const num = await getNextStaffPayslipNumber(r.year, r.month);
+          await sb('nec_payroll', { method: 'PATCH', filter: `id=eq.${r.id}`, body: { payslip_number: num } });
+          r.payslip_number = num;
+        } catch(e) {}
+      }
+      const html = isInv ? buildStaffInvoiceHTML(staff, r) : buildStaffPayslipHTML(staff, r, bankInfo);
+      const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      await renderHtmlIntoPdfPage(doc, html, false);
+      const label = isInv ? 'Settlement Invoice' : 'Payslip';
+      zip.file(`Payslips/${MONTH_FULL[r.month]} ${year} - ${label}.pdf`, doc.output('arraybuffer'));
+    }
+
+    // ── Annual income summary ──
+    const totalCoway = r2(invoices.reduce((s, i) => s + parseFloat(i.coway_payslip_amount || 0), 0));
+    const totalInvoiced = r2(invoices.reduce((s, i) => s + parseFloat(i.invoice_amount || 0), 0));
+    const totalPayslipIncome = r2(payrollRows.filter(r => !isInvoiceRecord(r)).reduce((s, r) => s + parseFloat(r.total_pay || 0), 0));
+    const totalOwedBack = r2(payrollRows.filter(r => isInvoiceRecord(r)).reduce((s, r) => s + Math.abs(parseFloat(r.total_pay || 0)), 0));
+    const netIncome = r2((totalCoway - totalInvoiced) + totalPayslipIncome - totalOwedBack);
+
+    const summaryLines = [
+      'New Era Consulting Enterprise — Annual Record',
+      `${proxy.name}${proxy.ic_number ? ' | IC: ' + proxy.ic_number : ''} | Year: ${year}`,
+      '', 'Month-by-month:'
+    ];
+    for (let m = 1; m <= 12; m++) {
+      const inv = invoices.find(i => i.month === m);
+      const pr = payrollRows.find(r => r.month === m);
+      if (!inv && !pr) continue;
+      const parts = [];
+      if (inv) parts.push(`Coway RM${fmtNum(inv.coway_payslip_amount)}`, `Invoiced RM${fmtNum(inv.invoice_amount)}`);
+      if (pr) parts.push(`${isInvoiceRecord(pr) ? 'Owed back' : 'Payslip'} RM${fmtNum(Math.abs(pr.total_pay))}`);
+      summaryLines.push(`  ${MONTH_FULL[m]}: ${parts.join(' | ')}`);
+    }
+    summaryLines.push('', 'Annual totals:');
+    summaryLines.push(`  Total Coway Money (received into proxy account): RM ${fmtNum(totalCoway)}`);
+    summaryLines.push(`  Total Invoiced back to company: RM ${fmtNum(totalInvoiced)}`);
+    if (staff) {
+      summaryLines.push(`  Total Payslip income (paid by New Era as staff): RM ${fmtNum(totalPayslipIncome)}`);
+      if (totalOwedBack > 0) summaryLines.push(`  Total owed back to New Era (negative settlement months): RM ${fmtNum(totalOwedBack)}`);
+    }
+    summaryLines.push(`  Net Income for the year: RM ${fmtNum(netIncome)}`);
+    summaryLines.push('', 'Note: system-generated reference summary only — not tax or financial advice. Please verify with your accountant before LHDN filing.');
+    zip.file('Summary.txt', summaryLines.join('\n'));
+
+    showToast('Building ZIP…');
+    const content = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(content);
+    a.download = `${proxy.name.replace(/[/\\?%*:|"<>]/g, '-')} ${year} - Full Year Documents.zip`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+
+    showProxyYearSummary(proxy, year, totalCoway, totalInvoiced, totalPayslipIncome, totalOwedBack, netIncome, staff);
+    showToast(`Downloaded ${invoices.length + payrollRows.length} documents ✓`);
+  } catch(e) { showToast('Error: ' + e.message, 'error'); console.error(e); }
+}
+
+function showProxyYearSummary(proxy, year, totalCoway, totalInvoiced, totalPayslipIncome, totalOwedBack, netIncome, staff) {
+  document.querySelectorAll('.modal-backdrop[data-proxy-summary]').forEach(m => m.remove());
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.setAttribute('data-proxy-summary', '1');
+  modal.style.display = 'flex';
+  modal.innerHTML = `<div class="modal" style="max-width:420px">
+    <div class="modal-title">${proxy.name} — ${year} Summary</div>
+    <div style="display:flex;flex-direction:column;gap:8px;font-size:13px;margin-top:8px">
+      <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Coway Money (into proxy account)</span><span class="td-mono">RM ${fmtNum(totalCoway)}</span></div>
+      <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Invoiced back to company</span><span class="td-mono">RM ${fmtNum(totalInvoiced)}</span></div>
+      ${staff ? `<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Payslip income (as staff)</span><span class="td-mono">RM ${fmtNum(totalPayslipIncome)}</span></div>` : ''}
+      ${totalOwedBack > 0 ? `<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Owed back (negative months)</span><span class="td-mono" style="color:var(--red)">-RM ${fmtNum(totalOwedBack)}</span></div>` : ''}
+      <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:8px;font-weight:700"><span>Net Income (${year})</span><span class="td-mono" style="color:var(--green)">RM ${fmtNum(netIncome)}</span></div>
+      <div style="font-size:10px;color:var(--muted);margin-top:6px">Reference summary only — not tax/financial advice. Please verify with your accountant before LHDN filing.</div>
+    </div>
+    <div style="margin-top:16px;text-align:right">
+      <button class="btn btn-primary" onclick="this.closest('.modal-backdrop').remove()">Close</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
 }
 
 async function exportPL() {
