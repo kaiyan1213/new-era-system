@@ -9696,31 +9696,20 @@ async function exportProxyFullYear(proxyId, proxyName, year) {
     // it, so only the (coway - invoiced) difference is this person's own.
     const netIncome = r2((totalCowayInvoiced - totalInvoiced) + totalCowayOwnProxy + totalPayslipIncome - totalOwedBack);
 
-    const summaryLines = [
-      'New Era Consulting Enterprise — Annual Record',
-      `${proxy.name}${proxy.ic_number ? ' | IC: ' + proxy.ic_number : ''} | Year: ${year}`,
-      '', 'Month-by-month:'
-    ];
+    // Month-by-month rows — feeds both the outside CSV and the on-screen
+    // chart. No "Summary.txt" inside the ZIP anymore; the summary lives as
+    // a separate CSV download instead.
+    const monthlyRows = [];
     for (let m = 1; m <= 12; m++) {
       const inv = invoices.find(i => i.month === m);
       const pr = payrollRows.find(r => r.month === m);
       if (!inv && !pr) continue;
-      const parts = [];
-      if (inv) parts.push(`Coway RM${fmtNum(inv.coway_payslip_amount)}`, `Invoiced RM${fmtNum(inv.invoice_amount)}`);
-      if (pr && parseFloat(pr.own_proxy_offset || 0) > 0) parts.push(`Coway (own proxy) RM${fmtNum(pr.own_proxy_offset)}`);
-      if (pr) parts.push(`${isInvoiceRecord(pr) ? 'Owed back' : 'Payslip'} RM${fmtNum(Math.abs(pr.total_pay))}`);
-      summaryLines.push(`  ${MONTH_FULL[m]}: ${parts.join(' | ')}`);
+      const coway = r2((inv ? parseFloat(inv.coway_payslip_amount || 0) : 0) + (pr ? parseFloat(pr.own_proxy_offset || 0) : 0));
+      const invoicedAmt = inv ? r2(parseFloat(inv.invoice_amount || 0)) : 0;
+      const payslipAmt = pr && !isInvoiceRecord(pr) ? r2(parseFloat(pr.total_pay || 0)) : 0;
+      const owedBackAmt = pr && isInvoiceRecord(pr) ? r2(Math.abs(parseFloat(pr.total_pay || 0))) : 0;
+      monthlyRows.push({ month: m, label: MONTH_FULL[m], coway, invoicedAmt, payslipAmt, owedBackAmt });
     }
-    summaryLines.push('', 'Annual totals:');
-    summaryLines.push(`  Total Coway Money (received into proxy account): RM ${fmtNum(totalCoway)}`);
-    if (totalCowayInvoiced > 0) summaryLines.push(`  Total Invoiced back to company: RM ${fmtNum(totalInvoiced)}`);
-    if (staff) {
-      summaryLines.push(`  Total Payslip income (paid by New Era as staff, already excludes the Coway money above): RM ${fmtNum(totalPayslipIncome)}`);
-      if (totalOwedBack > 0) summaryLines.push(`  Total owed back to New Era (negative settlement months): RM ${fmtNum(totalOwedBack)}`);
-    }
-    summaryLines.push(`  Net Income for the year: RM ${fmtNum(netIncome)}`);
-    summaryLines.push('', 'Note: system-generated reference summary only — not tax or financial advice. Please verify with your accountant before LHDN filing.');
-    zip.file('Summary.txt', summaryLines.join('\n'));
 
     showToast('Building ZIP…');
     const content = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
@@ -9730,21 +9719,48 @@ async function exportProxyFullYear(proxyId, proxyName, year) {
     a.click();
     URL.revokeObjectURL(a.href);
 
-    showProxyYearSummary(proxy, year, totalCoway, totalInvoiced, totalPayslipIncome, totalOwedBack, netIncome, staff);
+    // Separate CSV (outside the ZIP) with the same figures Summary.txt used to hold
+    const csvRows = [
+      ['New Era Consulting Enterprise — Annual Record'],
+      [`${proxy.name} | Year: ${year}`], [''],
+      ['Month', 'Coway Money (RM)', 'Invoiced back to company (RM)', 'Payslip income (RM)', 'Owed back (RM)']
+    ];
+    monthlyRows.forEach(r => csvRows.push([r.label, r.coway.toFixed(2), r.invoicedAmt.toFixed(2), r.payslipAmt.toFixed(2), r.owedBackAmt.toFixed(2)]));
+    csvRows.push([''], [
+      'TOTAL', totalCoway.toFixed(2), totalInvoiced.toFixed(2), totalPayslipIncome.toFixed(2), totalOwedBack.toFixed(2)
+    ]);
+    csvRows.push([''], ['Net Income for the year (RM)', netIncome.toFixed(2)]);
+    downloadCSV(csvRows, `${proxy.name.replace(/ /g, '_')}_${year}_Coway_Money_Summary.csv`);
+
+    await showProxyYearSummary(proxy, year, totalCoway, totalInvoiced, totalPayslipIncome, totalOwedBack, netIncome, staff, monthlyRows);
     showToast(`Downloaded ${invoices.length + payrollRows.length} documents ✓`);
   } catch(e) { showToast('Error: ' + e.message, 'error'); console.error(e); }
 }
 
-function showProxyYearSummary(proxy, year, totalCoway, totalInvoiced, totalPayslipIncome, totalOwedBack, netIncome, staff) {
+// Loads Chart.js from cdnjs on demand — for the month-by-month bar chart
+// in the year-summary modal below.
+function loadChartJS() {
+  if (window.Chart) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js';
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('Failed to load Chart.js'));
+    document.head.appendChild(s);
+  });
+}
+
+async function showProxyYearSummary(proxy, year, totalCoway, totalInvoiced, totalPayslipIncome, totalOwedBack, netIncome, staff, monthlyRows) {
   document.querySelectorAll('.modal-backdrop[data-proxy-summary]').forEach(m => m.remove());
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop';
   modal.setAttribute('data-proxy-summary', '1');
   modal.style.display = 'flex';
-  modal.innerHTML = `<div class="modal" style="max-width:420px">
+  modal.innerHTML = `<div class="modal" style="max-width:480px">
     <div class="modal-title">${proxy.name} — ${year} Summary</div>
-    <div style="display:flex;flex-direction:column;gap:8px;font-size:13px;margin-top:8px">
-      <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Coway Money (into proxy account)</span><span class="td-mono">RM ${fmtNum(totalCoway)}</span></div>
+    <div style="height:200px;margin-top:10px"><canvas id="proxyYearChart"></canvas></div>
+    <div style="display:flex;flex-direction:column;gap:8px;font-size:13px;margin-top:14px">
+      <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Coway money</span><span class="td-mono">RM ${fmtNum(totalCoway)}</span></div>
       ${totalInvoiced > 0 ? `<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Invoiced back to company</span><span class="td-mono">RM ${fmtNum(totalInvoiced)}</span></div>` : ''}
       ${staff ? `<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Payslip income (as staff)</span><span class="td-mono">RM ${fmtNum(totalPayslipIncome)}</span></div>` : ''}
       ${totalOwedBack > 0 ? `<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Owed back (negative months)</span><span class="td-mono" style="color:var(--red)">-RM ${fmtNum(totalOwedBack)}</span></div>` : ''}
@@ -9756,6 +9772,31 @@ function showProxyYearSummary(proxy, year, totalCoway, totalInvoiced, totalPaysl
     </div>
   </div>`;
   document.body.appendChild(modal);
+
+  try {
+    await loadChartJS();
+    const ctx = document.getElementById('proxyYearChart');
+    if (ctx && monthlyRows && monthlyRows.length) {
+      new window.Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: monthlyRows.map(r => r.label.slice(0, 3)),
+          datasets: [
+            { label: 'Coway money', data: monthlyRows.map(r => r.coway), backgroundColor: '#4f7cff' },
+            { label: 'Payslip income', data: monthlyRows.map(r => r.payslipAmt), backgroundColor: '#16a34a' }
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { labels: { color: '#aaa', font: { size: 10 } } } },
+          scales: {
+            x: { ticks: { color: '#888', font: { size: 10 } }, grid: { display: false } },
+            y: { ticks: { color: '#888', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.06)' } }
+          }
+        }
+      });
+    }
+  } catch(e) { console.error('Chart render failed:', e); }
 }
 
 async function exportPL() {
