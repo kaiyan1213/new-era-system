@@ -9541,19 +9541,41 @@ async function loadExportProxies() {
     return;
   }
   const invoices = await sb('proxy_invoices', { filter: `year=eq.${year}`, select: 'proxy_id,month,coway_payslip_amount,invoice_amount,invoice_number,status' });
+  // Staff-linked (own_proxy_id) accounts never get proxy_invoices rows —
+  // their Coway money only shows up as nec_payroll.own_proxy_offset — so
+  // reading proxy_invoices alone shows RM0 for everyone whose income
+  // actually flows through Payroll (see exportProxyFullYear for the same
+  // fix applied to the bulk PDF export).
+  const linkedStaff = await sb('nec_staff', { filter: 'own_proxy_id=not.is.null', select: 'id,own_proxy_id' });
+  const staffIdByProxy = {};
+  linkedStaff.forEach(s => { staffIdByProxy[s.own_proxy_id] = s.id; });
+  const staffIds = linkedStaff.map(s => s.id);
+  let payrollByStaff = {};
+  if (staffIds.length) {
+    const pr = await sb('nec_payroll', { filter: `year=eq.${year}&staff_id=in.(${staffIds.join(',')})`, select: 'staff_id,month,own_proxy_offset,total_pay' });
+    pr.forEach(r => { (payrollByStaff[r.staff_id] = payrollByStaff[r.staff_id] || []).push(r); });
+  }
+
   container.innerHTML = proxyList.map(p => {
     const pInv = invoices.filter(i => i.proxy_id === p.id);
-    const ytdCoway = pInv.reduce((s,i) => s + parseFloat(i.coway_payslip_amount||0), 0);
+    const linkedStaffId = staffIdByProxy[p.id];
+    const pPayroll = linkedStaffId ? (payrollByStaff[linkedStaffId] || []) : [];
+    const ytdCowayInvoiced = pInv.reduce((s,i) => s + parseFloat(i.coway_payslip_amount||0), 0);
+    const ytdCowayOwnProxy = pPayroll.reduce((s,r) => s + parseFloat(r.own_proxy_offset||0), 0);
+    const ytdCoway = ytdCowayInvoiced + ytdCowayOwnProxy;
     const ytdInvoiced = pInv.reduce((s,i) => s + parseFloat(i.invoice_amount||0), 0);
-    const ytdProfit = ytdCoway - ytdInvoiced;
+    const ytdPayslip = pPayroll.reduce((s,r) => s + (parseFloat(r.total_pay||0) > 0 ? parseFloat(r.total_pay||0) : 0), 0);
+    const monthsRecorded = new Set([...pInv.map(i => i.month), ...pPayroll.map(r => r.month)]).size;
+    const netLabel = linkedStaffId ? 'Payslip' : 'Profit';
+    const netAmt = linkedStaffId ? ytdPayslip : (ytdCoway - ytdInvoiced);
     return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center">
       <div>
         <div style="font-weight:600">${p.name}</div>
-        <div style="font-size:11px;color:var(--muted)">IC: ${p.ic_number || '—'} | ${pInv.length} months recorded</div>
+        <div style="font-size:11px;color:var(--muted)">IC: ${p.ic_number || '—'} | ${monthsRecorded} months recorded</div>
         <div style="font-size:11px;margin-top:4px">
-          Coway Total: <span style="font-family:var(--mono);color:var(--accent)">${fmt(ytdCoway)}</span> | 
-          Invoiced: <span style="font-family:var(--mono);color:var(--green)">${fmt(ytdInvoiced)}</span> | 
-          Profit: <span style="font-family:var(--mono);color:${ytdProfit>4500?'var(--yellow)':'var(--green)'}">${fmt(ytdProfit)}</span>
+          Coway Money: <span style="font-family:var(--mono);color:var(--accent)">${fmt(ytdCoway)}</span> |
+          ${ytdInvoiced > 0 ? `Invoiced: <span style="font-family:var(--mono);color:var(--green)">${fmt(ytdInvoiced)}</span> | ` : ''}
+          ${netLabel}: <span style="font-family:var(--mono);color:${netAmt>4500?'var(--yellow)':'var(--green)'}">${fmt(netAmt)}</span>
         </div>
       </div>
       <div style="display:flex;gap:6px">
@@ -9564,25 +9586,53 @@ async function loadExportProxies() {
   }).join('');
 }
 
+// Plain CSV export for one person's year — reads BOTH possible sources of
+// their Coway money, same as exportProxyFullYear below: proxy_invoices (the
+// normal flow) AND, for staff-linked accounts (nec_staff.own_proxy_id),
+// nec_payroll.own_proxy_offset — a proxy_invoices-only read shows RM0 for
+// every column for anyone whose income actually flows through Payroll
+// instead (proxy_invoices rows are never created for those accounts, see
+// task history "Stop creating invoices for Payroll-owned proxies").
 async function exportProxy(proxyId, proxyName, year) {
   const invoices = await sb('proxy_invoices', {
     filter: `proxy_id=eq.${proxyId}&year=eq.${year}`,
-    select: 'month,coway_payslip_amount,invoice_amount,proxy_profit,invoice_number,status,notes'
+    select: 'month,coway_payslip_amount,invoice_amount,invoice_number,status,notes'
   });
   invoices.sort((a,b) => a.month - b.month);
+
+  const staffRows = await sb('nec_staff', { filter: `own_proxy_id=eq.${proxyId}` });
+  const staff = staffRows[0] || null;
+  let payrollRows = [];
+  if (staff) {
+    payrollRows = await sb('nec_payroll', { filter: `staff_id=eq.${staff.id}&year=eq.${year}` });
+    payrollRows.sort((a,b) => a.month - b.month);
+  }
+
   const rows = [
-    ['New Era Consulting Enterprise — Proxy Record'],
-    [`Proxy: ${proxyName} | Year: ${year}`],
+    ['New Era Consulting Enterprise — Annual Record'],
+    [`${proxyName} | Year: ${year}`],
     [''],
-    ['Month','Coway Payslip (RM)','Invoice to NEC (RM)','Proxy Profit (RM)','Invoice No','Status','Notes'],
-    ...invoices.map(i => [MONTH_FULL[i.month], i.coway_payslip_amount, i.invoice_amount, i.proxy_profit, i.invoice_number||'', i.status, i.notes||'']),
-    [''],
-    ['TOTAL',
-      invoices.reduce((s,i)=>s+parseFloat(i.coway_payslip_amount||0),0).toFixed(2),
-      invoices.reduce((s,i)=>s+parseFloat(i.invoice_amount||0),0).toFixed(2),
-      invoices.reduce((s,i)=>s+parseFloat(i.proxy_profit||0),0).toFixed(2),'','','']
+    ['Month','Coway Money (RM)','Invoiced back to company (RM)','Payslip income (RM)','Net (RM)','Doc No','Status']
   ];
-  downloadCSV(rows, `NEC_Proxy_${proxyName.replace(/ /g,'_')}_${year}.csv`);
+  let tCoway = 0, tInvoiced = 0, tPayslip = 0, tOwedBack = 0;
+  for (let m = 1; m <= 12; m++) {
+    const inv = invoices.find(i => i.month === m);
+    const pr = payrollRows.find(r => r.month === m);
+    if (!inv && !pr) continue;
+    const coway = r2((inv ? parseFloat(inv.coway_payslip_amount||0) : 0) + (pr ? parseFloat(pr.own_proxy_offset||0) : 0));
+    const invoicedAmt = inv ? r2(parseFloat(inv.invoice_amount||0)) : 0;
+    const isInv = pr ? isInvoiceRecord(pr) : false;
+    const payslipAmt = pr && !isInv ? r2(parseFloat(pr.total_pay||0)) : 0;
+    const owedBackAmt = pr && isInv ? r2(Math.abs(parseFloat(pr.total_pay||0))) : 0;
+    const net = r2((coway - invoicedAmt) + payslipAmt - owedBackAmt);
+    const docNo = inv?.invoice_number || pr?.payslip_number || pr?.invoice_number || '';
+    const status = inv?.status || (pr ? (isInv ? 'owed back' : 'payslip') : '');
+    rows.push([MONTH_FULL[m], coway.toFixed(2), invoicedAmt.toFixed(2), payslipAmt.toFixed(2), net.toFixed(2), docNo, status]);
+    tCoway += coway; tInvoiced += invoicedAmt; tPayslip += payslipAmt; tOwedBack += owedBackAmt;
+  }
+  rows.push(['']);
+  rows.push(['TOTAL', tCoway.toFixed(2), tInvoiced.toFixed(2), tPayslip.toFixed(2), r2(tCoway - tInvoiced + tPayslip - tOwedBack).toFixed(2), '', '']);
+  downloadCSV(rows, `NEC_${proxyName.replace(/ /g,'_')}_${year}.csv`);
   showToast(`Exported ${proxyName} ${year}`);
 }
 
