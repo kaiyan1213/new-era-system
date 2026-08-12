@@ -9711,6 +9711,7 @@ async function exportProxyFullYear(proxyId, proxyName, year) {
       monthlyRows.push({ month: m, label: MONTH_FULL[m], coway, invoicedAmt, payslipAmt, owedBackAmt });
     }
 
+    // ── Download the PDFs (ZIP) — this is the primary, auto-triggered download ──
     showToast('Building ZIP…');
     const content = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
     const a = document.createElement('a');
@@ -9718,22 +9719,14 @@ async function exportProxyFullYear(proxyId, proxyName, year) {
     a.download = `${proxy.name.replace(/[/\\?%*:|"<>]/g, '-')} ${year} - Full Year Documents.zip`;
     a.click();
     URL.revokeObjectURL(a.href);
+    showToast(`Downloaded ${invoices.length + payrollRows.length} PDFs (ZIP) ✓`);
 
-    // Separate CSV (outside the ZIP) with the same figures Summary.txt used to hold
-    const csvRows = [
-      ['New Era Consulting Enterprise — Annual Record'],
-      [`${proxy.name} | Year: ${year}`], [''],
-      ['Month', 'Coway Money (RM)', 'Invoiced back to company (RM)', 'Payslip income (RM)', 'Owed back (RM)']
-    ];
-    monthlyRows.forEach(r => csvRows.push([r.label, r.coway.toFixed(2), r.invoicedAmt.toFixed(2), r.payslipAmt.toFixed(2), r.owedBackAmt.toFixed(2)]));
-    csvRows.push([''], [
-      'TOTAL', totalCoway.toFixed(2), totalInvoiced.toFixed(2), totalPayslipIncome.toFixed(2), totalOwedBack.toFixed(2)
-    ]);
-    csvRows.push([''], ['Net Income for the year (RM)', netIncome.toFixed(2)]);
-    downloadCSV(csvRows, `${proxy.name.replace(/ /g, '_')}_${year}_Coway_Money_Summary.csv`);
-
+    // The CSV summary is NOT auto-downloaded here — firing two downloads
+    // back-to-back with no user click in between gets silently blocked by
+    // Safari/Chrome's multi-download protection (only one of the two makes
+    // it through). Instead it's a button inside the summary modal below —
+    // a real click, so it always goes through.
     await showProxyYearSummary(proxy, year, totalCoway, totalInvoiced, totalPayslipIncome, totalOwedBack, netIncome, staff, monthlyRows);
-    showToast(`Downloaded ${invoices.length + payrollRows.length} documents ✓`);
   } catch(e) { showToast('Error: ' + e.message, 'error'); console.error(e); }
 }
 
@@ -9767,11 +9760,26 @@ async function showProxyYearSummary(proxy, year, totalCoway, totalInvoiced, tota
       <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:8px;font-weight:700"><span>Net Income (${year})</span><span class="td-mono" style="color:var(--green)">RM ${fmtNum(netIncome)}</span></div>
       <div style="font-size:10px;color:var(--muted);margin-top:6px">Reference summary only — not tax/financial advice. Please verify with your accountant before LHDN filing.</div>
     </div>
-    <div style="margin-top:16px;text-align:right">
+    <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn btn-ghost" id="proxyYearCsvBtn">⬇ Download CSV</button>
       <button class="btn btn-primary" onclick="this.closest('.modal-backdrop').remove()">Close</button>
     </div>
   </div>`;
   document.body.appendChild(modal);
+
+  // Real click (not an auto-triggered second download) — CSV data is
+  // captured in this closure, no re-fetching needed.
+  document.getElementById('proxyYearCsvBtn').addEventListener('click', () => {
+    const csvRows = [
+      ['New Era Consulting Enterprise — Annual Record'],
+      [`${proxy.name} | Year: ${year}`], [''],
+      ['Month', 'Coway Money (RM)', 'Invoiced back to company (RM)', 'Payslip income (RM)', 'Owed back (RM)']
+    ];
+    (monthlyRows || []).forEach(r => csvRows.push([r.label, r.coway.toFixed(2), r.invoicedAmt.toFixed(2), r.payslipAmt.toFixed(2), r.owedBackAmt.toFixed(2)]));
+    csvRows.push([''], ['TOTAL', totalCoway.toFixed(2), totalInvoiced.toFixed(2), totalPayslipIncome.toFixed(2), totalOwedBack.toFixed(2)]);
+    csvRows.push([''], ['Net Income for the year (RM)', netIncome.toFixed(2)]);
+    downloadCSV(csvRows, `${proxy.name.replace(/ /g, '_')}_${year}_Coway_Money_Summary.csv`);
+  });
 
   try {
     await loadChartJS();
