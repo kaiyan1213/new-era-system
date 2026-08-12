@@ -9559,7 +9559,7 @@ async function loadExportProxies() {
   const staffIds = linkedStaff.map(s => s.id);
   let payrollByStaff = {};
   if (staffIds.length) {
-    const pr = await sb('nec_payroll', { filter: `year=eq.${year}&staff_id=in.(${staffIds.join(',')})`, select: 'staff_id,month,own_proxy_offset,total_pay' });
+    const pr = await sb('nec_payroll', { filter: `year=eq.${year}&staff_id=in.(${staffIds.join(',')})`, select: 'staff_id,month,own_proxy_offset,total_pay,claim_amount' });
     pr.forEach(r => { (payrollByStaff[r.staff_id] = payrollByStaff[r.staff_id] || []).push(r); });
   }
 
@@ -9571,7 +9571,13 @@ async function loadExportProxies() {
     const ytdCowayOwnProxy = pPayroll.reduce((s,r) => s + parseFloat(r.own_proxy_offset||0), 0);
     const ytdCoway = ytdCowayInvoiced + ytdCowayOwnProxy;
     const ytdInvoiced = pInv.reduce((s,i) => s + parseFloat(i.invoice_amount||0), 0);
-    const ytdPayslip = pPayroll.reduce((s,r) => s + (parseFloat(r.total_pay||0) > 0 ? parseFloat(r.total_pay||0) : 0), 0);
+    // claim_amount is a reimbursement folded into total_pay for payment
+    // purposes, not taxable profit — excluded from the headline figure
+    // here (same fix as exportProxy/exportProxyFullYear below).
+    const ytdPayslip = pPayroll.reduce((s,r) => {
+      const tp = parseFloat(r.total_pay||0);
+      return tp > 0 ? s + (tp - parseFloat(r.claim_amount||0)) : s;
+    }, 0);
     const monthsRecorded = new Set([...pInv.map(i => i.month), ...pPayroll.map(r => r.month)]).size;
     const netLabel = linkedStaffId ? 'Payslip' : 'Profit';
     const netAmt = linkedStaffId ? ytdPayslip : (ytdCoway - ytdInvoiced);
@@ -9653,9 +9659,9 @@ async function exportProxy(proxyId, proxyName, year) {
     ['New Era Consulting Enterprise — Annual Record'],
     [`${proxyName} | Year: ${year}`],
     [''],
-    ['Month','Coway Money (RM)','Invoiced back to company (RM)','Payslip income (RM)','Net (RM)','Doc No','Status']
+    ['Month','Coway Money (RM)','Invoiced back to company (RM)','Payslip income (RM)','Claim - reimbursement, not income (RM)','Net (RM)','Doc No','Status']
   ];
-  let tCoway = 0, tInvoiced = 0, tPayslip = 0, tOwedBack = 0;
+  let tCoway = 0, tInvoiced = 0, tPayslip = 0, tClaim = 0, tOwedBack = 0;
   for (let m = 1; m <= 12; m++) {
     const inv = invoices.find(i => i.month === m);
     const pr = payrollRows.find(r => r.month === m);
@@ -9663,16 +9669,19 @@ async function exportProxy(proxyId, proxyName, year) {
     const coway = r2((inv ? parseFloat(inv.coway_payslip_amount||0) : 0) + (pr ? parseFloat(pr.own_proxy_offset||0) : 0));
     const invoicedAmt = inv ? r2(parseFloat(inv.invoice_amount||0)) : 0;
     const isInv = pr ? isInvoiceRecord(pr) : false;
-    const payslipAmt = pr && !isInv ? r2(parseFloat(pr.total_pay||0)) : 0;
+    // claim_amount is a reimbursement folded into total_pay for actual
+    // payment purposes, but it's not taxable profit — pull it back out.
+    const claimAmt = pr && !isInv ? r2(parseFloat(pr.claim_amount||0)) : 0;
+    const payslipAmt = pr && !isInv ? r2(parseFloat(pr.total_pay||0) - claimAmt) : 0;
     const owedBackAmt = pr && isInv ? r2(Math.abs(parseFloat(pr.total_pay||0))) : 0;
     const net = r2((coway - invoicedAmt) + payslipAmt - owedBackAmt);
     const docNo = inv?.invoice_number || pr?.payslip_number || pr?.invoice_number || '';
     const status = inv?.status || (pr ? (isInv ? 'owed back' : 'payslip') : '');
-    rows.push([MONTH_FULL[m], coway.toFixed(2), invoicedAmt.toFixed(2), payslipAmt.toFixed(2), net.toFixed(2), docNo, status]);
-    tCoway += coway; tInvoiced += invoicedAmt; tPayslip += payslipAmt; tOwedBack += owedBackAmt;
+    rows.push([MONTH_FULL[m], coway.toFixed(2), invoicedAmt.toFixed(2), payslipAmt.toFixed(2), claimAmt.toFixed(2), net.toFixed(2), docNo, status]);
+    tCoway += coway; tInvoiced += invoicedAmt; tPayslip += payslipAmt; tClaim += claimAmt; tOwedBack += owedBackAmt;
   }
   rows.push(['']);
-  rows.push(['TOTAL', tCoway.toFixed(2), tInvoiced.toFixed(2), tPayslip.toFixed(2), r2(tCoway - tInvoiced + tPayslip - tOwedBack).toFixed(2), '', '']);
+  rows.push(['TOTAL', tCoway.toFixed(2), tInvoiced.toFixed(2), tPayslip.toFixed(2), tClaim.toFixed(2), r2(tCoway - tInvoiced + tPayslip - tOwedBack).toFixed(2), '', '']);
   downloadCSV(rows, `NEC_${proxyName.replace(/ /g,'_')}_${year}.csv`);
   showToast(`Exported ${proxyName} ${year}`);
 }
@@ -9777,7 +9786,15 @@ async function exportProxyFullYear(proxyId, proxyName, year) {
     const totalCowayOwnProxy = r2(payrollRows.reduce((s, r) => s + parseFloat(r.own_proxy_offset || 0), 0));
     const totalCoway = r2(totalCowayInvoiced + totalCowayOwnProxy);
     const totalInvoiced = r2(invoices.reduce((s, i) => s + parseFloat(i.invoice_amount || 0), 0));
-    const totalPayslipIncome = r2(payrollRows.filter(r => !isInvoiceRecord(r)).reduce((s, r) => s + parseFloat(r.total_pay || 0), 0));
+    // claim_amount is a CLAIM/reimbursement (expenses the staff already
+    // paid out of pocket on the company's behalf, e.g. petrol, ads spend),
+    // NOT income — it's folded into total_pay for actual payment purposes,
+    // but must be pulled back OUT before counting anything as "profit"/
+    // taxable income, otherwise LHDN filing overstates this person's real
+    // earnings by the claim amount every month one was made.
+    const payslipRows = payrollRows.filter(r => !isInvoiceRecord(r));
+    const totalClaim = r2(payslipRows.reduce((s, r) => s + parseFloat(r.claim_amount || 0), 0));
+    const totalPayslipIncome = r2(payslipRows.reduce((s, r) => s + parseFloat(r.total_pay || 0), 0) - totalClaim);
     const totalOwedBack = r2(payrollRows.filter(r => isInvoiceRecord(r)).reduce((s, r) => s + Math.abs(parseFloat(r.total_pay || 0)), 0));
     // totalCowayOwnProxy is already netted OUT of totalPayslipIncome (it's
     // subtracted when computing total_pay), so both are real, non-
@@ -9785,6 +9802,7 @@ async function exportProxyFullYear(proxyId, proxyName, year) {
     // safe to add directly. totalCowayInvoiced is different: that money
     // sits in the proxy account and totalInvoiced is forwarded back out of
     // it, so only the (coway - invoiced) difference is this person's own.
+    // totalClaim is deliberately EXCLUDED — reimbursement, not profit.
     const netIncome = r2((totalCowayInvoiced - totalInvoiced) + totalCowayOwnProxy + totalPayslipIncome - totalOwedBack);
 
     // Month-by-month rows — feeds both the outside CSV and the on-screen
@@ -9797,9 +9815,10 @@ async function exportProxyFullYear(proxyId, proxyName, year) {
       if (!inv && !pr) continue;
       const coway = r2((inv ? parseFloat(inv.coway_payslip_amount || 0) : 0) + (pr ? parseFloat(pr.own_proxy_offset || 0) : 0));
       const invoicedAmt = inv ? r2(parseFloat(inv.invoice_amount || 0)) : 0;
-      const payslipAmt = pr && !isInvoiceRecord(pr) ? r2(parseFloat(pr.total_pay || 0)) : 0;
+      const claimAmt = pr && !isInvoiceRecord(pr) ? r2(parseFloat(pr.claim_amount || 0)) : 0;
+      const payslipAmt = pr && !isInvoiceRecord(pr) ? r2(parseFloat(pr.total_pay || 0) - claimAmt) : 0;
       const owedBackAmt = pr && isInvoiceRecord(pr) ? r2(Math.abs(parseFloat(pr.total_pay || 0))) : 0;
-      monthlyRows.push({ month: m, label: MONTH_FULL[m], coway, invoicedAmt, payslipAmt, owedBackAmt });
+      monthlyRows.push({ month: m, label: MONTH_FULL[m], coway, invoicedAmt, payslipAmt, claimAmt, owedBackAmt });
     }
 
     // ── Download the PDFs (ZIP) — this is the primary, auto-triggered download ──
@@ -9817,7 +9836,7 @@ async function exportProxyFullYear(proxyId, proxyName, year) {
     // Safari/Chrome's multi-download protection (only one of the two makes
     // it through). Instead it's a button inside the summary modal below —
     // a real click, so it always goes through.
-    await showProxyYearSummary(proxy, year, totalCoway, totalInvoiced, totalPayslipIncome, totalOwedBack, netIncome, staff, monthlyRows);
+    await showProxyYearSummary(proxy, year, totalCoway, totalInvoiced, totalPayslipIncome, totalClaim, totalOwedBack, netIncome, staff, monthlyRows);
   } catch(e) { showToast('Error: ' + e.message, 'error'); console.error(e); }
 }
 
@@ -9834,7 +9853,7 @@ function loadChartJS() {
   });
 }
 
-async function showProxyYearSummary(proxy, year, totalCoway, totalInvoiced, totalPayslipIncome, totalOwedBack, netIncome, staff, monthlyRows) {
+async function showProxyYearSummary(proxy, year, totalCoway, totalInvoiced, totalPayslipIncome, totalClaim, totalOwedBack, netIncome, staff, monthlyRows) {
   document.querySelectorAll('.modal-backdrop[data-proxy-summary]').forEach(m => m.remove());
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop';
@@ -9847,9 +9866,10 @@ async function showProxyYearSummary(proxy, year, totalCoway, totalInvoiced, tota
       <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Coway money</span><span class="td-mono">RM ${fmtNum(totalCoway)}</span></div>
       ${totalInvoiced > 0 ? `<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Invoiced back to company</span><span class="td-mono">RM ${fmtNum(totalInvoiced)}</span></div>` : ''}
       ${staff ? `<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Payslip income (as staff)</span><span class="td-mono">RM ${fmtNum(totalPayslipIncome)}</span></div>` : ''}
+      ${totalClaim > 0 ? `<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Claim (reimbursement — not income)</span><span class="td-mono">RM ${fmtNum(totalClaim)}</span></div>` : ''}
       ${totalOwedBack > 0 ? `<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Owed back (negative months)</span><span class="td-mono" style="color:var(--red)">-RM ${fmtNum(totalOwedBack)}</span></div>` : ''}
       <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:8px;font-weight:700"><span>Net Income (${year})</span><span class="td-mono" style="color:var(--green)">RM ${fmtNum(netIncome)}</span></div>
-      <div style="font-size:10px;color:var(--muted);margin-top:6px">Reference summary only — not tax/financial advice. Please verify with your accountant before LHDN filing.</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:6px">Claim is excluded from Net Income — it's a reimbursement, not profit. Reference summary only — not tax/financial advice. Please verify with your accountant before LHDN filing.</div>
     </div>
     <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px">
       <button class="btn btn-ghost" id="proxyYearCsvBtn">⬇ Download CSV</button>
@@ -9864,11 +9884,11 @@ async function showProxyYearSummary(proxy, year, totalCoway, totalInvoiced, tota
     const csvRows = [
       ['New Era Consulting Enterprise — Annual Record'],
       [`${proxy.name} | Year: ${year}`], [''],
-      ['Month', 'Coway Money (RM)', 'Invoiced back to company (RM)', 'Payslip income (RM)', 'Owed back (RM)']
+      ['Month', 'Coway Money (RM)', 'Invoiced back to company (RM)', 'Payslip income (RM)', 'Claim - reimbursement, not income (RM)', 'Owed back (RM)']
     ];
-    (monthlyRows || []).forEach(r => csvRows.push([r.label, r.coway.toFixed(2), r.invoicedAmt.toFixed(2), r.payslipAmt.toFixed(2), r.owedBackAmt.toFixed(2)]));
-    csvRows.push([''], ['TOTAL', totalCoway.toFixed(2), totalInvoiced.toFixed(2), totalPayslipIncome.toFixed(2), totalOwedBack.toFixed(2)]);
-    csvRows.push([''], ['Net Income for the year (RM)', netIncome.toFixed(2)]);
+    (monthlyRows || []).forEach(r => csvRows.push([r.label, r.coway.toFixed(2), r.invoicedAmt.toFixed(2), r.payslipAmt.toFixed(2), (r.claimAmt||0).toFixed(2), r.owedBackAmt.toFixed(2)]));
+    csvRows.push([''], ['TOTAL', totalCoway.toFixed(2), totalInvoiced.toFixed(2), totalPayslipIncome.toFixed(2), totalClaim.toFixed(2), totalOwedBack.toFixed(2)]);
+    csvRows.push([''], ['Net Income for the year (RM) — excludes Claim', netIncome.toFixed(2)]);
     downloadCSV(csvRows, `${proxy.name.replace(/ /g, '_')}_${year}_Coway_Money_Summary.csv`);
   });
 
@@ -9882,7 +9902,8 @@ async function showProxyYearSummary(proxy, year, totalCoway, totalInvoiced, tota
           labels: monthlyRows.map(r => r.label.slice(0, 3)),
           datasets: [
             { label: 'Coway money', data: monthlyRows.map(r => r.coway), backgroundColor: '#4f7cff' },
-            { label: 'Payslip income', data: monthlyRows.map(r => r.payslipAmt), backgroundColor: '#16a34a' }
+            { label: 'Payslip income', data: monthlyRows.map(r => r.payslipAmt), backgroundColor: '#16a34a' },
+            { label: 'Claim (not income)', data: monthlyRows.map(r => r.claimAmt || 0), backgroundColor: '#888888' }
           ]
         },
         options: {
