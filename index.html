@@ -5993,9 +5993,17 @@ async function saveAutoCommissionRow(idx) {
     record_type: 'staff',
   };
   try {
-    // Overwrite any existing payroll record for this staff/year/month so
-    // re-syncing doesn't create duplicates.
-    const existing = await sb('nec_payroll', { filter: `staff_id=eq.${row.staff.id}&year=eq.${row.year}&month=eq.${row.month}`, select: 'id' });
+    // Overwrite any existing STAFF-type payroll record for this
+    // staff/year/month so re-syncing doesn't create duplicates — scoped to
+    // record_type=staff so this never touches a Manager settlement row for
+    // the same person/period. Someone can hold both identities at once
+    // (e.g. a profit-sharing manager who also personally works TM orders)
+    // and each identity's confirm must only ever manage its own row; the
+    // Payroll page then shows both and they add together, exactly like any
+    // other cost line. Before this fix, an unscoped delete here would wipe
+    // out a manager's already-confirmed settlement the moment their
+    // personal commission was (re)confirmed, or vice versa.
+    const existing = await sb('nec_payroll', { filter: `staff_id=eq.${row.staff.id}&year=eq.${row.year}&month=eq.${row.month}&record_type=eq.staff`, select: 'id' });
     for (const e of existing) await sbDelete('nec_payroll', `id=eq.${e.id}`);
 
     await sb('nec_payroll', { method: 'POST', body });
@@ -6973,7 +6981,13 @@ async function confirmManagerToPayroll(managerId) {
   const month = parseInt(monthRaw);
   try {
     const t = await getManagerTotalForPeriod(m, year, month);
-    const existing = await sb('nec_payroll', { filter: `staff_id=eq.${m.staff_id}&year=eq.${year}&month=eq.${month}`, select: 'id' });
+    // Scoped to record_type=manager — only overwrites THIS manager's own
+    // prior settlement row, never a staff-type (TM/DM commission) row for
+    // the same person/period. A person can hold both identities (e.g. Jess
+    // is both a profit-sharing manager and personally works TM orders);
+    // confirming one must never delete the other's already-locked-in
+    // amount. See the matching fix in saveAutoCommissionRow.
+    const existing = await sb('nec_payroll', { filter: `staff_id=eq.${m.staff_id}&year=eq.${year}&month=eq.${month}&record_type=eq.manager`, select: 'id' });
     for (const e of existing) await sbDelete('nec_payroll', `id=eq.${e.id}`);
     // Store the raw Com/Claim/Mistake/Acc Below figures (not a
     // pre-split breakdown) so getSettlementBreakdown can derive both
