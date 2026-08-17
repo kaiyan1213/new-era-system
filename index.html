@@ -2143,8 +2143,13 @@
     <input type="hidden" id="epId">
     <div style="font-size:12px;color:var(--muted);margin-bottom:12px" id="epStaffLabel"></div>
     <div class="form-grid">
+      <div class="form-group hidden" id="epManagerClaimRow">
+        <label class="form-label">Manager Claim (RM) — from Adjustments, locked</label>
+        <input type="text" id="epManagerClaimDisplay" class="form-input" disabled style="opacity:0.7">
+        <div style="font-size:10px;color:var(--muted);margin-top:4px">To change this, go to Manager Overview → Re-confirm. Editing here would let it silently drift out of sync with Adjustments.</div>
+      </div>
       <div class="form-group">
-        <label class="form-label">Claim Amount (RM) — reimbursements/expense claims owed to staff</label>
+        <label class="form-label" id="epClaimLabel">Claim Amount (RM) — reimbursements/expense claims owed to staff</label>
         <input type="number" id="epClaim" class="form-input" placeholder="0.00">
       </div>
       <div class="form-row">
@@ -6186,7 +6191,14 @@ function getRawSettlementParts(r) {
       // real Com/Claim/Mistake split.
       com = parseFloat(r.commission_earned||0);
     }
-    return { com, claim, mistake, deduction, deductionLabel: 'Acc Below' };
+    // payroll_claim_amount is a SEPARATE claim from this manager's own
+    // Adjustments-table claim above — this person's independent Payroll-
+    // side earnings (e.g. personal TM commission's claim portion), added
+    // on top, never merged into `claim`/notes. Shown as its own line by
+    // getCalculationBreakdown/getPayslipLineItems below so a manager who
+    // also personally works TM/DM orders never has their two claim
+    // figures silently combined into one indistinguishable number again.
+    return { com, claim, mistake, deduction, deductionLabel: 'Acc Below', payrollClaim: parseFloat(r.payroll_claim_amount||0) };
   }
   return {
     com: parseFloat(r.commission_earned||0),
@@ -6194,6 +6206,7 @@ function getRawSettlementParts(r) {
     mistake: 0,
     deduction: parseFloat(r.own_proxy_offset||0),
     deductionLabel: 'Coway Money',
+    payrollClaim: 0,
   };
 }
 
@@ -6203,11 +6216,12 @@ function getRawSettlementParts(r) {
 // NOT what the formal Payslip shows (see getPayslipLineItems below) —
 // the Payslip only shows the final, post-absorption split.
 function getCalculationBreakdown(r) {
-  const { com, claim, mistake, deduction, deductionLabel } = getRawSettlementParts(r);
+  const { com, claim, mistake, deduction, deductionLabel, payrollClaim } = getRawSettlementParts(r);
   const rows = [];
   if (parseFloat(r.base_salary||0) > 0) rows.push({ label: 'Base Salary', amount: parseFloat(r.base_salary) });
   rows.push({ label: 'Com', amount: com || null });
   rows.push({ label: 'Claim', amount: claim || null });
+  if (payrollClaim) rows.push({ label: 'Claim (Payroll)', amount: payrollClaim });
   if (mistake) rows.push({ label: 'Mistake', amount: mistake });
   rows.push({ label: deductionLabel, amount: deduction > 0 ? -deduction : null });
   if (parseFloat(r.bonus||0) !== 0) rows.push({ label: 'Bonus', amount: parseFloat(r.bonus) });
@@ -6231,7 +6245,7 @@ function getCalculationBreakdown(r) {
 // lump "Commission" figure but also never shows the raw deduction
 // itself, only what's actually being paid out in each bucket.
 function getPayslipLineItems(r) {
-  const { com, claim, mistake, deduction } = getRawSettlementParts(r);
+  const { com, claim, mistake, deduction, payrollClaim } = getRawSettlementParts(r);
   const { shown } = allocateSettlement([
     { label: 'Com', amount: com },
     { label: 'Claim', amount: claim },
@@ -6244,6 +6258,10 @@ function getPayslipLineItems(r) {
   if (parseFloat(r.base_salary||0) > 0) rows.push({ label: 'Base Salary', amount: parseFloat(r.base_salary) });
   rows.push({ label: 'Com', amount: comShown || null });
   rows.push({ label: 'Claim', amount: claimShown || null });
+  // payrollClaim is never subject to Acc Below absorption above — that
+  // deduction only eats into THIS manager's own Com/Claim/Mistake, never
+  // this separate Payroll-side figure — so it's always shown in full.
+  if (payrollClaim) rows.push({ label: 'Claim (Payroll)', amount: payrollClaim });
   if (mistakeShown) rows.push({ label: 'Mistake', amount: mistakeShown });
   if (parseFloat(r.bonus||0) !== 0) rows.push({ label: 'Bonus', amount: parseFloat(r.bonus) });
   // Same reasoning as getCalculationBreakdown above — r.deductions for a
@@ -6719,7 +6737,22 @@ function openEditPayrollModal(id) {
   const staff = staffList.find(s => s.id === r.staff_id) || { name: 'Unknown' };
   document.getElementById('epId').value = r.id;
   document.getElementById('epStaffLabel').textContent = `${staff.name} — ${MONTHS[r.month]} ${r.year}`;
-  document.getElementById('epClaim').value = r.claim_amount || 0;
+  const isMgr = r.record_type === 'manager';
+  // Manager records split Claim into two genuinely separate figures (see
+  // payroll_claim_amount note in SETUP_SQL): claim_amount is THIS
+  // manager's own Adjustments-table Claim (Mistake/Gift/Loan/etc, locked —
+  // only Re-confirm on Manager Overview should ever change it), and
+  // payroll_claim_amount is a second, independent claim for whatever this
+  // person separately earns on the Payroll side (e.g. a manager who also
+  // personally works TM orders) — always ADDED on top, never merged into
+  // or overwriting the manager figure. Plain staff records have no such
+  // split — claim_amount is already just theirs.
+  document.getElementById('epManagerClaimRow').classList.toggle('hidden', !isMgr);
+  document.getElementById('epManagerClaimDisplay').value = fmtNum(r.claim_amount || 0);
+  document.getElementById('epClaimLabel').textContent = isMgr
+    ? 'Payroll Claim (RM) — this person\'s own claim on the Payroll side (e.g. TM), added on top of Manager Claim above'
+    : 'Claim Amount (RM) — reimbursements/expense claims owed to staff';
+  document.getElementById('epClaim').value = isMgr ? (r.payroll_claim_amount || 0) : (r.claim_amount || 0);
   document.getElementById('epBonus').value = r.bonus || 0;
   document.getElementById('epDeduct').value = r.deductions || 0;
   openModal('modalEditPayroll');
@@ -6727,11 +6760,14 @@ function openEditPayrollModal(id) {
 
 async function saveEditPayroll() {
   const id = document.getElementById('epId').value;
-  const body = {
-    claim_amount: parseFloat(document.getElementById('epClaim').value) || 0,
-    bonus: parseFloat(document.getElementById('epBonus').value) || 0,
-    deductions: parseFloat(document.getElementById('epDeduct').value) || 0,
-  };
+  const r = payrollRecords?.find(x => x.id === id);
+  const isMgr = r && r.record_type === 'manager';
+  const claimInputValue = parseFloat(document.getElementById('epClaim').value) || 0;
+  const body = isMgr
+    ? { payroll_claim_amount: claimInputValue } // manager's own claim_amount is untouched — locked, only Re-confirm changes it
+    : { claim_amount: claimInputValue };
+  body.bonus = parseFloat(document.getElementById('epBonus').value) || 0;
+  body.deductions = parseFloat(document.getElementById('epDeduct').value) || 0;
   // Also refresh the own-proxy netting against this staff's Coway payslip
   // breakdown for this period. own_proxy_offset is only computed once, at
   // the moment a payroll record is first saved (savePayroll/
@@ -6748,7 +6784,6 @@ async function saveEditPayroll() {
   // employee/employer EPF amounts need to be refreshed to match —
   // otherwise editing deductions alone would leave a stale EPF figure
   // that was computed against the wrong base.
-  const r = payrollRecords?.find(x => x.id === id);
   if (r && r.record_type !== 'manager') {
     const staff = staffList.find(s => s.id === r.staff_id);
     const ownProxyOffset = await getOwnProxyPayslipAmount(staff?.own_proxy_id, r.year, r.month);
@@ -6767,7 +6802,8 @@ async function saveEditPayroll() {
   }
   try {
     await sb('nec_payroll', { method: 'PATCH', filter: `id=eq.${id}`, body });
-    await logAudit('UPDATE', 'nec_payroll', `Edited payroll record ${id} — claim RM${body.claim_amount.toFixed(2)}, bonus RM${body.bonus.toFixed(2)}, deductions RM${body.deductions.toFixed(2)}${body.epf_employee != null ? `, EPF employee refreshed to RM${body.epf_employee.toFixed(2)}` : ''}${body.own_proxy_offset != null ? `, own proxy offset refreshed to RM${body.own_proxy_offset.toFixed(2)}` : ''}`);
+    const claimLabel = isMgr ? `payroll claim RM${claimInputValue.toFixed(2)} (manager claim untouched)` : `claim RM${claimInputValue.toFixed(2)}`;
+    await logAudit('UPDATE', 'nec_payroll', `Edited payroll record ${id} — ${claimLabel}, bonus RM${body.bonus.toFixed(2)}, deductions RM${body.deductions.toFixed(2)}${body.epf_employee != null ? `, EPF employee refreshed to RM${body.epf_employee.toFixed(2)}` : ''}${body.own_proxy_offset != null ? `, own proxy offset refreshed to RM${body.own_proxy_offset.toFixed(2)}` : ''}`);
     closeModal('modalEditPayroll');
     showToast('Saved ✓');
     loadPayroll();
@@ -6981,14 +7017,21 @@ async function confirmManagerToPayroll(managerId) {
   const month = parseInt(monthRaw);
   try {
     const t = await getManagerTotalForPeriod(m, year, month);
-    // Scoped to record_type=manager — only overwrites THIS manager's own
-    // prior settlement row, never a staff-type (TM/DM commission) row for
-    // the same person/period. A person can hold both identities (e.g. Jess
-    // is both a profit-sharing manager and personally works TM orders);
+    // Scoped to record_type=manager — only ever touches THIS manager's own
+    // settlement row, never a staff-type (TM/DM commission) row for the
+    // same person/period. A person can hold both identities (e.g. Jess is
+    // both a profit-sharing manager and personally works TM orders);
     // confirming one must never delete the other's already-locked-in
     // amount. See the matching fix in saveAutoCommissionRow.
+    //
+    // PATCH-in-place if a manager row already exists, instead of the old
+    // delete-then-insert — a fresh INSERT would reset payroll_claim_amount
+    // back to its column default (0) every time, silently wiping out
+    // whatever this person's own Payroll-side claim was (see the Edit
+    // Payroll modal) each time the manager settlement is Re-confirmed.
+    // PATCHing only the manager-owned fields below leaves
+    // payroll_claim_amount completely untouched either way.
     const existing = await sb('nec_payroll', { filter: `staff_id=eq.${m.staff_id}&year=eq.${year}&month=eq.${month}&record_type=eq.manager`, select: 'id' });
-    for (const e of existing) await sbDelete('nec_payroll', `id=eq.${e.id}`);
     // Store the raw Com/Claim/Mistake/Acc Below figures (not a
     // pre-split breakdown) so getSettlementBreakdown can derive both
     // the fully transparent Calculation view and the absorbed Payslip
@@ -6997,22 +7040,23 @@ async function confirmManagerToPayroll(managerId) {
     // Manager settlement: total already includes Com+Claim+Mistake-AccBelow
     // from getManagerTotalForPeriod. own_proxy_offset must be 0 — managers
     // are not proxy accounts, so nothing gets deducted here.
-    await sb('nec_payroll', {
-      method: 'POST',
-      body: {
-        staff_id: m.staff_id, year, month,
-        commission_earned: t.comTotal,
-        claim_amount: t.claimTotal,
-        bonus: t.mistakeTotal,
-        deductions: t.accBelowAmt,
-        own_proxy_offset: 0,
-        base_salary: 0,
-        epf_employee: 0,
-        record_type: 'manager',
-        notes
-      }
-    });
-    await logAudit('CREATE', 'nec_payroll', `Confirmed ${m.name}'s manager settlement for ${MONTHS[month]} ${year} into Payroll — Com ${fmt(t.comTotal)} (Manager Comm ${fmt(t.commTotal)} + Manager Invoice ${fmt(t.invoiceAmt)} + Outsider ${fmt(t.outsiderAmt)}) + Claim ${fmt(t.claimTotal)} + Mistake ${fmt(t.mistakeTotal)} − Acc Below ${fmt(t.accBelowAmt)} = Total RM${t.total.toFixed(2)}`);
+    const managerBody = {
+      commission_earned: t.comTotal,
+      claim_amount: t.claimTotal,
+      bonus: t.mistakeTotal,
+      deductions: t.accBelowAmt,
+      own_proxy_offset: 0,
+      base_salary: 0,
+      epf_employee: 0,
+      notes
+    };
+    if (existing.length) {
+      await sb('nec_payroll', { method: 'PATCH', filter: `id=eq.${existing[0].id}`, body: managerBody });
+      for (let i = 1; i < existing.length; i++) await sbDelete('nec_payroll', `id=eq.${existing[i].id}`); // clean up any stray duplicates
+    } else {
+      await sb('nec_payroll', { method: 'POST', body: { staff_id: m.staff_id, year, month, record_type: 'manager', ...managerBody } });
+    }
+    await logAudit('UPDATE', 'nec_payroll', `Confirmed ${m.name}'s manager settlement for ${MONTHS[month]} ${year} into Payroll — Com ${fmt(t.comTotal)} (Manager Comm ${fmt(t.commTotal)} + Manager Invoice ${fmt(t.invoiceAmt)} + Outsider ${fmt(t.outsiderAmt)}) + Claim ${fmt(t.claimTotal)} + Mistake ${fmt(t.mistakeTotal)} − Acc Below ${fmt(t.accBelowAmt)} = Total RM${t.total.toFixed(2)} (Payroll-side claim, if any, left untouched)`);
     showToast(`${m.name} confirmed to Payroll ✓`);
     loadMgrAdjustments();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
@@ -10105,7 +10149,8 @@ CREATE TABLE IF NOT EXISTS nec_payroll (
   epf_employee numeric(10,2) DEFAULT 0,
   epf_employer numeric(10,2) DEFAULT 0,
   own_proxy_offset numeric(10,2) DEFAULT 0,
-  total_pay numeric(10,2) GENERATED ALWAYS AS (commission_earned + base_salary + bonus + claim_amount - deductions - epf_employee - own_proxy_offset) STORED,
+  payroll_claim_amount numeric(10,2) DEFAULT 0,
+  total_pay numeric(10,2) GENERATED ALWAYS AS (commission_earned + base_salary + bonus + claim_amount + payroll_claim_amount - deductions - epf_employee - own_proxy_offset) STORED,
   settlement_type text,
   record_type text DEFAULT 'staff',
   notes text,
@@ -10113,6 +10158,31 @@ CREATE TABLE IF NOT EXISTS nec_payroll (
   status text DEFAULT 'draft',
   created_at timestamptz DEFAULT now()
 );
+
+-- payroll_claim_amount: for a MANAGER-type record, claim_amount is
+-- reserved exclusively for that manager's own Adjustments-table Claim
+-- (Mistake/Gift/Loan/etc, confirmed via Manager Overview → Re-confirm) —
+-- it must never be hand-edited on the Payroll page, or it silently drifts
+-- out of sync with Adjustments and the printed Payslip's own line items
+-- stop matching its Total Pay. A person who ALSO personally works TM/DM
+-- orders that period (e.g. a manager who's also a salesperson) needs a
+-- second, genuinely separate claim figure for THAT side of their earnings
+-- — payroll_claim_amount is that second bucket: freely editable on the
+-- Payroll page's Edit modal, always ADDED on top of the manager's claim
+-- (see total_pay above), and never touched by confirmManagerToPayroll or
+-- Re-confirm, so re-confirming the manager settlement can never wipe out
+-- whatever's been added here. Printed as its own "Claim (Payroll)" line,
+-- separate from the manager's "Claim" line, so the two are never confused.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='nec_payroll' AND column_name='payroll_claim_amount') THEN
+    ALTER TABLE nec_payroll ADD COLUMN payroll_claim_amount numeric(10,2) DEFAULT 0;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='nec_payroll' AND column_name='total_pay' AND is_generated='NEVER') THEN
+    -- pre-existing plain column from an older deployment — leave it, this only matters for fresh/GENERATED setups
+    NULL;
+  END IF;
+END $$;
 
 ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS commission_type text DEFAULT 'tiered';
 ALTER TABLE nec_payroll ADD COLUMN IF NOT EXISTS epf_employee numeric(10,2) DEFAULT 0;
