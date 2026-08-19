@@ -2489,11 +2489,15 @@
       Drop the PDF statement — Claude will read every transaction and suggest a category, channel, and team for each. Nothing is saved until you review and click "Save All to P&L Costs" below.
     </div>
 
-    <div class="form-group" style="margin-bottom:14px;max-width:320px">
+    <div class="form-group" id="ccSingleCardPickerWrap" style="margin-bottom:14px;max-width:320px">
       <label class="form-label">Which card is this statement from? (optional)</label>
-      <select id="ccStatementCard" class="form-input">
+      <select id="ccStatementCard" class="form-input" onchange="handleTopCardChange(this.value)">
         <option value="">— Not linked to a specific card —</option>
       </select>
+    </div>
+
+    <div id="ccMultiCardBanner" class="hidden" style="margin-bottom:14px;padding:10px 12px;background:rgba(217,119,6,0.12);border:1px solid var(--yellow);border-radius:8px;font-size:12px;color:var(--text)">
+      ⚠️ This PDF covers <strong id="ccMultiCardCount">2</strong> different cards under one combined statement — each one is shown separately below with its own balance. Pick the matching card for each section and save them separately; they will never be combined into one number.
     </div>
 
     <div style="margin-bottom:12px">
@@ -2530,17 +2534,25 @@
         </div>
       </div>
       <div id="ccBalanceNote" class="hidden" style="font-size:11px;color:var(--muted);margin:-6px 0 10px">The two totals can differ — rebates, fees, or other non-purchase lines aren't itemized below but are reflected in the bank's balance.</div>
-      <div id="ccCategorySummary" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px"></div>
-      <div class="table-wrap" style="max-height:420px;overflow-y:auto">
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th><th>Description</th><th>Amount</th><th>Category</th><th>Channel</th><th>Team</th><th></th>
-            </tr>
-          </thead>
-          <tbody id="ccTransactionBody"></tbody>
-        </table>
+
+      <!-- Single-card statement (the normal case) — one flat table -->
+      <div id="ccSingleGroupWrap">
+        <div id="ccCategorySummary" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px"></div>
+        <div class="table-wrap" style="max-height:420px;overflow-y:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th><th>Description</th><th>Amount</th><th>Category</th><th>Channel</th><th>Team</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="ccTransactionBody"></tbody>
+          </table>
+        </div>
       </div>
+
+      <!-- Multi-card statement — one block per detected card, each with its
+           own balance + its own "which card" picker, never combined -->
+      <div id="ccMultiGroupWrap" class="hidden"></div>
     </div>
 
     <div class="form-actions">
@@ -2574,6 +2586,11 @@
           <label class="form-label">Due Day (1-31)</label>
           <input type="number" id="acDueDay" class="form-input" min="1" max="31" placeholder="17">
         </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Card Last 4 Digits (optional)</label>
+        <input type="text" id="acCardLast4" class="form-input" maxlength="4" placeholder="e.g. 9529">
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">Used to auto-match this card when a statement PDF covers multiple cards at once (e.g. a combined CIMB statement).</div>
       </div>
       <div class="form-group" style="margin-top:4px">
         <label class="form-label">Owner Team</label>
@@ -2654,6 +2671,11 @@
           <label class="form-label">Due Day (1-31)</label>
           <input type="number" id="ecDueDay" class="form-input" min="1" max="31">
         </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Card Last 4 Digits (optional)</label>
+        <input type="text" id="ecCardLast4" class="form-input" maxlength="4" placeholder="e.g. 9529">
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">Used to auto-match this card when a statement PDF covers multiple cards at once.</div>
       </div>
       <div class="form-row">
         <div class="form-group">
@@ -8857,8 +8879,16 @@ async function saveCostEntry() {
 // auto-saves; the user reviews category/channel/team per row (or
 // bulk-applies via the "Set all" controls) and explicitly confirms.
 // ──────────────────────────────────────────────────────────────
-let ccTransactions = []; // [{date, description, amount, category, channel, company_team}]
-let ccStatementBalance = null; // the bank's own printed statement balance, when Claude could find it — may differ from the sum of itemized transactions (rebates/fees aren't itemized but are reflected here)
+let ccTransactions = []; // [{date, description, amount, category, channel, company_team, card_last4, _groupIdx}]
+let ccStatementBalance = null; // the bank's own printed statement balance, when Claude could find it — may differ from the sum of itemized transactions (rebates/fees aren't itemized but are reflected here). For a multi-card statement this is the SUM across every card — never used to save a single card's tracker entry.
+// One entry per distinct physical card detected in the uploaded PDF —
+// {card_last4, statement_balance, previous_balance, selectedCardId}.
+// A normal single-card statement still produces exactly one entry here.
+// More than one entry means the PDF combined several cards into one
+// mailing (e.g. CIMB sending a Travel Platinum + a Visa Infinite in the
+// same statement) — each group is reviewed/saved independently so their
+// amounts are never added together.
+let ccCardGroups = [];
 const CC_CHANNELS = ['DM','TM','XHS','OTHER','SHARED'];
 
 // ──────────────────────────────────────────────────────────────
@@ -8882,7 +8912,7 @@ let ccCardsLoaded = false;
 async function loadCreditCards(force = false) {
   if (ccCardsLoaded && !force) return;
   try {
-    ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true&order=card_name.asc', select: 'id,card_name,bank,statement_day,due_day,owner_team,gift_team,ads_team' });
+    ccCards = await sb('nec_credit_cards', { filter: 'active=eq.true&order=card_name.asc', select: 'id,card_name,bank,statement_day,due_day,owner_team,gift_team,ads_team,card_last4' });
     ccCardsLoaded = true;
   } catch(e) { ccCards = []; } // table not set up yet — features degrade gracefully
 }
@@ -8954,11 +8984,16 @@ async function promptAddCategory() {
 async function openCCStatementModal() {
   ccTransactions = [];
   ccStatementBalance = null;
+  ccCardGroups = [];
   document.getElementById('ccFileInput').value = '';
   document.getElementById('ccProgress').classList.add('hidden');
   document.getElementById('ccReviewWrap').classList.add('hidden');
   document.getElementById('ccSaveAllBtn').classList.add('hidden');
   document.getElementById('ccUploadZone').classList.remove('hidden');
+  document.getElementById('ccMultiCardBanner').classList.add('hidden');
+  document.getElementById('ccSingleCardPickerWrap').classList.remove('hidden');
+  document.getElementById('ccSingleGroupWrap').classList.remove('hidden');
+  document.getElementById('ccMultiGroupWrap').classList.add('hidden');
   await loadCostCategories();
   await loadCreditCards();
   document.getElementById('ccStatementCard').innerHTML = `<option value="">— Not linked to a specific card —</option>`
@@ -8986,6 +9021,50 @@ function handleCCDrop(e) {
 function handleCCFileSelect(e) {
   const file = e.target.files[0];
   if (file) processCCFile(file);
+}
+
+// Sets each of this group's transactions' company_team based on whichever
+// nec_credit_cards row is currently selected for the group (its
+// ads_team/gift_team), the same rule that used to run once globally
+// against the single top "which card" dropdown. Re-run whenever a
+// group's card selection changes so the defaults stay correct.
+function applyGroupCardDefaults(txnArray, groupIdx, group) {
+  const selCard = group.selectedCardId ? ccCards.find(c => c.id === group.selectedCardId) : null;
+  const cardAdsTeam = selCard?.ads_team || 'New Era';
+  const cardGiftTeam = selCard?.gift_team || 'New Era';
+  txnArray.forEach(t => {
+    if (t._groupIdx !== groupIdx) return;
+    if (t.category === 'ai_tools') {
+      t.company_team = null; // AI tools always Shared
+    } else if (t.category === 'ad_spend' || t.category === 'manychat') {
+      t.company_team = cardAdsTeam;
+    } else if (t.category === 'gift') {
+      t.company_team = cardGiftTeam;
+    } else {
+      t.company_team = cardAdsTeam; // default to ads_team for other categories
+    }
+  });
+}
+
+// Fired by each per-group "which card" dropdown in the multi-card review UI.
+function handleGroupCardChange(groupIdx, cardId) {
+  const g = ccCardGroups[groupIdx];
+  if (!g) return;
+  g.selectedCardId = cardId || null;
+  applyGroupCardDefaults(ccTransactions, groupIdx, g);
+  renderCCTransactions();
+}
+
+// Fired by the top "which card" dropdown — only meaningful in the normal
+// single-group case (mirrors the old behavior, plus now also re-applies
+// team defaults live instead of only at parse time).
+function handleTopCardChange(cardId) {
+  if (ccCardGroups.length !== 1) return;
+  ccCardGroups[0].selectedCardId = cardId || null;
+  if (ccTransactions.length) {
+    applyGroupCardDefaults(ccTransactions, 0, ccCardGroups[0]);
+    renderCCTransactions();
+  }
 }
 
 async function processCCFile(file) {
@@ -9038,33 +9117,56 @@ async function processCCFile(file) {
             desc.includes('TRANSFER / TOP-UP THANK YOU')) return false;
         return true;
       })
-      .map(t => {
-        // Override company_team based on selected card's owner_team
-        const sel = document.getElementById('ccStatementCard');
-        const selCardId = sel ? sel.value : '';
-        const selCard = ccCards.find(c => c.id === selCardId);
-        const cardAdsTeam = selCard?.ads_team || 'New Era';
-        const cardGiftTeam = selCard?.gift_team || 'New Era';
-        let team = t.company_team;
-        if (t.category === 'ai_tools') {
-          team = null; // AI tools always Shared
-        } else if (t.category === 'ad_spend' || t.category === 'manychat') {
-          team = cardAdsTeam;
-        } else if (t.category === 'gift') {
-          team = cardGiftTeam;
-        } else {
-          team = cardAdsTeam; // default to ads_team for other categories
-        }
-        return { ...t, company_team: team, year: defaultYear, month: defaultMonth };
-      });
+      .map(t => ({ ...t, year: defaultYear, month: defaultMonth }));
 
-    // Step 2: statement balance reconciliation
-    // If total > statement balance, find & remove transactions matching the excess
+    // Build the per-card-group list. "cards" is the backend's source of
+    // truth for per-card balances — a statement covering more than one
+    // physical card (e.g. a combined CIMB mailing) comes back with one
+    // entry per card here instead of one hand-summed number. Fall back to
+    // the legacy singular statement_balance/previous_balance as a single
+    // group when the backend response predates this (older cached
+    // deploy) so single-card statements never break.
     const stmtBal = (typeof data.statement_balance === 'number') ? data.statement_balance : null;
     const prevBal = (typeof data.previous_balance === 'number') ? data.previous_balance : null;
-    // Use full statement balance (includes previous balance) as the statement amount
     ccStatementBalance = stmtBal;
-    // Show previous balance info
+    const cardsFromApi = (Array.isArray(data.cards) && data.cards.length)
+      ? data.cards
+      : (stmtBal !== null ? [{ card_last4: null, statement_balance: stmtBal, previous_balance: prevBal }] : []);
+    const topSelCardId = document.getElementById('ccStatementCard')?.value || '';
+    ccCardGroups = cardsFromApi.map(c => {
+      const autoMatch = c.card_last4 ? ccCards.find(cc => cc.card_last4 && cc.card_last4 === c.card_last4) : null;
+      return {
+        card_last4: c.card_last4 || null,
+        statement_balance: (typeof c.statement_balance === 'number') ? c.statement_balance : null,
+        previous_balance: (typeof c.previous_balance === 'number') ? c.previous_balance : null,
+        // With only one group, respect whatever the user pre-picked in the
+        // top "Which card is this statement from?" dropdown before
+        // uploading — same behavior as before this feature existed.
+        selectedCardId: autoMatch ? autoMatch.id : (cardsFromApi.length === 1 ? (topSelCardId || null) : null)
+      };
+    });
+    if (!ccCardGroups.length) ccCardGroups = [{ card_last4: null, statement_balance: null, previous_balance: null, selectedCardId: topSelCardId || null }];
+
+    // Tag each transaction with which group it belongs to, matching on
+    // card_last4. If there's only one group, everything belongs to it
+    // regardless of tagging (covers the normal single-card case even if
+    // the model didn't bother tagging card_last4). Unmatched transactions
+    // in a genuine multi-card statement fall back to group 0 rather than
+    // being silently dropped — still visible and reviewable/removable.
+    allTxns.forEach(t => {
+      if (ccCardGroups.length === 1) { t._groupIdx = 0; return; }
+      const idx = ccCardGroups.findIndex(g => g.card_last4 && t.card_last4 && g.card_last4 === t.card_last4);
+      t._groupIdx = idx >= 0 ? idx : 0;
+    });
+
+    // Apply each group's card-based team defaults (ads_team/gift_team) —
+    // scoped per group so a multi-card statement's two sections can end
+    // up with different default teams once each is matched to its own
+    // card.
+    ccCardGroups.forEach((g, idx) => applyGroupCardDefaults(allTxns, idx, g));
+
+    // Show previous balance info (combined, for the top summary line —
+    // per-group balances are shown in each group's own header below)
     if (prevBal !== null) {
       const prevWrap = document.getElementById('ccPrevBalWrap');
       if (prevWrap) {
@@ -9080,38 +9182,39 @@ async function processCCFile(file) {
         }
       }
     }
-    if (stmtBal !== null) {
-      // Use precise cent arithmetic to avoid floating point issues
-      const txnTotalCents = allTxns.reduce((s,t) => s + Math.round(t.amount * 100), 0);
-      const targetCents = Math.round(stmtBal * 100);
-      if (txnTotalCents > targetCents) {
-        const excessCents = txnTotalCents - targetCents;
-        // 0/1 knapsack: find subset of transactions summing to excessCents
-        const cands = allTxns.map((t,i) => [Math.round(t.amount * 100), i]).filter(([c]) => c <= excessCents);
-        // 0/1 knapsack with backtracking — plain JS arrays
-        const dp = Array(excessCents + 1).fill(false);
-        const parent = Array(excessCents + 1).fill(null); // {k, prevSum}
-        dp[0] = true;
-        for (let k = 0; k < cands.length; k++) {
-          const c = cands[k][0];
-          for (let s = excessCents; s >= c; s--) {
-            if (!dp[s] && dp[s - c]) {
-              dp[s] = true;
-              parent[s] = { k, prevSum: s - c };
-            }
-          }
-        }
-        if (dp[excessCents]) {
-          const removeOrigIndices = new Set();
-          let s = excessCents;
-          while (s > 0 && parent[s]) {
-            removeOrigIndices.add(cands[parent[s].k][1]);
-            s = parent[s].prevSum;
-          }
-          allTxns = allTxns.filter((_,i) => !removeOrigIndices.has(i));
+
+    // Statement balance reconciliation — run PER GROUP against that
+    // group's own statement_balance, never against a combined figure, so
+    // a multi-card statement's CR/rebate cleanup for one card can never
+    // remove a transaction that actually belongs to the other card.
+    ccCardGroups.forEach((g, idx) => {
+      if (g.statement_balance === null) return;
+      const groupTxnIndices = allTxns.map((t,i) => t._groupIdx === idx ? i : -1).filter(i => i >= 0);
+      const txnTotalCents = groupTxnIndices.reduce((s,i) => s + Math.round(allTxns[i].amount * 100), 0);
+      const targetCents = Math.round(g.statement_balance * 100);
+      if (txnTotalCents <= targetCents) return;
+      const excessCents = txnTotalCents - targetCents;
+      // 0/1 knapsack: find subset of THIS GROUP's transactions summing to excessCents
+      const cands = groupTxnIndices.map(i => [Math.round(allTxns[i].amount * 100), i]).filter(([c]) => c <= excessCents);
+      const dp = Array(excessCents + 1).fill(false);
+      const parent = Array(excessCents + 1).fill(null);
+      dp[0] = true;
+      for (let k = 0; k < cands.length; k++) {
+        const c = cands[k][0];
+        for (let s = excessCents; s >= c; s--) {
+          if (!dp[s] && dp[s - c]) { dp[s] = true; parent[s] = { k, prevSum: s - c }; }
         }
       }
-    }
+      if (dp[excessCents]) {
+        const removeOrigIndices = new Set();
+        let s = excessCents;
+        while (s > 0 && parent[s]) {
+          removeOrigIndices.add(cands[parent[s].k][1]);
+          s = parent[s].prevSum;
+        }
+        allTxns = allTxns.filter((_,i) => !removeOrigIndices.has(i));
+      }
+    });
 
     ccTransactions = allTxns;
 
@@ -9132,12 +9235,12 @@ async function processCCFile(file) {
   }
 }
 
-function renderCCTransactions() {
-  const tbody = document.getElementById('ccTransactionBody');
-  updateCCSummary();
-
-  tbody.innerHTML = ccTransactions.map((t, i) => `
-    <tr>
+// One <tr> for a transaction — shared by the single-group table and every
+// multi-group mini table. `i` is always the transaction's index in the
+// flat ccTransactions array, so the existing per-row handlers work
+// unchanged regardless of which table is rendering it.
+function ccTransactionRowHTML(t, i) {
+  return `<tr>
       <td class="td-mono" style="font-size:11px">${t.date}</td>
       <td style="font-size:12px">${t.description}</td>
       <td class="td-mono">${fmtNum(t.amount)}</td>
@@ -9159,7 +9262,53 @@ function renderCCTransactions() {
         </select>
       </td>
       <td><button class="btn btn-ghost btn-sm" onclick="removeCCTransaction(${i})">✕</button></td>
-    </tr>`).join('');
+    </tr>`;
+}
+
+function ccCardOptionsHTML(selectedId) {
+  return `<option value="">— Not linked to a specific card —</option>`
+    + ccCards.map(c => `<option value="${c.id}"${selectedId===c.id?' selected':''}>${c.card_name}${c.card_last4 ? ` (…${c.card_last4})` : ''}</option>`).join('');
+}
+
+function renderCCTransactions() {
+  updateCCSummary();
+
+  const isMulti = ccCardGroups.length > 1;
+  document.getElementById('ccSingleCardPickerWrap').classList.toggle('hidden', isMulti);
+  document.getElementById('ccMultiCardBanner').classList.toggle('hidden', !isMulti);
+  document.getElementById('ccSingleGroupWrap').classList.toggle('hidden', isMulti);
+  document.getElementById('ccMultiGroupWrap').classList.toggle('hidden', !isMulti);
+
+  if (!isMulti) {
+    document.getElementById('ccTransactionBody').innerHTML = ccTransactions.map((t, i) => ccTransactionRowHTML(t, i)).join('');
+    return;
+  }
+
+  document.getElementById('ccMultiCardCount').textContent = ccCardGroups.length;
+  document.getElementById('ccMultiGroupWrap').innerHTML = ccCardGroups.map((g, idx) => {
+    const rows = ccTransactions.map((t, i) => ({ t, i })).filter(x => x.t._groupIdx === idx);
+    const groupTotal = r2(rows.reduce((s,x) => s + x.t.amount, 0));
+    return `
+    <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:600">
+          Card ${g.card_last4 ? `ending …${g.card_last4}` : `#${idx+1}`}
+          <span style="font-weight:400;color:var(--muted);margin-left:8px">
+            ${rows.length} txns · Total RM ${fmtNum(groupTotal)}${g.statement_balance !== null ? ` · Statement Balance RM ${fmtNum(g.statement_balance)}` : ''}
+          </span>
+        </div>
+        <select style="font-size:11px;padding:4px 8px;max-width:280px" onchange="handleGroupCardChange(${idx}, this.value)">
+          ${ccCardOptionsHTML(g.selectedCardId)}
+        </select>
+      </div>
+      <div class="table-wrap" style="max-height:280px;overflow-y:auto">
+        <table>
+          <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Category</th><th>Channel</th><th>Team</th><th></th></tr></thead>
+          <tbody>${rows.map(x => ccTransactionRowHTML(x.t, x.i)).join('')}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 // Handles a single row's category dropdown. Picking the trailing "+ Add
@@ -9241,51 +9390,64 @@ function applyCCBulk(field, value) {
   renderCCTransactions();
 }
 
+// Saves every reviewed transaction as a P&L cost entry, then syncs the CC
+// Tracker's statement amount for each linked card. Iterates GROUP BY
+// GROUP rather than treating ccTransactions as one flat list — this is
+// the whole point of the multi-card fix: a combined statement's two
+// cards each get their own credit_card_id on their own transactions and
+// their own upsertCCStatement call with their own statement_balance, so
+// their amounts are never summed together into one card's tracker entry.
 async function saveAllCCTransactions() {
   if (!ccTransactions.length) return;
   const btn = document.getElementById('ccSaveAllBtn');
-  const cardId = document.getElementById('ccStatementCard').value || null;
   btn.disabled = true;
   btn.textContent = 'Saving…';
   let saved = 0;
+  const total = ccTransactions.length;
   try {
-    for (const t of ccTransactions) {
-      await sb('nec_pl_costs', {
-        method: 'POST',
-        body: {
-          year: t.year, month: t.month,
-          channel: t.channel, company_team: t.company_team,
-          category: t.category, description: t.description,
-          amount: t.amount, credit_card_id: cardId
-        }
-      });
-      saved++;
-    }
-    const grandTotal = r2(ccTransactions.reduce((s,t)=>s+t.amount,0));
-    await logAudit('CREATE', 'nec_pl_costs', `Bulk-imported ${saved} transactions from credit card statement${cardId ? ` (${cardName(cardId)})` : ''}, total RM${grandTotal.toFixed(2)}`);
+    for (let idx = 0; idx < ccCardGroups.length; idx++) {
+      const g = ccCardGroups[idx];
+      const cardId = g.selectedCardId || null;
+      const groupTxns = ccTransactions.filter(t => t._groupIdx === idx);
+      if (!groupTxns.length) continue;
 
-    // If a card was linked, push this statement's total into the CC Tracker
-    // so the "how much do I owe on this card" view is up to date immediately
-    // — the user enters the actual amount paid + dates separately there.
-    // Prefer the bank's own printed statement balance when we found one
-    // (it correctly nets out rebates/fees that aren't itemized as costs);
-    // fall back to the sum of itemized transactions otherwise.
-    if (cardId) {
-      // Statements are normally one calendar period — use whichever
-      // year/month appears most often across the transactions.
-      const counts = {};
-      ccTransactions.forEach(t => { const k = `${t.year}-${t.month}`; counts[k] = (counts[k]||0)+1; });
-      const topKey = Object.keys(counts).sort((a,b) => counts[b]-counts[a])[0];
-      const [sYear, sMonth] = topKey.split('-').map(Number);
-      const statementAmountToSave = ccStatementBalance !== null ? ccStatementBalance : grandTotal;
-      await upsertCCStatement(cardId, sYear, sMonth, { statement_amount: statementAmountToSave });
+      for (const t of groupTxns) {
+        await sb('nec_pl_costs', {
+          method: 'POST',
+          body: {
+            year: t.year, month: t.month,
+            channel: t.channel, company_team: t.company_team,
+            category: t.category, description: t.description,
+            amount: t.amount, credit_card_id: cardId
+          }
+        });
+        saved++;
+      }
+
+      const groupTotal = r2(groupTxns.reduce((s,t)=>s+t.amount,0));
+      const cardLabel = cardId ? cardName(cardId) : (g.card_last4 ? `card …${g.card_last4}` : 'unlinked');
+      await logAudit('CREATE', 'nec_pl_costs', `Bulk-imported ${groupTxns.length} transactions from credit card statement (${cardLabel}), total RM${groupTotal.toFixed(2)}`);
+
+      // If a card was linked, push THIS GROUP's own statement total into
+      // the CC Tracker — never the combined total across every group.
+      // Prefer the bank's own printed statement balance for this specific
+      // card when we found one; fall back to the sum of its itemized
+      // transactions otherwise.
+      if (cardId) {
+        const counts = {};
+        groupTxns.forEach(t => { const k = `${t.year}-${t.month}`; counts[k] = (counts[k]||0)+1; });
+        const topKey = Object.keys(counts).sort((a,b) => counts[b]-counts[a])[0];
+        const [sYear, sMonth] = topKey.split('-').map(Number);
+        const statementAmountToSave = (g.statement_balance !== null) ? g.statement_balance : groupTotal;
+        await upsertCCStatement(cardId, sYear, sMonth, { statement_amount: statementAmountToSave });
+      }
     }
 
     showToast(`Saved ${saved} cost entries ✓`);
     closeModal('modalCCStatement');
     loadPL();
   } catch(e) {
-    showToast(`Saved ${saved}/${ccTransactions.length} before error: ${e.message}`, 'error');
+    showToast(`Saved ${saved}/${total} before error: ${e.message}`, 'error');
   } finally {
     btn.disabled = false;
     btn.textContent = '✓ Save All to P&L Costs';
@@ -9614,6 +9776,7 @@ function openAddCardModal() {
   document.getElementById('acBank').value = '';
   document.getElementById('acStatementDay').value = '';
   document.getElementById('acDueDay').value = '';
+  document.getElementById('acCardLast4').value = '';
   openModal('modalAddCard');
 }
 
@@ -9625,6 +9788,7 @@ function openEditCard(cardId) {
   document.getElementById('ecBank').value = card.bank || '';
   document.getElementById('ecStatementDay').value = card.statement_day || '';
   document.getElementById('ecDueDay').value = card.due_day || '';
+  document.getElementById('ecCardLast4').value = card.card_last4 || '';
   document.getElementById('ecAdsTeam').value = card.ads_team || 'New Era';
   document.getElementById('ecGiftTeam').value = card.gift_team || 'New Era';
   document.getElementById('modalEditCard').classList.remove('hidden');
@@ -9639,6 +9803,7 @@ async function saveEditCard() {
     bank: document.getElementById('ecBank').value.trim() || null,
     statement_day: parseInt(document.getElementById('ecStatementDay').value) || null,
     due_day: parseInt(document.getElementById('ecDueDay').value) || null,
+    card_last4: document.getElementById('ecCardLast4').value.trim().slice(-4) || null,
     ads_team: document.getElementById('ecAdsTeam').value || 'New Era',
     gift_team: document.getElementById('ecGiftTeam').value || 'New Era'
   };
@@ -9660,6 +9825,7 @@ async function saveNewCard() {
     bank: document.getElementById('acBank').value.trim() || null,
     statement_day: parseInt(document.getElementById('acStatementDay').value) || null,
     due_day: parseInt(document.getElementById('acDueDay').value) || null,
+    card_last4: document.getElementById('acCardLast4').value.trim().slice(-4) || null,
     owner_team: ownerTeam
   };
   try {
@@ -10534,6 +10700,15 @@ INSERT INTO nec_credit_cards (card_name, bank, statement_day, due_day) VALUES
   ('Carine CIMB', 'CIMB', 26, 15),
   ('Jess HLB', 'HLB', 30, 19)
 ON CONFLICT (card_name) DO NOTHING;
+
+-- Last 4 digits of the physical card number (optional). Some banks (e.g.
+-- CIMB) mail out ONE combined PDF covering several distinct cards under
+-- the same cardholder (e.g. a Travel Platinum Mastercard + a Visa
+-- Infinite, each with its own statement balance) — this lets the CC
+-- Statement upload flow auto-match each detected card section in the PDF
+-- to the right nec_credit_cards row instead of the two cards' amounts
+-- ever being combined into one.
+ALTER TABLE nec_credit_cards ADD COLUMN IF NOT EXISTS card_last4 text;
 
 CREATE TABLE IF NOT EXISTS nec_cc_statements (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
