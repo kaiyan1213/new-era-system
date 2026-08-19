@@ -100,6 +100,7 @@ CRITICAL: If an amount has "CR" after it (e.g. "81.80 CR"), it is a REFUND/CREDI
 - description: the merchant name, cleaned up (strip card masking digits, trailing reference numbers)
 - amount: positive number, MYR, no currency symbol or commas
 - is_credit: true if this is a refund/credit/payment (amount had "CR" suffix or is a payment line), false otherwise
+- card_last4: CRITICAL — some banks (e.g. CIMB) mail out ONE combined PDF covering MULTIPLE distinct physical cards under the same cardholder, each printed as its own section with its own masked card number (e.g. "5521-1527-0319-9529" or "XXXX-XXXX-XXXX-9529") and its own "PREVIOUS BALANCE ... STATEMENT BALANCE" block. If the statement has more than one such card-number section, set card_last4 to the last 4 digits of whichever card-number section this specific transaction physically appears under (e.g. "9529"). If the statement only ever shows ONE card number throughout, set card_last4 to that card's last 4 digits (or null if no card number is printed anywhere).
 
 Then classify each transaction:
 - category: pick the SINGLE best match slug from this exact list: ${JSON.stringify(categorySlugs)}
@@ -118,10 +119,10 @@ ${hasOther ? '' : '  (if truly nothing fits, pick whichever category is the clos
   * AI tools (ANTHROPIC, OPENAI, APPLE, PADDLE) → always null (shared, split 50/50)
   * Otherwise → null
 
-IMPORTANT: Extract ALL charge/purchase transactions from ALL sections of the statement (including sections labeled "VISA INFINITE", "TAN KAI YAN", or any cardholder name). Do NOT skip any section.
+IMPORTANT: Extract ALL charge/purchase transactions from ALL sections of the statement (including sections labeled "VISA INFINITE", "TAN KAI YAN", or any cardholder name). Do NOT skip any section — but DO keep each section's transactions tagged with the correct card_last4 (see above) so they can be told apart. NEVER merge two different cards' amounts into one number anywhere in your response — each card section has its OWN previous balance and statement balance printed directly above/below its own transaction list; a page-level "Cards Summary" table near the top listing multiple "Credit Card No." rows is a strong signal this statement covers more than one card.
 
-Respond with ONLY a raw JSON object (no markdown, no code fences), with three keys:
-1. "transactions": array of ALL charge transactions found.
+Respond with ONLY a raw JSON object (no markdown, no code fences), with these keys:
+1. "transactions": array of ALL charge transactions found (each tagged with card_last4 per the rule above).
    EXCLUDE ONLY these specific types:
    - Lines with "CR" suffix (refunds/credits)
    - Lines starting with "PAYMENT RECEIVED", "DUITNOW TO", "TRANSFER FROM", "TOP-UP THANK YOU"
@@ -137,11 +138,15 @@ Respond with ONLY a raw JSON object (no markdown, no code fences), with three ke
    - is_credit must be TRUE only if the amount has "CR" suffix, or is explicitly a DUITNOW TO / PAYMENT RECEIVED line
    - NEVER set is_credit: true just because the description contains words like "BILL", "SUBSCRIPTION", "SERVICE"
 2. "cr_amounts": array of numeric amounts (MYR) that appeared with "CR" suffix (refunds/credits/payments)
-3. "statement_balance": the final STATEMENT BALANCE shown at the bottom of the statement (as a number, MYR) — this includes previous balance + new charges - payments
-4. "previous_balance": the PREVIOUS BALANCE / Balance Brought Forward shown at the top (as a number, MYR, or null if not shown)
+3. "cards": array with ONE entry per distinct card number section found in the statement — this is the SOURCE OF TRUTH for balances, never a hand-summed total. Each entry: {"card_last4": "9529", "statement_balance": 13435.64, "previous_balance": 24421.39}. If the statement only covers one card, this array still has exactly one entry (card_last4 can be null if no card number is printed). Read each card's own statement_balance/previous_balance directly from that card's own section — do NOT add multiple cards' balances together anywhere.
+4. "statement_balance": DEPRECATED but still required for backward compatibility — set this to the SUM of every entry's statement_balance in "cards" (so old clients still see a combined total), never a number you invent separately.
+5. "previous_balance": DEPRECATED but still required — set this to the SUM of every entry's previous_balance in "cards".
 
-Format:
-{"transactions":[{"date":"15/06","description":"FACEBK *ADS8X7Y2Z","amount":450.00,"is_credit":false,"category":"${categorySlugs[0]}","channel":"SHARED","company_team":null}],"cr_amounts":[56.45,3.15],"statement_balance":44543.40,"previous_balance":30361.46}
+Format (single-card example):
+{"transactions":[{"date":"15/06","description":"FACEBK *ADS8X7Y2Z","amount":450.00,"is_credit":false,"category":"${categorySlugs[0]}","channel":"SHARED","company_team":null,"card_last4":null}],"cr_amounts":[56.45,3.15],"cards":[{"card_last4":null,"statement_balance":44543.40,"previous_balance":30361.46}],"statement_balance":44543.40,"previous_balance":30361.46}
+
+Format (multi-card example — two cards under one PDF, balances kept separate):
+{"transactions":[{"date":"15/07","description":"FACEBK *4RHZ6WMRF2","amount":539.56,"is_credit":false,"category":"${categorySlugs[0]}","channel":"DM","company_team":null,"card_last4":"9529"},{"date":"17/07","description":"FACEBK *TF5UTUZV72","amount":2928.83,"is_credit":false,"category":"${categorySlugs[0]}","channel":"DM","company_team":null,"card_last4":"7293"}],"cr_amounts":[],"cards":[{"card_last4":"9529","statement_balance":13435.64,"previous_balance":24421.39},{"card_last4":"7293","statement_balance":2953.83,"previous_balance":0}],"statement_balance":16389.47,"previous_balance":24421.39}
 
 Statement text:
 ${trimmedText}`;
@@ -193,6 +198,7 @@ ${trimmedText}`;
     let claudeCrAmounts = [];
     let claudeStatementBalance = null;
     let claudePreviousBalance = null;
+    let claudeCards = [];
     try {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.transactions)) {
@@ -200,6 +206,26 @@ ${trimmedText}`;
         claudeCrAmounts = Array.isArray(parsed.cr_amounts) ? parsed.cr_amounts.map(Number).filter(n => !isNaN(n)) : [];
         claudeStatementBalance = (typeof parsed.statement_balance === 'number') ? parsed.statement_balance : null;
         claudePreviousBalance = (typeof parsed.previous_balance === 'number') ? parsed.previous_balance : null;
+        // "cards" is the source of truth for per-card balances (added so
+        // combined multi-card statements, e.g. CIMB mailing one PDF for
+        // two physical cards, never get their balances silently summed
+        // into a single card's tracker entry). Older prompt responses
+        // (or a model that ignores the new instruction) won't have this
+        // key — fall back to a single synthetic entry built from the
+        // legacy top-level fields so single-card statements keep working
+        // exactly as before.
+        if (Array.isArray(parsed.cards) && parsed.cards.length > 0) {
+          claudeCards = parsed.cards
+            .filter(c => c && typeof c.statement_balance === 'number')
+            .map(c => ({
+              card_last4: (typeof c.card_last4 === 'string' && c.card_last4.trim()) ? c.card_last4.trim().slice(-4) : null,
+              statement_balance: c.statement_balance,
+              previous_balance: (typeof c.previous_balance === 'number') ? c.previous_balance : null
+            }));
+        }
+        if (claudeCards.length === 0 && claudeStatementBalance !== null) {
+          claudeCards = [{ card_last4: null, statement_balance: claudeStatementBalance, previous_balance: claudePreviousBalance }];
+        }
       } else if (Array.isArray(parsed)) {
         transactions = parsed; // old format fallback
       } else {
@@ -272,7 +298,12 @@ ${trimmedText}`;
         amount: Math.round(t.amount * 100) / 100,
         category: categorySlugs.includes(t.category) ? t.category : fallbackCategory,
         channel: CHANNELS.includes(t.channel) ? t.channel : 'SHARED',
-        company_team: (t.company_team === 'New Era' || t.company_team === 'Alpha C') ? t.company_team : null
+        company_team: (t.company_team === 'New Era' || t.company_team === 'Alpha C') ? t.company_team : null,
+        // Which physical card (last 4 digits) this transaction belongs to
+        // — null when the statement only ever shows one card, or the
+        // card number couldn't be found. See "cards" below for the
+        // authoritative per-card balances.
+        card_last4: (typeof t.card_last4 === 'string' && t.card_last4.trim()) ? t.card_last4.trim().slice(-4) : null
       }));
 
     const total = Math.round(cleaned.reduce((s,t) => s + t.amount, 0) * 100) / 100;
@@ -280,8 +311,31 @@ ${trimmedText}`;
     claudeCrAmounts.forEach(a => crAmountSet.add(Math.round(a * 100)));
     const crAmounts = [...crAmountSet].map(c => c/100);
 
-    console.log('[Parser] cleaned count:', cleaned.length, 'raw transactions count:', transactions.length, 'cr_amounts:', claudeCrAmounts, 'stmt_bal:', claudeStatementBalance);
-    return res.status(200).json({ success: true, transactions: cleaned, total, count: cleaned.length, _cr_filtered: crAmounts, statement_balance: claudeStatementBalance, previous_balance: claudePreviousBalance, _debug_raw_count: transactions.length });
+    // Distinct card sections actually detected — more than one means this
+    // single PDF covers multiple physical cards (e.g. a CIMB combined
+    // statement) and the frontend must review/save each one separately
+    // instead of lumping their statement balances together.
+    const isMultiCard = claudeCards.length > 1;
+
+    console.log('[Parser] cleaned count:', cleaned.length, 'raw transactions count:', transactions.length, 'cr_amounts:', claudeCrAmounts, 'stmt_bal:', claudeStatementBalance, 'cards:', claudeCards.length, 'isMultiCard:', isMultiCard);
+    return res.status(200).json({
+      success: true,
+      transactions: cleaned,
+      total,
+      count: cleaned.length,
+      _cr_filtered: crAmounts,
+      // Legacy singular fields — kept for backward compatibility with any
+      // caller that only reads these. For a multi-card statement these
+      // are the SUM across all cards (never use them to save a single
+      // card's tracker entry once is_multi_card is true).
+      statement_balance: claudeStatementBalance,
+      previous_balance: claudePreviousBalance,
+      // Per-card breakdown — the source of truth. Always at least one
+      // entry when parsing succeeded.
+      cards: claudeCards,
+      is_multi_card: isMultiCard,
+      _debug_raw_count: transactions.length
+    });
   } catch(e) {
     return res.status(500).json({ error: e.message });
   }
