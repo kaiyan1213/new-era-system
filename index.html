@@ -449,7 +449,7 @@
   <div class="login-box">
     <div class="login-logo">NE</div>
     <div class="login-title">New Era System</div>
-    <div class="login-sub">New Era Consulting Enterprise — Internal</div>
+    <div class="login-sub">New Era Consulting (M) Sdn Bhd — Internal</div>
     <div class="login-field">
       <label class="login-label">Username</label>
       <input type="text" id="loginUser" class="login-input" placeholder="e.g. kaiyan" onkeydown="if(event.key==='Enter')doLogin()">
@@ -467,7 +467,7 @@
   <div class="nav-brand">
     <div class="nav-logo">NE</div>
     <div>
-      <div class="nav-title">New Era Consulting Enterprise</div>
+      <div class="nav-title">New Era Consulting (M) Sdn Bhd</div>
       <div class="nav-sub">Internal Management System</div>
     </div>
   </div>
@@ -4521,14 +4521,53 @@ function copyUnpaidList() {
   navigator.clipboard.writeText(text).then(() => showToast('Copied to clipboard'));
 }
 
+// New Era switched from a sole-proprietor "Enterprise" registration to a
+// proper Sdn Bhd (NEW ERA CONSULTING (M) SDN. BHD., reg. 202601033669
+// (1695764-D), incorporated 20 Aug 2026 per SSM Section 15 + Certificate
+// of Incorporation). Every invoice/payslip is date-stamped by the
+// underlying record's own year/month, so the letterhead is picked
+// per-document from that period rather than a single global switch:
+// August 2026 and earlier keep printing the old Enterprise letterhead
+// exactly as those documents were originally issued (reprinting a past
+// month must never silently rewrite history), while September 2026
+// onward always uses the new Sdn Bhd letterhead.
+const ENTERPRISE_INFO = {
+  name: 'NEW ERA CONSULTING ENTERPRISE',
+  reg: '202503018811 (MA0326725-T)',
+  addressHtml: 'No 21, Jalan Villa Puncak Desa 3,<br>Villa Puncak Desa, Taman Desa Petaling,<br>57100 Kuala Lumpur, W.P.',
+  addressLines: ['No 21, Jalan Villa Puncak Desa 3, Villa Puncak Desa,', 'Taman Desa Petaling, 57100 Kuala Lumpur, W.P.'],
+  bankName: 'Public Bank Berhad',
+  bankAccountName: 'New Era Consulting Enterprise',
+  bankAccountNo: '3243542608'
+};
+const SDN_BHD_INFO = {
+  name: 'NEW ERA CONSULTING (M) SDN. BHD.',
+  reg: '202601033669 (1695764-D)',
+  addressHtml: 'No 10, Jalan SS 2/61,<br>SS 2, 47300 Petaling Jaya,<br>Selangor',
+  addressLines: ['No 10, Jalan SS 2/61, SS 2,', '47300 Petaling Jaya, Selangor'],
+  // TODO: the Sdn Bhd's own bank account isn't open yet (per Kai Yan,
+  // 21 Aug 2026) — still pointing at the old Enterprise account as a
+  // placeholder so invoices/payslips keep working meanwhile. Update
+  // these three fields once the new account exists.
+  bankName: 'Public Bank Berhad',
+  bankAccountName: 'New Era Consulting Enterprise',
+  bankAccountNo: '3243542608'
+};
+function getCompanyInfo(year, month) {
+  const y = parseInt(year), m = parseInt(month);
+  const isSdnBhd = y > 2026 || (y === 2026 && m >= 9);
+  return isSdnBhd ? SDN_BHD_INFO : ENTERPRISE_INFO;
+}
+
 function buildInvoiceHTML(inv, proxy) {
+  const co = getCompanyInfo(inv.year, inv.month);
   return `
       <div class="invoice-preview">
         <div class="inv-header">
           <div>
-            <div class="inv-company-name">NEW ERA CONSULTING ENTERPRISE</div>
-            <div class="inv-reg">202503018811 (MA0326725-T)</div>
-            <div class="inv-address">No 21, Jalan Villa Puncak Desa 3,<br>Villa Puncak Desa, Taman Desa Petaling,<br>57100 Kuala Lumpur, W.P.</div>
+            <div class="inv-company-name">${co.name}</div>
+            <div class="inv-reg">${co.reg}</div>
+            <div class="inv-address">${co.addressHtml}</div>
           </div>
           <div>
             <div class="inv-label">INVOICE</div>
@@ -4557,10 +4596,10 @@ function buildInvoiceHTML(inv, proxy) {
         </div>
         <div class="inv-footer">
           <strong>Payment Information</strong><br>
-          Bank: Public Bank Berhad<br>
-          Account Name: New Era Consulting Enterprise<br>
-          Account No: 3243542608<br><br>
-          This invoice is issued by New Era Consulting Enterprise for marketing services rendered.
+          Bank: ${co.bankName}<br>
+          Account Name: ${co.bankAccountName}<br>
+          Account No: ${co.bankAccountNo}<br><br>
+          This invoice is issued by ${co.name} for marketing services rendered.
         </div>
       </div>`;
 }
@@ -4601,17 +4640,18 @@ function loadJsPDF() {
 // Draws one invoice onto a jsPDF doc starting at page Y offset.
 // Returns the doc so multiple invoices can be chained with addPage().
 function drawInvoiceOnPDF(doc, inv, proxy) {
+  const co = getCompanyInfo(inv.year, inv.month);
   const w = doc.internal.pageSize.getWidth();
   const blue = [79, 124, 255], dark = [26, 26, 46], grey = [120, 120, 120], lightgrey = [220, 220, 220];
   let y = 22;
 
   // ── Company header (left) ──────────────────────────────────────
   doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...dark);
-  doc.text('NEW ERA CONSULTING ENTERPRISE', 18, y);
+  doc.text(co.name, 18, y);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...grey);
-  doc.text('202503018811 (MA0326725-T)', 18, y + 5);
-  doc.text('No 21, Jalan Villa Puncak Desa 3, Villa Puncak Desa,', 18, y + 10);
-  doc.text('Taman Desa Petaling, 57100 Kuala Lumpur, W.P.', 18, y + 15);
+  doc.text(co.reg, 18, y + 5);
+  doc.text(co.addressLines[0], 18, y + 10);
+  doc.text(co.addressLines[1], 18, y + 15);
 
   // ── INVOICE label (right) ──────────────────────────────────────
   doc.setFont('helvetica', 'bold'); doc.setFontSize(22); doc.setTextColor(...blue);
@@ -4673,10 +4713,10 @@ function drawInvoiceOnPDF(doc, inv, proxy) {
   doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(...grey);
   doc.text('Payment Information', 18, y);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
-  doc.text('Bank: Public Bank Berhad', 18, y + 5);
-  doc.text('Account Name: New Era Consulting Enterprise', 18, y + 10);
-  doc.text('Account No: 3243542608', 18, y + 15);
-  doc.text('This invoice is issued by New Era Consulting Enterprise for marketing services rendered.', 18, y + 22);
+  doc.text(`Bank: ${co.bankName}`, 18, y + 5);
+  doc.text(`Account Name: ${co.bankAccountName}`, 18, y + 10);
+  doc.text(`Account No: ${co.bankAccountNo}`, 18, y + 15);
+  doc.text(`This invoice is issued by ${co.name} for marketing services rendered.`, 18, y + 22);
 
   return doc;
 }
@@ -6330,13 +6370,14 @@ function genStaffDocNumber(prefix, r) {
 // Calculation worksheet is for).
 function buildStaffInvoiceHTML(staff, r) {
   const amountDue = Math.abs(parseFloat(r.total_pay || 0));
+  const co = getCompanyInfo(r.year, r.month);
   return `
       <div class="invoice-preview">
         <div class="inv-header">
           <div>
-            <div class="inv-company-name">NEW ERA CONSULTING ENTERPRISE</div>
-            <div class="inv-reg">202503018811 (MA0326725-T)</div>
-            <div class="inv-address">No 21, Jalan Villa Puncak Desa 3,<br>Villa Puncak Desa, Taman Desa Petaling,<br>57100 Kuala Lumpur, W.P.</div>
+            <div class="inv-company-name">${co.name}</div>
+            <div class="inv-reg">${co.reg}</div>
+            <div class="inv-address">${co.addressHtml}</div>
           </div>
           <div>
             <div class="inv-label">INVOICE</div>
@@ -6365,9 +6406,9 @@ function buildStaffInvoiceHTML(staff, r) {
         </div>
         <div class="inv-footer">
           <strong>Payment Information</strong><br>
-          Bank: Public Bank Berhad<br>
-          Account Name: New Era Consulting Enterprise<br>
-          Account No: 3243542608
+          Bank: ${co.bankName}<br>
+          Account Name: ${co.bankAccountName}<br>
+          Account No: ${co.bankAccountNo}
         </div>
       </div>`;
 }
@@ -6380,6 +6421,7 @@ function buildStaffPayslipHTML(staff, r, bankInfo) {
   const totalPay = parseFloat(r.total_pay || 0);
   const isOutsider = r.commission_type === 'outsider';
   const rows = getPayslipLineItems(r);
+  const co = getCompanyInfo(r.year, r.month);
   const rowsHtml = rows.map(row => `
             <tr>
               <td>${row.label}</td>
@@ -6389,9 +6431,9 @@ function buildStaffPayslipHTML(staff, r, bankInfo) {
       <div class="invoice-preview">
         <div class="inv-header">
           <div>
-            <div class="inv-company-name">NEW ERA CONSULTING ENTERPRISE</div>
-            <div class="inv-reg">202503018811 (MA0326725-T)</div>
-            <div class="inv-address">No 21, Jalan Villa Puncak Desa 3,<br>Villa Puncak Desa, Taman Desa Petaling,<br>57100 Kuala Lumpur, W.P.</div>
+            <div class="inv-company-name">${co.name}</div>
+            <div class="inv-reg">${co.reg}</div>
+            <div class="inv-address">${co.addressHtml}</div>
           </div>
           <div>
             <div class="inv-label" style="color:#16a34a">PAYSLIP</div>
@@ -7500,15 +7542,16 @@ function buildPIDocumentHTML(mgr, row, bankInfo) {
   const net = parseFloat(row.net_amount || 0);
   const isInv = net < 0;
   const amount = Math.abs(net);
+  const co = getCompanyInfo(row.year, row.month);
   const poolMathNote = `Pool Total RM ${fmtNum(row.pi_pool_total)} × ${row.share_percentage}% share = RM ${fmtNum(row.pool_share_amount)} pool share. Already received RM ${fmtNum(row.own_amount)} directly from Coway this period.`;
   if (isInv) {
     return `
       <div class="invoice-preview">
         <div class="inv-header">
           <div>
-            <div class="inv-company-name">NEW ERA CONSULTING ENTERPRISE</div>
-            <div class="inv-reg">202503018811 (MA0326725-T)</div>
-            <div class="inv-address">No 21, Jalan Villa Puncak Desa 3,<br>Villa Puncak Desa, Taman Desa Petaling,<br>57100 Kuala Lumpur, W.P.</div>
+            <div class="inv-company-name">${co.name}</div>
+            <div class="inv-reg">${co.reg}</div>
+            <div class="inv-address">${co.addressHtml}</div>
           </div>
           <div>
             <div class="inv-label">INVOICE — PI</div>
@@ -7537,9 +7580,9 @@ function buildPIDocumentHTML(mgr, row, bankInfo) {
         </div>
         <div class="inv-footer">
           <strong>Payment Information</strong><br>
-          Bank: Public Bank Berhad<br>
-          Account Name: New Era Consulting Enterprise<br>
-          Account No: 3243542608
+          Bank: ${co.bankName}<br>
+          Account Name: ${co.bankAccountName}<br>
+          Account No: ${co.bankAccountNo}
         </div>
       </div>`;
   }
@@ -7547,9 +7590,9 @@ function buildPIDocumentHTML(mgr, row, bankInfo) {
       <div class="invoice-preview">
         <div class="inv-header">
           <div>
-            <div class="inv-company-name">NEW ERA CONSULTING ENTERPRISE</div>
-            <div class="inv-reg">202503018811 (MA0326725-T)</div>
-            <div class="inv-address">No 21, Jalan Villa Puncak Desa 3,<br>Villa Puncak Desa, Taman Desa Petaling,<br>57100 Kuala Lumpur, W.P.</div>
+            <div class="inv-company-name">${co.name}</div>
+            <div class="inv-reg">${co.reg}</div>
+            <div class="inv-address">${co.addressHtml}</div>
           </div>
           <div>
             <div class="inv-label" style="color:#16a34a">PAYSLIP — PI</div>
@@ -10010,7 +10053,7 @@ async function exportProxy(proxyId, proxyName, year) {
   }
 
   const rows = [
-    ['New Era Consulting Enterprise — Annual Record'],
+    ['New Era Consulting (M) Sdn Bhd — Annual Record'],
     [`${proxyName} | Year: ${year}`],
     [''],
     ['Month','Coway Money (RM)','Invoiced back to company (RM)','Payslip income (RM)','Claim - reimbursement, not income (RM)','Net (RM)','Doc No','Status']
@@ -10236,7 +10279,7 @@ async function showProxyYearSummary(proxy, year, totalCoway, totalInvoiced, tota
   // captured in this closure, no re-fetching needed.
   document.getElementById('proxyYearCsvBtn').addEventListener('click', () => {
     const csvRows = [
-      ['New Era Consulting Enterprise — Annual Record'],
+      ['New Era Consulting (M) Sdn Bhd — Annual Record'],
       [`${proxy.name} | Year: ${year}`], [''],
       ['Month', 'Coway Money (RM)', 'Invoiced back to company (RM)', 'Payslip income (RM)', 'Claim - reimbursement, not income (RM)', 'Owed back (RM)']
     ];
@@ -10280,7 +10323,7 @@ async function exportPL() {
   const payroll = await sb('nec_payroll', { filter: `year=eq.${year}`, select: 'month,total_pay' });
 
   const rows = [
-    ['New Era Consulting Enterprise — P&L Summary'],
+    ['New Era Consulting (M) Sdn Bhd — P&L Summary'],
     [`Year: ${year}`], [''],
     ['Month','Revenue (RM)','Staff Payroll (RM)','Other Costs (RM)','Total Costs (RM)','Net Profit (RM)','Margin %']
   ];
