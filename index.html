@@ -5115,12 +5115,14 @@ async function loadPayroll() {
           ? `<span class="badge badge-paid">${r.payment_date}</span>`
           : `<button class="btn btn-ghost btn-sm" onclick="markPayrollPaid('${r.id}')">Mark Paid</button>`}</td>
         <td>
-          <button class="btn btn-ghost btn-sm" onclick="openEditPayrollModal('${r.id}')">Edit</button>
-          <button class="btn btn-ghost btn-sm" onclick="generatePayrollRecordPayslip('${r.id}')">${isInvoice ? '🖨 Invoice' : '🖨 Payslip'}</button>
-          <button class="btn btn-ghost btn-sm" onclick="generatePayrollRecordPayslip('${r.id}','download')">⬇ Save PDF</button>
-          <button class="btn btn-ghost btn-sm" onclick="generatePayrollCalculation('${r.id}')">🧮 Calc</button>
-          <button class="btn btn-ghost btn-sm" onclick="generatePayrollCalculation('${r.id}','download')">⬇ Save Calc PDF</button>
-          <button class="btn btn-danger btn-sm" onclick="deletePayroll('${r.id}')">✕</button>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;min-width:150px">
+            <button class="btn btn-ghost btn-sm" style="white-space:nowrap" onclick="openEditPayrollModal('${r.id}')">✎ Edit</button>
+            <button class="btn btn-danger btn-sm" style="white-space:nowrap" onclick="deletePayroll('${r.id}')">✕ Delete</button>
+            <button class="btn btn-ghost btn-sm" style="white-space:nowrap" onclick="generatePayrollRecordPayslip('${r.id}')">${isInvoice ? '🖨 Invoice' : '🖨 Payslip'}</button>
+            <button class="btn btn-ghost btn-sm" style="white-space:nowrap" onclick="generatePayrollRecordPayslip('${r.id}','download')">⬇ PDF</button>
+            <button class="btn btn-ghost btn-sm" style="white-space:nowrap" onclick="generatePayrollCalculation('${r.id}')">🧮 Calc</button>
+            <button class="btn btn-ghost btn-sm" style="white-space:nowrap" onclick="generatePayrollCalculation('${r.id}','download')">⬇ Calc PDF</button>
+          </div>
         </td>
       </tr>`;
     }).join('');
