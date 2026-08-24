@@ -5568,6 +5568,22 @@ async function previewAutoCommission() {
       return ka !== kb ? ka - kb : na.localeCompare(nb);
     });
 
+    // Which staff already have a confirmed payroll row for this period —
+    // without this, a long list with no visual "done" marker made it easy
+    // to scroll past someone and never click Save to Payroll for them,
+    // causing late payroll. Scoped to record_type=staff so a manager's
+    // separate settlement row (same person, different identity) never
+    // counts as this row already being saved. "stale" means the numbers
+    // on file no longer match what's currently calculated here (e.g. more
+    // orders got matched to this staff after the last save) — still
+    // needs re-confirming even though it was saved once before.
+    const existingPayrollForPeriod = await sb('nec_payroll', {
+      filter: `year=eq.${year}&month=eq.${month}&record_type=eq.staff`,
+      select: 'staff_id,commission_earned,orders_count'
+    });
+    const payrollByStaffId = {};
+    existingPayrollForPeriod.forEach(p => { payrollByStaffId[p.staff_id] = p; });
+
     autoCommissionData = reportStaff
       .map(s => {
         const allOrders = (matchedByStaffId[s.id] || []).map(o => ({
@@ -5599,7 +5615,14 @@ async function previewAutoCommission() {
         if (tmOrders.length) breakdownParts.push(`TM (${tmOrders.length} orders): ${tmResult.breakdown}`);
         if (outsiderOrders.length) breakdownParts.push(`Outsider (${outsiderOrders.length} orders): ${outsiderResult.breakdown}`);
         const breakdown = breakdownParts.join(' || ') || 'No matched orders this month';
-        return { staff: s, orders: allOrders, commission, breakdown, year, month };
+        const existing = payrollByStaffId[s.id];
+        let payrollStatus = 'none'; // none | saved | stale
+        if (existing) {
+          const matches = Math.abs(parseFloat(existing.commission_earned||0) - commission) < 0.01
+            && parseInt(existing.orders_count||0) === allOrders.length;
+          payrollStatus = matches ? 'saved' : 'stale';
+        }
+        return { staff: s, orders: allOrders, commission, breakdown, year, month, payrollStatus };
       });
 
     if (!autoCommissionData.length) {
@@ -5607,11 +5630,29 @@ async function previewAutoCommission() {
       return;
     }
 
+    // Summary banner — the whole point is to make "who's still pending"
+    // scannable without reading every row, since scrolling past someone
+    // silently was exactly how staff got missed and paid late before.
+    const savedCount = autoCommissionData.filter(r => r.payrollStatus === 'saved').length;
+    const staleCount = autoCommissionData.filter(r => r.payrollStatus === 'stale').length;
+    const pendingCount = autoCommissionData.filter(r => r.payrollStatus === 'none').length;
+    const totalCount = autoCommissionData.length;
     let html = '';
+    if (pendingCount > 0 || staleCount > 0) {
+      html += `<div style="margin-bottom:12px;padding:10px 14px;background:rgba(220,38,38,0.1);border:1px solid var(--red);border-radius:8px;font-size:13px">
+        ⚠️ <strong>${savedCount} / ${totalCount} confirmed to payroll.</strong>
+        ${pendingCount > 0 ? `<span style="color:var(--red)"> ${pendingCount} not saved yet</span>` : ''}${pendingCount > 0 && staleCount > 0 ? ' · ' : ''}${staleCount > 0 ? `<span style="color:var(--yellow)"> ${staleCount} saved but out of date (orders changed since last save — re-save needed)</span>` : ''}
+      </div>`;
+    } else {
+      html += `<div style="margin-bottom:12px;padding:10px 14px;background:rgba(22,163,74,0.1);border:1px solid var(--green);border-radius:8px;font-size:13px;color:var(--green)">
+        ✓ All ${totalCount} confirmed to payroll for this period.
+      </div>`;
+    }
     html += `
       <table>
         <thead>
           <tr>
+            <th>Status</th>
             <th>Staff</th>
             <th>收单追踪 Name</th>
             <th>Verified Orders</th>
@@ -5630,8 +5671,17 @@ async function previewAutoCommission() {
         neCount ? `<span style="color:#2563eb">NE ${neCount}</span>` : '',
         acCount ? `<span style="color:#f97316">AC ${acCount}</span>` : ''
       ].filter(Boolean).join(' · ') || '—';
+      const statusBadge = row.payrollStatus === 'saved'
+        ? `<span class="badge" style="background:rgba(22,163,74,0.15);color:var(--green)">✓ Saved</span>`
+        : row.payrollStatus === 'stale'
+          ? `<span class="badge" style="background:rgba(217,119,6,0.15);color:var(--yellow)">⚠ Outdated</span>`
+          : `<span class="badge" style="background:rgba(220,38,38,0.15);color:var(--red)">Not Saved</span>`;
+      const rowBg = row.payrollStatus === 'saved' ? 'background:rgba(22,163,74,0.04)'
+        : row.payrollStatus === 'stale' ? 'background:rgba(217,119,6,0.06)'
+        : '';
       html += `
-          <tr>
+          <tr style="${rowBg}">
+            <td>${statusBadge}</td>
             <td class="td-name">${row.staff.name}</td>
             <td class="td-mono">${row.staff.lead_staff_name}</td>
             <td class="td-mono">${row.orders.length}</td>
@@ -5642,7 +5692,7 @@ async function previewAutoCommission() {
             <td>
               <div style="display:flex;gap:4px;flex-wrap:wrap">
 
-                <button class="btn btn-primary btn-sm" onclick="saveAutoCommissionRow(${idx})">Save to Payroll</button>
+                <button class="btn btn-sm" style="${row.payrollStatus === 'saved' ? 'background:var(--surface2);color:var(--muted);border:1px solid var(--border)' : row.payrollStatus === 'stale' ? 'background:var(--yellow);color:#1a1a2e' : 'background:var(--accent);color:#fff'}" onclick="saveAutoCommissionRow(${idx})">${row.payrollStatus === 'saved' ? '✓ Saved — Re-save' : row.payrollStatus === 'stale' ? '⚠ Re-save (Outdated)' : 'Save to Payroll'}</button>
                 ${(row.staff.channel === 'TM' || row.orders.some(o => (o.commission_algo||'').toLowerCase() === 'tm')) ? `<button class="btn btn-ghost btn-sm" style="color:var(--yellow);border-color:var(--yellow)" onclick="openTMCostModal(${idx})">💰 Fill Costs</button>` : ''}
                 <button class="btn btn-ghost btn-sm" onclick="generateStaffPayslip(${idx})">📋 Order Breakdown</button>
               </div>
@@ -6098,6 +6148,11 @@ async function saveAutoCommissionRow(idx) {
     await logAudit('CREATE', 'nec_payroll', `Auto-generated payroll for ${row.staff.name} — ${MONTHS[body.month]} ${body.year} — ${body.orders_count} orders, commission RM${body.commission_earned.toFixed(2)}${settleNote}`);
     showToast(`Saved payroll for ${row.staff.name} ✓`);
     loadPayroll();
+    // Re-run the preview so this row's Status badge flips to "✓ Saved"
+    // immediately and the top summary count updates — without this the
+    // list still looked exactly the same after saving, which was part of
+    // why it was easy to lose track of who'd actually been confirmed.
+    previewAutoCommission();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
