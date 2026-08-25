@@ -5594,13 +5594,12 @@ async function previewAutoCommission() {
     // to scroll past someone and never click Save to Payroll for them,
     // causing late payroll. Scoped to record_type=staff so a manager's
     // separate settlement row (same person, different identity) never
-    // counts as this row already being saved. "stale" means the numbers
-    // on file no longer match what's currently calculated here (e.g. more
-    // orders got matched to this staff after the last save) — still
-    // needs re-confirming even though it was saved once before.
+    // counts as this row already being saved. Deliberately just an
+    // existence check (see the "stale" comment below for why it's not
+    // compared against the live-recalculated numbers).
     const existingPayrollForPeriod = await sb('nec_payroll', {
       filter: `year=eq.${year}&month=eq.${month}&record_type=eq.staff`,
-      select: 'staff_id,commission_earned,orders_count'
+      select: 'staff_id'
     });
     const payrollByStaffId = {};
     existingPayrollForPeriod.forEach(p => { payrollByStaffId[p.staff_id] = p; });
@@ -5636,13 +5635,18 @@ async function previewAutoCommission() {
         if (tmOrders.length) breakdownParts.push(`TM (${tmOrders.length} orders): ${tmResult.breakdown}`);
         if (outsiderOrders.length) breakdownParts.push(`Outsider (${outsiderOrders.length} orders): ${outsiderResult.breakdown}`);
         const breakdown = breakdownParts.join(' || ') || 'No matched orders this month';
+        // Whether this staff already has a payroll row for this period —
+        // deliberately just an existence check, not a "do the numbers
+        // still match" check. Orders/leads for a month keep getting
+        // logged in 收单追踪 well after payroll for that month was
+        // already confirmed and paid out, so the live recalculation here
+        // naturally drifts from what was actually saved/paid — that's
+        // normal, not a sign anything is wrong. Flagging that drift as
+        // "outdated" produced false alarms on staff who were already
+        // correctly paid, which is worse than the original "who did I
+        // forget" problem this was built to solve.
         const existing = payrollByStaffId[s.id];
-        let payrollStatus = 'none'; // none | saved | stale
-        if (existing) {
-          const matches = Math.abs(parseFloat(existing.commission_earned||0) - commission) < 0.01
-            && parseInt(existing.orders_count||0) === allOrders.length;
-          payrollStatus = matches ? 'saved' : 'stale';
-        }
+        const payrollStatus = existing ? 'saved' : 'none';
         return { staff: s, orders: allOrders, commission, breakdown, year, month, payrollStatus };
       });
 
@@ -5655,14 +5659,13 @@ async function previewAutoCommission() {
     // scannable without reading every row, since scrolling past someone
     // silently was exactly how staff got missed and paid late before.
     const savedCount = autoCommissionData.filter(r => r.payrollStatus === 'saved').length;
-    const staleCount = autoCommissionData.filter(r => r.payrollStatus === 'stale').length;
     const pendingCount = autoCommissionData.filter(r => r.payrollStatus === 'none').length;
     const totalCount = autoCommissionData.length;
     let html = '';
-    if (pendingCount > 0 || staleCount > 0) {
+    if (pendingCount > 0) {
       html += `<div style="margin-bottom:12px;padding:10px 14px;background:rgba(220,38,38,0.1);border:1px solid var(--red);border-radius:8px;font-size:13px">
         ⚠️ <strong>${savedCount} / ${totalCount} confirmed to payroll.</strong>
-        ${pendingCount > 0 ? `<span style="color:var(--red)"> ${pendingCount} not saved yet</span>` : ''}${pendingCount > 0 && staleCount > 0 ? ' · ' : ''}${staleCount > 0 ? `<span style="color:var(--yellow)"> ${staleCount} saved but out of date (orders changed since last save — re-save needed)</span>` : ''}
+        <span style="color:var(--red)"> ${pendingCount} not saved yet</span>
       </div>`;
     } else {
       html += `<div style="margin-bottom:12px;padding:10px 14px;background:rgba(22,163,74,0.1);border:1px solid var(--green);border-radius:8px;font-size:13px;color:var(--green)">
@@ -5694,12 +5697,8 @@ async function previewAutoCommission() {
       ].filter(Boolean).join(' · ') || '—';
       const statusBadge = row.payrollStatus === 'saved'
         ? `<span class="badge" style="background:rgba(22,163,74,0.15);color:var(--green)">✓ Saved</span>`
-        : row.payrollStatus === 'stale'
-          ? `<span class="badge" style="background:rgba(217,119,6,0.15);color:var(--yellow)">⚠ Outdated</span>`
-          : `<span class="badge" style="background:rgba(220,38,38,0.15);color:var(--red)">Not Saved</span>`;
-      const rowBg = row.payrollStatus === 'saved' ? 'background:rgba(22,163,74,0.04)'
-        : row.payrollStatus === 'stale' ? 'background:rgba(217,119,6,0.06)'
-        : '';
+        : `<span class="badge" style="background:rgba(220,38,38,0.15);color:var(--red)">Not Saved</span>`;
+      const rowBg = row.payrollStatus === 'saved' ? 'background:rgba(22,163,74,0.04)' : '';
       html += `
           <tr style="${rowBg}">
             <td>${statusBadge}</td>
@@ -5713,7 +5712,7 @@ async function previewAutoCommission() {
             <td>
               <div style="display:flex;gap:4px;flex-wrap:wrap">
 
-                <button class="btn btn-sm" style="${row.payrollStatus === 'saved' ? 'background:var(--surface2);color:var(--muted);border:1px solid var(--border)' : row.payrollStatus === 'stale' ? 'background:var(--yellow);color:#1a1a2e' : 'background:var(--accent);color:#fff'}" onclick="saveAutoCommissionRow(${idx})">${row.payrollStatus === 'saved' ? '✓ Saved — Re-save' : row.payrollStatus === 'stale' ? '⚠ Re-save (Outdated)' : 'Save to Payroll'}</button>
+                <button class="btn btn-sm" style="${row.payrollStatus === 'saved' ? 'background:var(--surface2);color:var(--muted);border:1px solid var(--border)' : 'background:var(--accent);color:#fff'}" onclick="saveAutoCommissionRow(${idx})">${row.payrollStatus === 'saved' ? '✓ Saved — Re-save' : 'Save to Payroll'}</button>
                 ${(row.staff.channel === 'TM' || row.orders.some(o => (o.commission_algo||'').toLowerCase() === 'tm')) ? `<button class="btn btn-ghost btn-sm" style="color:var(--yellow);border-color:var(--yellow)" onclick="openTMCostModal(${idx})">💰 Fill Costs</button>` : ''}
                 <button class="btn btn-ghost btn-sm" onclick="generateStaffPayslip(${idx})">📋 Order Breakdown</button>
                 <button class="btn btn-ghost btn-sm" onclick="generateStaffPayslip(${idx},'download')">⬇ Save PDF</button>
