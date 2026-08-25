@@ -5592,17 +5592,24 @@ async function previewAutoCommission() {
     // Which staff already have a confirmed payroll row for this period —
     // without this, a long list with no visual "done" marker made it easy
     // to scroll past someone and never click Save to Payroll for them,
-    // causing late payroll. Scoped to record_type=staff so a manager's
-    // separate settlement row (same person, different identity) never
-    // counts as this row already being saved. Deliberately just an
-    // existence check (see the "stale" comment below for why it's not
-    // compared against the live-recalculated numbers).
+    // causing late payroll. Deliberately just an existence check (see the
+    // "stale" comment below for why it's not compared against the
+    // live-recalculated numbers). Pulls BOTH record_type='staff' and
+    // record_type='manager' rows: pool managers (Kai Yan/Chloe/Carine/
+    // Jess/Zehao) get their personal commission bundled straight into
+    // their manager-type settlement row via the Manager Comm tab, so they
+    // never get a separate staff-type row here — that's expected, not a
+    // miss, and must not show as red "Not Saved".
     const existingPayrollForPeriod = await sb('nec_payroll', {
-      filter: `year=eq.${year}&month=eq.${month}&record_type=eq.staff`,
-      select: 'staff_id'
+      filter: `year=eq.${year}&month=eq.${month}&record_type=in.(staff,manager)`,
+      select: 'staff_id,record_type'
     });
     const payrollByStaffId = {};
-    existingPayrollForPeriod.forEach(p => { payrollByStaffId[p.staff_id] = p; });
+    existingPayrollForPeriod.forEach(p => {
+      if (!payrollByStaffId[p.staff_id]) payrollByStaffId[p.staff_id] = { staff: false, manager: false };
+      if (p.record_type === 'staff') payrollByStaffId[p.staff_id].staff = true;
+      if (p.record_type === 'manager') payrollByStaffId[p.staff_id].manager = true;
+    });
 
     autoCommissionData = reportStaff
       .map(s => {
@@ -5646,7 +5653,7 @@ async function previewAutoCommission() {
         // correctly paid, which is worse than the original "who did I
         // forget" problem this was built to solve.
         const existing = payrollByStaffId[s.id];
-        const payrollStatus = existing ? 'saved' : 'none';
+        const payrollStatus = existing?.staff ? 'saved' : (existing?.manager ? 'covered_by_manager' : 'none');
         return { staff: s, orders: allOrders, commission, breakdown, year, month, payrollStatus };
       });
 
@@ -5659,17 +5666,21 @@ async function previewAutoCommission() {
     // scannable without reading every row, since scrolling past someone
     // silently was exactly how staff got missed and paid late before.
     const savedCount = autoCommissionData.filter(r => r.payrollStatus === 'saved').length;
+    const coveredByManagerCount = autoCommissionData.filter(r => r.payrollStatus === 'covered_by_manager').length;
     const pendingCount = autoCommissionData.filter(r => r.payrollStatus === 'none').length;
     const totalCount = autoCommissionData.length;
+    const confirmedCount = savedCount + coveredByManagerCount;
     let html = '';
     if (pendingCount > 0) {
       html += `<div style="margin-bottom:12px;padding:10px 14px;background:rgba(220,38,38,0.1);border:1px solid var(--red);border-radius:8px;font-size:13px">
-        ⚠️ <strong>${savedCount} / ${totalCount} confirmed to payroll.</strong>
+        ⚠️ <strong>${confirmedCount} / ${totalCount} confirmed to payroll.</strong>
         <span style="color:var(--red)"> ${pendingCount} not saved yet</span>
+        ${coveredByManagerCount ? `<span style="color:var(--muted)"> · ${coveredByManagerCount} via Manager Settlement</span>` : ''}
       </div>`;
     } else {
       html += `<div style="margin-bottom:12px;padding:10px 14px;background:rgba(22,163,74,0.1);border:1px solid var(--green);border-radius:8px;font-size:13px;color:var(--green)">
         ✓ All ${totalCount} confirmed to payroll for this period.
+        ${coveredByManagerCount ? `<span style="color:var(--muted)"> (${coveredByManagerCount} via Manager Settlement)</span>` : ''}
       </div>`;
     }
     html += `
@@ -5697,8 +5708,11 @@ async function previewAutoCommission() {
       ].filter(Boolean).join(' · ') || '—';
       const statusBadge = row.payrollStatus === 'saved'
         ? `<span class="badge" style="background:rgba(22,163,74,0.15);color:var(--green)">✓ Saved</span>`
+        : row.payrollStatus === 'covered_by_manager'
+        ? `<span class="badge" style="background:rgba(37,99,235,0.15);color:#2563eb" title="Personal commission already bundled into this staff's Manager Settlement row for this period">✓ Via Manager Settlement</span>`
         : `<span class="badge" style="background:rgba(220,38,38,0.15);color:var(--red)">Not Saved</span>`;
-      const rowBg = row.payrollStatus === 'saved' ? 'background:rgba(22,163,74,0.04)' : '';
+      const rowBg = row.payrollStatus === 'saved' ? 'background:rgba(22,163,74,0.04)'
+        : row.payrollStatus === 'covered_by_manager' ? 'background:rgba(37,99,235,0.04)' : '';
       html += `
           <tr style="${rowBg}">
             <td>${statusBadge}</td>
@@ -5712,7 +5726,7 @@ async function previewAutoCommission() {
             <td>
               <div style="display:flex;gap:4px;flex-wrap:wrap">
 
-                <button class="btn btn-sm" style="${row.payrollStatus === 'saved' ? 'background:var(--surface2);color:var(--muted);border:1px solid var(--border)' : 'background:var(--accent);color:#fff'}" onclick="saveAutoCommissionRow(${idx})">${row.payrollStatus === 'saved' ? '✓ Saved — Re-save' : 'Save to Payroll'}</button>
+                <button class="btn btn-sm" style="${row.payrollStatus === 'saved' ? 'background:var(--surface2);color:var(--muted);border:1px solid var(--border)' : row.payrollStatus === 'covered_by_manager' ? 'background:var(--surface2);color:#2563eb;border:1px solid #2563eb' : 'background:var(--accent);color:#fff'}" onclick="saveAutoCommissionRow(${idx})">${row.payrollStatus === 'saved' ? '✓ Saved — Re-save' : row.payrollStatus === 'covered_by_manager' ? 'Save Separate Staff Row' : 'Save to Payroll'}</button>
                 ${(row.staff.channel === 'TM' || row.orders.some(o => (o.commission_algo||'').toLowerCase() === 'tm')) ? `<button class="btn btn-ghost btn-sm" style="color:var(--yellow);border-color:var(--yellow)" onclick="openTMCostModal(${idx})">💰 Fill Costs</button>` : ''}
                 <button class="btn btn-ghost btn-sm" onclick="generateStaffPayslip(${idx})">📋 Order Breakdown</button>
                 <button class="btn btn-ghost btn-sm" onclick="generateStaffPayslip(${idx},'download')">⬇ Save PDF</button>
