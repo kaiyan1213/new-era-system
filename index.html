@@ -5655,10 +5655,16 @@ async function previewAutoCommission() {
         const existing = payrollByStaffId[s.id];
         const payrollStatus = existing?.staff ? 'saved' : (existing?.manager ? 'covered_by_manager' : 'none');
         return { staff: s, orders: allOrders, commission, breakdown, year, month, payrollStatus };
-      });
+      })
+      // Staff with zero matched orders this period have nothing to review
+      // or save here — showing them just adds noise to a list that's
+      // meant to be scanned for who still needs action.
+      .filter(row => row.orders.length > 0);
 
     if (!autoCommissionData.length) {
-      container.innerHTML = `<div class="empty"><div class="empty-text">No sales staff have a 收单追踪 Staff Name set yet. Edit a staff member below and fill in "收单追踪 Staff Name".</div></div>`;
+      container.innerHTML = reportStaff.length
+        ? `<div class="empty"><div class="empty-text">No matched orders this period for any sales staff.</div></div>`
+        : `<div class="empty"><div class="empty-text">No sales staff have a 收单追踪 Staff Name set yet. Edit a staff member below and fill in "收单追踪 Staff Name".</div></div>`;
       return;
     }
 
