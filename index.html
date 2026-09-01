@@ -481,6 +481,7 @@
       <a class="nav-link" onclick="showPage('payroll')">Payroll</a>
       <a class="nav-link" onclick="showPage('manager')">Manager</a>
       <a class="nav-link" onclick="showPage('pl')">P&amp;L</a>
+      <a class="nav-link" onclick="showPage('expenses')">Expenses</a>
       <a class="nav-link" onclick="showPage('cctracker')">CC Tracker</a>
       <a class="nav-link" onclick="showPage('breakdown')">Breakdown</a>
       <a class="nav-link" onclick="showPage('bankdir')">Bank Details</a>
@@ -1196,6 +1197,65 @@
         </thead>
         <tbody id="plTableBody">
           <tr><td colspan="6"><div class="empty"><div class="empty-icon">📊</div><div class="empty-text">Loading cost entries...</div></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ========== VENDOR / SUPPLIER INVOICES (EXPENSES) PAGE ========== -->
+  <div id="page-expenses" class="hidden">
+    <div class="page-header">
+      <div>
+        <div class="page-title">Vendor Invoices</div>
+        <div class="page-sub">Invoices other companies send to us — rent, software, equipment, professional fees. Stored for tax deduction records and auto-added to P&L expenses.</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" onclick="openVendorInvoiceModal()">+ Add Vendor Invoice</button>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <select id="veYear" onchange="loadVendorInvoices()">
+          <option value="2025">2025</option>
+          <option value="2026" selected>2026</option>
+        </select>
+        <select id="veMonth" onchange="loadVendorInvoices()">
+          <option value="">Full Year</option>
+          <option value="1">January</option><option value="2">February</option>
+          <option value="3">March</option><option value="4">April</option>
+          <option value="5">May</option><option value="6">June</option>
+          <option value="7">July</option><option value="8">August</option>
+          <option value="9">September</option><option value="10">October</option>
+          <option value="11">November</option><option value="12">December</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="stats-row" style="margin-bottom:16px">
+      <div class="stat-card">
+        <div class="stat-label">Total Vendor Expenses</div>
+        <div class="stat-value red" id="veTotalAmt">—</div>
+        <div class="stat-sub" id="veTotalSub">for selected period</div>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Vendor</th>
+            <th>Invoice No</th>
+            <th>Category</th>
+            <th>Team</th>
+            <th>Amount</th>
+            <th>File</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="veTableBody">
+          <tr><td colspan="8"><div class="empty"><div class="empty-icon">🧾</div><div class="empty-text">Loading vendor invoices...</div></div></td></tr>
         </tbody>
       </table>
     </div>
@@ -2481,6 +2541,89 @@
   </div>
 </div>
 
+<div class="modal-bg hidden" id="modalVendorInvoice">
+  <div class="modal">
+    <div class="modal-title" id="veModalTitle">Add Vendor Invoice</div>
+    <input type="hidden" id="veEditId" value="">
+    <div class="form-grid">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Vendor / Company Name</label>
+          <input type="text" id="veVendorName" class="form-input" placeholder="e.g. TNB, Maxis, ABC Trading Sdn Bhd">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Their Invoice No (optional)</label>
+          <input type="text" id="veInvoiceNo" class="form-input" placeholder="e.g. INV-2026-0451">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Invoice Date</label>
+          <input type="date" id="veInvoiceDate" class="form-input" onchange="veSyncPeriodFromDate()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Year</label>
+          <select id="veEditYear" class="form-input"><option value="2025">2025</option><option value="2026" selected>2026</option></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Month</label>
+          <select id="veEditMonth" class="form-input">
+            <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
+            <option value="4">Apr</option><option value="5">May</option><option value="6">Jun</option>
+            <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
+            <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Category</label>
+          <select id="veCategory" class="form-input" onchange="handleVECategoryChange(this);veSyncAmount()">
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Company Team</label>
+          <select id="veTeam" class="form-input" onchange="veSyncAmount()">
+            <option value="">Shared (both teams)</option>
+            <option value="New Era">New Era</option>
+            <option value="Alpha C">Alpha C</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Total Amount (RM)</label>
+        <input type="number" id="veAmount" class="form-input" placeholder="0.00" step="0.01" oninput="veSyncAmount()">
+      </div>
+      <div id="veNEACRow" style="display:none">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Optional: split between NE and AC (leave blank to use Company Team setting above)</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">🏢 New Era Amount (RM)</label>
+            <input type="number" id="veAmountNE" class="form-input" placeholder="0.00" step="0.01" oninput="veSyncAC()">
+          </div>
+          <div class="form-group">
+            <label class="form-label">🏢 Alpha C Amount (RM)</label>
+            <input type="number" id="veAmountAC" class="form-input" placeholder="0.00" step="0.01" oninput="veSyncNE()">
+          </div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes (optional)</label>
+        <input type="text" id="veNotes" class="form-input" placeholder="e.g. Monthly office rent">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Invoice File (PDF / photo — stored for tax records)</label>
+        <input type="file" id="veFileInput" class="form-input" accept="application/pdf,image/*">
+        <div id="veExistingFile" style="font-size:12px;color:var(--muted);margin-top:4px"></div>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalVendorInvoice')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveVendorInvoice()">Save Vendor Invoice</button>
+    </div>
+  </div>
+</div>
+
 <!-- Credit Card Statement Upload Modal -->
 <div class="modal-bg hidden" id="modalCCStatement">
   <div class="modal" style="max-width:1100px;width:95vw">
@@ -2946,7 +3089,7 @@ async function loadAuditLog() {
         nec_staff:'Staff', nec_payroll:'Payroll',
         nec_manager_sharing:'Mgr Sharing', nec_pl_costs:'P&L Costs',
         nec_cost_categories:'Cost Categories',
-        nec_managers:'Managers'
+        nec_managers:'Managers', nec_vendor_invoices:'Vendor Invoices'
       }[l.table_name] || l.table_name;
       return `<tr>
         <td style="color:var(--muted);font-size:12px;font-family:var(--mono)">${timeStr}</td>
@@ -3025,7 +3168,7 @@ function resolveOwnerSelection(rawValue) {
 }
 
 function showPage(page) {
-  ['proxy','payroll','manager','pl','export','audit','upload','breakdown','setup','directory','bankdir','cctracker'].forEach(p => {
+  ['proxy','payroll','manager','pl','export','audit','upload','breakdown','setup','directory','bankdir','cctracker','expenses'].forEach(p => {
     const el = document.getElementById(`page-${p}`);
     if (el) el.classList.add('hidden');
   });
@@ -3055,6 +3198,11 @@ function showPage(page) {
     loadPL();
   }
   if (page === 'cctracker') loadCCTracker();
+  if (page === 'expenses') {
+    const _m = document.getElementById('veMonth');
+    if (_m && !_m.value) _m.value = new Date().getMonth() + 1;
+    loadVendorInvoices();
+  }
   if (page === 'audit') loadAuditLog();
   if (page === 'breakdown') {
     const _m = document.getElementById('bdMonth');
@@ -9050,6 +9198,268 @@ async function saveCostEntry() {
 }
 
 // ──────────────────────────────────────────────────────────────
+// Vendor / Supplier Invoices — bills OTHER companies send to us
+// (rent, software, equipment, professional fees, etc). Stored here
+// for tax-deduction record-keeping, with the original file kept as
+// base64 so it can be pulled back up at tax time without digging
+// through email/paper. Saving one of these also creates a linked
+// nec_pl_costs row (via the same category/team logic as Add Cost
+// Entry) so the amount automatically flows into the P&L Total
+// Expenses — editing or deleting the vendor invoice keeps that
+// linked cost row in sync so the two numbers never drift apart.
+// ──────────────────────────────────────────────────────────────
+let vendorInvoices = [];
+
+async function loadVendorInvoices() {
+  const year = parseInt(document.getElementById('veYear').value);
+  const monthRaw = document.getElementById('veMonth').value;
+  const month = monthRaw ? parseInt(monthRaw) : null;
+  await loadCostCategories();
+  const tbody = document.getElementById('veTableBody');
+  try {
+    // file_data deliberately excluded here — it's fetched on demand by
+    // viewVendorInvoiceFile() only when the user actually clicks View,
+    // so a list full of scanned invoices doesn't have to download every
+    // attachment just to render the table.
+    let filter = `year=eq.${year}&order=invoice_date.desc.nullslast`;
+    if (month) filter += `&month=eq.${month}`;
+    vendorInvoices = await sb('nec_vendor_invoices', {
+      filter,
+      select: 'id,vendor_name,invoice_no,invoice_date,year,month,category,company_team,amount,amount_ne,amount_ac,notes,file_name,file_type,pl_cost_id'
+    });
+    const total = r2(vendorInvoices.reduce((s,v) => s + parseFloat(v.amount || 0), 0));
+    document.getElementById('veTotalAmt').textContent = fmt(total);
+    document.getElementById('veTotalSub').textContent = `${vendorInvoices.length} invoice${vendorInvoices.length===1?'':'s'} — ${month ? MONTHS[month] : 'Full Year'} ${year}`;
+    if (!vendorInvoices.length) {
+      tbody.innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-icon">🧾</div><div class="empty-text">No vendor invoices recorded for this period.</div></div></td></tr>`;
+      return;
+    }
+    tbody.innerHTML = vendorInvoices.map(v => {
+      const dateStr = v.invoice_date ? new Date(v.invoice_date + 'T00:00:00').toLocaleDateString('en-MY') : '—';
+      const fileBtn = v.file_name
+        ? `<button class="btn btn-ghost btn-sm" onclick="viewVendorInvoiceFile('${v.id}')">📄 View</button>`
+        : `<span style="color:var(--muted);font-size:12px">—</span>`;
+      return `<tr>
+        <td class="td-mono">${dateStr}</td>
+        <td class="td-name">${v.vendor_name}</td>
+        <td class="td-mono">${v.invoice_no || '—'}</td>
+        <td>${categoryLabel(v.category)}</td>
+        <td>${v.company_team || 'Shared'}</td>
+        <td class="td-mono" style="color:var(--red);font-weight:600">${fmt(v.amount)}</td>
+        <td>${fileBtn}</td>
+        <td>
+          <div style="display:flex;gap:4px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" onclick="openEditVendorInvoice('${v.id}')">✎ Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteVendorInvoice('${v.id}')">✕ Delete</button>
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Table not set up. Go to Setup tab.</div></div></td></tr>`;
+  }
+}
+
+async function openVendorInvoiceModal() {
+  await loadCostCategories();
+  document.getElementById('veModalTitle').textContent = 'Add Vendor Invoice';
+  document.getElementById('veEditId').value = '';
+  document.getElementById('veVendorName').value = '';
+  document.getElementById('veInvoiceNo').value = '';
+  document.getElementById('veInvoiceDate').value = '';
+  document.getElementById('veCategory').innerHTML = categoryOptionsHTML('other');
+  document.getElementById('veTeam').value = '';
+  document.getElementById('veAmount').value = '';
+  document.getElementById('veAmountNE').value = '';
+  document.getElementById('veAmountAC').value = '';
+  document.getElementById('veNEACRow').style.display = 'none';
+  document.getElementById('veNotes').value = '';
+  document.getElementById('veFileInput').value = '';
+  document.getElementById('veExistingFile').textContent = '';
+  const now = new Date();
+  document.getElementById('veEditYear').value = now.getFullYear();
+  document.getElementById('veEditMonth').value = now.getMonth() + 1;
+  openModal('modalVendorInvoice');
+}
+
+async function openEditVendorInvoice(id) {
+  await loadCostCategories();
+  const v = vendorInvoices.find(x => x.id === id);
+  if (!v) return;
+  document.getElementById('veModalTitle').textContent = 'Edit Vendor Invoice';
+  document.getElementById('veEditId').value = v.id;
+  document.getElementById('veVendorName').value = v.vendor_name || '';
+  document.getElementById('veInvoiceNo').value = v.invoice_no || '';
+  document.getElementById('veInvoiceDate').value = v.invoice_date || '';
+  document.getElementById('veCategory').innerHTML = categoryOptionsHTML(v.category);
+  document.getElementById('veTeam').value = v.company_team || '';
+  document.getElementById('veAmount').value = v.amount;
+  document.getElementById('veAmountNE').value = v.amount_ne ?? '';
+  document.getElementById('veAmountAC').value = v.amount_ac ?? '';
+  document.getElementById('veNEACRow').style.display = (v.amount_ne || v.amount_ac) ? 'block' : 'none';
+  document.getElementById('veNotes').value = v.notes || '';
+  document.getElementById('veFileInput').value = '';
+  document.getElementById('veExistingFile').textContent = v.file_name ? `Current file: ${v.file_name} (choose a new file above to replace it)` : '';
+  document.getElementById('veEditYear').value = v.year;
+  document.getElementById('veEditMonth').value = v.month;
+  openModal('modalVendorInvoice');
+}
+
+// Defaults Year/Month to whatever invoice date was just picked, since
+// the P&L period this expense should count toward normally follows the
+// invoice's own date rather than needing a separate manual pick.
+function veSyncPeriodFromDate() {
+  const d = document.getElementById('veInvoiceDate').value;
+  if (!d) return;
+  const [y, m] = d.split('-').map(Number);
+  if (y) document.getElementById('veEditYear').value = y;
+  if (m) document.getElementById('veEditMonth').value = m;
+}
+
+async function handleVECategoryChange(selectEl) {
+  if (selectEl.value !== ADD_CATEGORY_SENTINEL) { selectEl.dataset.prev = selectEl.value; return; }
+  const prevValue = selectEl.dataset.prev || 'other';
+  const slug = await promptAddCategory();
+  selectEl.innerHTML = categoryOptionsHTML(slug || prevValue);
+  selectEl.dataset.prev = slug || prevValue;
+}
+
+function veSyncAmount() {
+  const team = document.getElementById('veTeam').value;
+  document.getElementById('veNEACRow').style.display = !team ? 'block' : 'none';
+}
+function veSyncAC() {
+  const total = parseFloat(document.getElementById('veAmount').value) || 0;
+  const ne = parseFloat(document.getElementById('veAmountNE').value) || 0;
+  const ac = total - ne;
+  if (ac >= 0) document.getElementById('veAmountAC').value = ac.toFixed(2);
+}
+function veSyncNE() {
+  const total = parseFloat(document.getElementById('veAmount').value) || 0;
+  const ac = parseFloat(document.getElementById('veAmountAC').value) || 0;
+  const ne = total - ac;
+  if (ne >= 0) document.getElementById('veAmountNE').value = ne.toFixed(2);
+}
+
+async function saveVendorInvoice() {
+  const editId = document.getElementById('veEditId').value;
+  const vendorName = document.getElementById('veVendorName').value.trim();
+  const amount = parseFloat(document.getElementById('veAmount').value);
+  if (!vendorName) return showToast('Enter the vendor/company name', 'error');
+  if (!amount) return showToast('Enter amount', 'error');
+
+  const fileInput = document.getElementById('veFileInput');
+  const file = fileInput.files[0];
+  let fileFields = {};
+  if (file) {
+    try {
+      const base64Full = await new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onload = () => res(reader.result);
+        reader.onerror = () => rej(new Error('FileReader error'));
+        reader.readAsDataURL(file);
+      });
+      const comma = base64Full.indexOf(',');
+      fileFields = {
+        file_name: file.name,
+        file_type: file.type || 'application/octet-stream',
+        file_data: comma >= 0 ? base64Full.slice(comma + 1) : base64Full
+      };
+    } catch(e) { return showToast('Error reading file: ' + e.message, 'error'); }
+  }
+
+  const neAmt = parseFloat(document.getElementById('veAmountNE')?.value) || null;
+  const acAmt = parseFloat(document.getElementById('veAmountAC')?.value) || null;
+  const category = document.getElementById('veCategory').value;
+  const companyTeam = document.getElementById('veTeam').value || null;
+  const year = parseInt(document.getElementById('veEditYear').value);
+  const month = parseInt(document.getElementById('veEditMonth').value);
+  const invoiceNo = document.getElementById('veInvoiceNo').value.trim();
+
+  const body = {
+    vendor_name: vendorName,
+    invoice_no: invoiceNo || null,
+    invoice_date: document.getElementById('veInvoiceDate').value || null,
+    year, month,
+    category,
+    company_team: companyTeam,
+    amount,
+    amount_ne: neAmt,
+    amount_ac: acAmt,
+    notes: document.getElementById('veNotes').value.trim() || null,
+    ...fileFields
+  };
+
+  try {
+    const existing = editId ? vendorInvoices.find(x => x.id === editId) : null;
+    // Keep the linked nec_pl_costs row's amount/category/team/period in
+    // sync with whatever was just saved here, so P&L never shows a stale
+    // number after an edit.
+    const plCostBody = {
+      year, month,
+      channel: 'OTHER',
+      company_team: companyTeam,
+      category,
+      description: `Vendor Invoice: ${vendorName}${invoiceNo ? ' (' + invoiceNo + ')' : ''}`,
+      amount,
+      amount_ne: neAmt,
+      amount_ac: acAmt
+    };
+
+    if (editId) {
+      await sb('nec_vendor_invoices', { method: 'PATCH', filter: `id=eq.${editId}`, body });
+      if (existing?.pl_cost_id) {
+        await sb('nec_pl_costs', { method: 'PATCH', filter: `id=eq.${existing.pl_cost_id}`, body: plCostBody });
+      } else {
+        const created = await sb('nec_pl_costs', { method: 'POST', body: plCostBody });
+        if (created?.[0]?.id) await sb('nec_vendor_invoices', { method: 'PATCH', filter: `id=eq.${editId}`, body: { pl_cost_id: created[0].id } });
+      }
+      await logAudit('UPDATE', 'nec_vendor_invoices', `Vendor Invoice: ${vendorName} — RM${amount} (${MONTHS[month]} ${year})`);
+    } else {
+      const createdCost = await sb('nec_pl_costs', { method: 'POST', body: plCostBody });
+      body.pl_cost_id = createdCost?.[0]?.id || null;
+      await sb('nec_vendor_invoices', { method: 'POST', body });
+      await logAudit('CREATE', 'nec_vendor_invoices', `Vendor Invoice: ${vendorName} — RM${amount} (${MONTHS[month]} ${year})`);
+    }
+    closeModal('modalVendorInvoice');
+    showToast('Vendor invoice saved');
+    loadVendorInvoices();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteVendorInvoice(id) {
+  const v = vendorInvoices.find(x => x.id === id);
+  if (!v) return;
+  if (!confirm(`Delete vendor invoice from ${v.vendor_name} (RM${fmtNum(v.amount)})? This also removes its linked P&L cost entry.`)) return;
+  try {
+    if (v.pl_cost_id) await sbDelete('nec_pl_costs', `id=eq.${v.pl_cost_id}`);
+    await sbDelete('nec_vendor_invoices', `id=eq.${id}`);
+    await logAudit('DELETE', 'nec_vendor_invoices', `Deleted vendor invoice: ${v.vendor_name} — RM${v.amount}`);
+    showToast('Vendor invoice deleted');
+    loadVendorInvoices();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// Opens the stored file in a new tab straight from its base64 data —
+// works for both PDFs and images. Fetched fresh (not from the local
+// list cache) since file_data is deliberately excluded from the list
+// select above for performance.
+async function viewVendorInvoiceFile(id) {
+  try {
+    const rows = await sb('nec_vendor_invoices', { filter: `id=eq.${id}`, select: 'file_name,file_type,file_data' });
+    const row = rows?.[0];
+    if (!row?.file_data) return showToast('No file attached', 'error');
+    const byteChars = atob(row.file_data);
+    const byteNumbers = new Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+    const blob = new Blob([new Uint8Array(byteNumbers)], { type: row.file_type || 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch(e) { showToast('Error loading file: ' + e.message, 'error'); }
+}
+
+// ──────────────────────────────────────────────────────────────
 // Credit Card Statement upload — reads a statement PDF, has Claude
 // extract + categorize every transaction, then shows an editable
 // review table before anything is written to nec_pl_costs. Nothing
@@ -10856,6 +11266,34 @@ INSERT INTO nec_cost_categories (slug, label) VALUES
   ('cleaning','Cleaning Service'), ('other','Other')
 ON CONFLICT (slug) DO NOTHING;
 
+-- Vendor / Supplier Invoices — bills OTHER companies send to us (rent,
+-- software, equipment, professional fees, etc). Kept separate from the
+-- generic nec_pl_costs entries because these need vendor-specific fields
+-- (vendor name, their invoice number/date) and a stored copy of the
+-- original invoice file for tax time. Saving one of these also creates a
+-- linked nec_pl_costs row (pl_cost_id) so the amount automatically flows
+-- into the P&L Total Expenses — deleting the vendor invoice deletes that
+-- linked cost row too, so the two never drift out of sync.
+CREATE TABLE IF NOT EXISTS nec_vendor_invoices (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  vendor_name text NOT NULL,
+  invoice_no text,
+  invoice_date date,
+  year int NOT NULL,
+  month int NOT NULL,
+  category text NOT NULL,
+  company_team text,
+  amount numeric(10,2) NOT NULL,
+  amount_ne numeric(10,2),
+  amount_ac numeric(10,2),
+  notes text,
+  file_name text,
+  file_type text,
+  file_data text,
+  pl_cost_id uuid REFERENCES nec_pl_costs(id) ON DELETE SET NULL,
+  created_at timestamptz DEFAULT now()
+);
+
 -- Credit Card Tracker — master list of company credit cards plus one
 -- statement record per card per month (statement amount, payment amount,
 -- statement/due/payment dates, paid status). Powers the CC Tracker page
@@ -11092,7 +11530,7 @@ async function saveManagers() {
 async function testConnection() {
   const result = document.getElementById('connTestResult');
   result.textContent = 'Testing...';
-  const tables = ['proxy_accounts','proxy_invoices','proxy_invoice_payments','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_manager_payslips','nec_manager_adjustments','nec_pi_records','nec_pi_sharing','nec_pl_costs','nec_cost_categories','nec_credit_cards','nec_cc_statements','nec_cc_payments','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads','nec_order_assignments','monthly_config'];
+  const tables = ['proxy_accounts','proxy_invoices','proxy_invoice_payments','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_manager_payslips','nec_manager_adjustments','nec_pi_records','nec_pi_sharing','nec_pl_costs','nec_cost_categories','nec_vendor_invoices','nec_credit_cards','nec_cc_statements','nec_cc_payments','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads','nec_order_assignments','monthly_config'];
   const results = [];
   for (const t of tables) {
     try {
