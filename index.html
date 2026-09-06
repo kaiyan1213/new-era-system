@@ -8820,8 +8820,26 @@ async function loadPL() {
       const cat = (c.category || '').toLowerCase();
       // Find which card this came from
       const card = ccCards?.find(cc => cc.id === c.credit_card_id);
-      const cardTeam = card?.owner_team || c.company_team || null;
-      const isAC = cardTeam && (cardTeam.toLowerCase().includes('ky alliance') || cardTeam.toLowerCase().includes('alpha c'));
+      // The cost entry's OWN company_team (set explicitly — either typed
+      // in Add Cost Entry, or picked per-row/per-group when reviewing a
+      // CC statement upload) is the most reliable signal and must win
+      // outright: a card's owner_team field describes who the card is
+      // issued to (e.g. "NE — Chloe"), which is a different thing from
+      // which team's purchases actually ran through it (a card can be
+      // issued to an NE staff member but still carry AC's gift spend,
+      // exactly what its own gift_team/ads_team fields are for). Only
+      // when a row has no explicit team (legacy rows saved before
+      // company_team existed) do we fall back to the card's own
+      // category-specific team (gift_team/ads_team), then its general
+      // owner_team text, as a last resort.
+      let isAC;
+      if (c.company_team === 'Alpha C') isAC = true;
+      else if (c.company_team === 'New Era') isAC = false;
+      else {
+        const categoryTeam = cat === 'gift' ? card?.gift_team : cat === 'ad_spend' ? card?.ads_team : null;
+        const cardTeam = categoryTeam || card?.owner_team || null;
+        isAC = !!(cardTeam && (cardTeam.toLowerCase().includes('ky alliance') || cardTeam.toLowerCase().includes('alpha c')));
+      }
       const isNE = !isAC;
 
       const txDesc = c.description || label;
@@ -9882,7 +9900,7 @@ function renderCCTransactions() {
   document.getElementById('ccMultiGroupWrap').innerHTML = ccCardGroups.map((g, idx) => {
     const rows = ccTransactions.map((t, i) => ({ t, i })).filter(x => x.t._groupIdx === idx);
     const groupTotal = r2(rows.reduce((s,x) => s + x.t.amount, 0));
-    const adsFeeOffset = (g.statement_balance !== null) ? r2(groupTotal - g.statement_balance) : 0;
+    const gap = (g.statement_balance !== null) ? r2(groupTotal - g.statement_balance) : 0;
     return `
     <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
@@ -9891,7 +9909,7 @@ function renderCCTransactions() {
           <span style="font-weight:400;color:var(--muted);margin-left:8px">
             ${rows.length} txns · Total RM ${fmtNum(groupTotal)}${g.statement_balance !== null ? ` · Statement Balance RM ${fmtNum(g.statement_balance)}` : ''}
           </span>
-          ${adsFeeOffset >= 0.01 ? `<div style="font-weight:400;color:var(--yellow);font-size:11px;margin-top:2px">On save: − RM ${fmtNum(adsFeeOffset)} Ads Fee Offset entry (excess repayment beyond carried-over balance) so this card ties to the bank Statement Balance</div>` : ''}
+          ${Math.abs(gap) >= 0.01 ? `<div style="font-weight:400;color:var(--yellow);font-size:11px;margin-top:2px">On save: ${gap > 0 ? '−' : '+'} RM ${fmtNum(Math.abs(gap))} Ads Fee Offset entry (${gap > 0 ? 'overpaid vs carried-over balance' : 'underpaid vs carried-over balance'}) so this card ties to the bank Statement Balance</div>` : ''}
         </div>
         <select style="font-size:11px;padding:4px 8px;max-width:280px" onchange="handleGroupCardChange(${idx}, this.value)">
           ${ccCardOptionsHTML(g.selectedCardId)}
@@ -9951,9 +9969,9 @@ function updateCCSummary() {
   if (ccStatementBalance !== null) {
     document.getElementById('ccBalance').textContent = `RM ${fmtNum(ccStatementBalance)}`;
     balanceWrap.classList.remove('hidden');
-    const excess = r2(rawTotal - ccStatementBalance);
-    if (excess >= 0.01) {
-      balanceNote.textContent = `On save: a RM ${fmtNum(excess)} Ads Fee Offset entry is added (excess repayment beyond carried-over balance) so this ties to the bank Statement Balance.`;
+    const gap = r2(rawTotal - ccStatementBalance);
+    if (Math.abs(gap) >= 0.01) {
+      balanceNote.textContent = `On save: a RM ${fmtNum(Math.abs(gap))} Ads Fee Offset entry is added (${gap > 0 ? 'overpaid' : 'underpaid'} vs carried-over balance) so this ties to the bank Statement Balance.`;
       balanceNote.classList.remove('hidden');
     } else {
       balanceNote.classList.add('hidden');
@@ -10037,21 +10055,23 @@ async function saveAllCCTransactions() {
       const topKey = Object.keys(counts).sort((a,b) => counts[b]-counts[a])[0];
       const [sYear, sMonth] = topKey.split('-').map(Number);
 
-      // Owner's explicit rule: when this card's repayments this period paid
-      // off more than just the carried-over Previous Balance, that excess
-      // (groupTotal minus the bank's own Statement Balance) is treated as
-      // an Ads Fee offset — folded straight into the ad_spend category
-      // itself (not a separate reconciliation line) so the category still
-      // reads as "true net ad spend" and the card's P&L total ties exactly
-      // to the bank Statement Balance. Every individual transaction above
-      // keeps its own real, untouched amount; this is one extra ad_spend
-      // row for whatever's left over. Only fires when there's genuinely
-      // excess to absorb (groupTotal > statement_balance) — the reverse
-      // case (itemized total under the bank number) isn't covered by this
-      // rule and is left as-is.
+      // Owner's explicit rule: whatever gap is left between this card's
+      // itemized/categorized total and the bank's own Statement Balance —
+      // either direction — is treated as an Ads Fee adjustment, folded
+      // straight into the ad_spend category itself (not a separate
+      // reconciliation line), so the card's P&L total always ties exactly
+      // to the bank Statement Balance. Positive gap (itemized total ran
+      // ahead of the bank number, i.e. repayments this period covered more
+      // than just the carried-over balance) → subtract from Ad Spend.
+      // Negative gap (itemized total came in under the bank number, i.e.
+      // repayments didn't even fully clear the carried-over balance,
+      // meaning more is still owed than what got itemized) → add to Ad
+      // Spend. Every individual transaction above keeps its own real,
+      // untouched amount; this is one extra ad_spend row for whatever's
+      // left over either way.
       if (g.statement_balance !== null) {
-        const excess = r2(groupTotal - g.statement_balance);
-        if (excess >= 0.01) {
+        const gap = r2(groupTotal - g.statement_balance); // positive = overpaid, negative = underpaid
+        if (Math.abs(gap) >= 0.01) {
           const adSpendTeam = (() => {
             const teams = groupTxns.filter(t => t.category === 'ad_spend').map(t => t.company_team || null);
             const counted = {};
@@ -10065,8 +10085,10 @@ async function saveAllCCTransactions() {
               year: sYear, month: sMonth,
               channel: 'DM', company_team: adSpendTeam,
               category: 'ad_spend',
-              description: `Ads Fee Offset — ${cardLabel} repaid more than its carried-over balance this period; excess counted against Ad Spend (${MONTHS[sMonth]} ${sYear})`,
-              amount: -excess, credit_card_id: cardId
+              description: gap > 0
+                ? `Ads Fee Offset — ${cardLabel} repaid more than its carried-over balance this period; excess counted against Ad Spend (${MONTHS[sMonth]} ${sYear})`
+                : `Ads Fee Offset — ${cardLabel} repaid less than its carried-over balance this period; shortfall counted against Ad Spend (${MONTHS[sMonth]} ${sYear})`,
+              amount: -gap, credit_card_id: cardId
             }
           });
           saved++;
