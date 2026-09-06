@@ -9527,7 +9527,7 @@ async function loadCostCategories(force = false) {
     { slug:'rental', label:'Office Rental' }, { slug:'admin', label:'Admin' },
     { slug:'wifi', label:'Wifi' }, { slug:'utilities', label:'Water & Electric' },
     { slug:'team_building', label:'Team Building' }, { slug:'cleaning', label:'Cleaning Service' },
-    { slug:'other', label:'Other' }
+    { slug:'other', label:'Other' }, { slug:'cc_reconciliation', label:'CC Statement Reconciliation' }
   ];
   costCategoriesLoaded = true;
 }
@@ -9882,6 +9882,7 @@ function renderCCTransactions() {
   document.getElementById('ccMultiGroupWrap').innerHTML = ccCardGroups.map((g, idx) => {
     const rows = ccTransactions.map((t, i) => ({ t, i })).filter(x => x.t._groupIdx === idx);
     const groupTotal = r2(rows.reduce((s,x) => s + x.t.amount, 0));
+    const adsFeeOffset = (g.statement_balance !== null) ? r2(groupTotal - g.statement_balance) : 0;
     return `
     <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
@@ -9890,6 +9891,7 @@ function renderCCTransactions() {
           <span style="font-weight:400;color:var(--muted);margin-left:8px">
             ${rows.length} txns · Total RM ${fmtNum(groupTotal)}${g.statement_balance !== null ? ` · Statement Balance RM ${fmtNum(g.statement_balance)}` : ''}
           </span>
+          ${adsFeeOffset >= 0.01 ? `<div style="font-weight:400;color:var(--yellow);font-size:11px;margin-top:2px">On save: − RM ${fmtNum(adsFeeOffset)} Ads Fee Offset entry (excess repayment beyond carried-over balance) so this card ties to the bank Statement Balance</div>` : ''}
         </div>
         <select style="font-size:11px;padding:4px 8px;max-width:280px" onchange="handleGroupCardChange(${idx}, this.value)">
           ${ccCardOptionsHTML(g.selectedCardId)}
@@ -9939,22 +9941,23 @@ async function handleCCBulkCategoryChange(selectEl) {
 function updateCCSummary() {
   document.getElementById('ccCount').textContent = ccTransactions.length;
   const rawTotal = r2(ccTransactions.reduce((s,t) => s + t.amount, 0));
-  // Always show the live sum of whatever's currently in the itemized list
-  // below — this used to fall back to the bank's fixed statement balance
-  // whenever the itemized sum exceeded it (meant to hint "these should
-  // converge"), but that silently froze the number: deleting a row never
-  // moved it below the statement balance, so "Total" looked stuck no
-  // matter what got removed. The Statement Balance is already shown right
-  // next to this for comparison, with its own note explaining any gap —
-  // no need for this field to also pretend to be that number.
-  document.getElementById('ccTotal').textContent = `RM ${fmtNum(rawTotal)}`;
+  // If statement balance exists and is less than our total, use statement balance as the
+  // display total — the difference is CR refunds that the bank already netted off
+  const total = (ccStatementBalance !== null && ccStatementBalance < rawTotal) ? ccStatementBalance : rawTotal;
+  document.getElementById('ccTotal').textContent = `RM ${fmtNum(total)}`;
 
   const balanceWrap = document.getElementById('ccBalanceWrap');
   const balanceNote = document.getElementById('ccBalanceNote');
   if (ccStatementBalance !== null) {
     document.getElementById('ccBalance').textContent = `RM ${fmtNum(ccStatementBalance)}`;
     balanceWrap.classList.remove('hidden');
-    balanceNote.classList.toggle('hidden', Math.abs(ccStatementBalance - rawTotal) < 0.01);
+    const excess = r2(rawTotal - ccStatementBalance);
+    if (excess >= 0.01) {
+      balanceNote.textContent = `On save: a RM ${fmtNum(excess)} Ads Fee Offset entry is added (excess repayment beyond carried-over balance) so this ties to the bank Statement Balance.`;
+      balanceNote.classList.remove('hidden');
+    } else {
+      balanceNote.classList.add('hidden');
+    }
   } else {
     balanceWrap.classList.add('hidden');
     balanceNote.classList.add('hidden');
@@ -10027,16 +10030,55 @@ async function saveAllCCTransactions() {
       const cardLabel = cardId ? cardName(cardId) : (g.card_last4 ? `card …${g.card_last4}` : 'unlinked');
       await logAudit('CREATE', 'nec_pl_costs', `Bulk-imported ${groupTxns.length} transactions from credit card statement (${cardLabel}), total RM${groupTotal.toFixed(2)}`);
 
+      // Majority year/month among this group's transactions — shared by
+      // the ads-fee-offset entry below and the CC Tracker statement row.
+      const counts = {};
+      groupTxns.forEach(t => { const k = `${t.year}-${t.month}`; counts[k] = (counts[k]||0)+1; });
+      const topKey = Object.keys(counts).sort((a,b) => counts[b]-counts[a])[0];
+      const [sYear, sMonth] = topKey.split('-').map(Number);
+
+      // Owner's explicit rule: when this card's repayments this period paid
+      // off more than just the carried-over Previous Balance, that excess
+      // (groupTotal minus the bank's own Statement Balance) is treated as
+      // an Ads Fee offset — folded straight into the ad_spend category
+      // itself (not a separate reconciliation line) so the category still
+      // reads as "true net ad spend" and the card's P&L total ties exactly
+      // to the bank Statement Balance. Every individual transaction above
+      // keeps its own real, untouched amount; this is one extra ad_spend
+      // row for whatever's left over. Only fires when there's genuinely
+      // excess to absorb (groupTotal > statement_balance) — the reverse
+      // case (itemized total under the bank number) isn't covered by this
+      // rule and is left as-is.
+      if (g.statement_balance !== null) {
+        const excess = r2(groupTotal - g.statement_balance);
+        if (excess >= 0.01) {
+          const adSpendTeam = (() => {
+            const teams = groupTxns.filter(t => t.category === 'ad_spend').map(t => t.company_team || null);
+            const counted = {};
+            teams.forEach(t => { const k = t || '(null)'; counted[k] = (counted[k]||0)+1; });
+            const top = Object.keys(counted).sort((a,b) => counted[b]-counted[a])[0];
+            return (top && top !== '(null)') ? top : null;
+          })();
+          await sb('nec_pl_costs', {
+            method: 'POST',
+            body: {
+              year: sYear, month: sMonth,
+              channel: 'DM', company_team: adSpendTeam,
+              category: 'ad_spend',
+              description: `Ads Fee Offset — ${cardLabel} repaid more than its carried-over balance this period; excess counted against Ad Spend (${MONTHS[sMonth]} ${sYear})`,
+              amount: -excess, credit_card_id: cardId
+            }
+          });
+          saved++;
+        }
+      }
+
       // If a card was linked, push THIS GROUP's own statement total into
       // the CC Tracker — never the combined total across every group.
       // Prefer the bank's own printed statement balance for this specific
       // card when we found one; fall back to the sum of its itemized
       // transactions otherwise.
       if (cardId) {
-        const counts = {};
-        groupTxns.forEach(t => { const k = `${t.year}-${t.month}`; counts[k] = (counts[k]||0)+1; });
-        const topKey = Object.keys(counts).sort((a,b) => counts[b]-counts[a])[0];
-        const [sYear, sMonth] = topKey.split('-').map(Number);
         const statementAmountToSave = (g.statement_balance !== null) ? g.statement_balance : groupTotal;
         await upsertCCStatement(cardId, sYear, sMonth, { statement_amount: statementAmountToSave });
       }
@@ -11275,7 +11317,8 @@ INSERT INTO nec_cost_categories (slug, label) VALUES
   ('ad_spend','Ad Spend'), ('ai_tools','AI Tools'), ('gift','Gift'),
   ('staff_pay','Staff Pay'), ('rental','Office Rental'), ('admin','Admin'),
   ('wifi','Wifi'), ('utilities','Water & Electric'), ('team_building','Team Building'),
-  ('cleaning','Cleaning Service'), ('other','Other')
+  ('cleaning','Cleaning Service'), ('other','Other'),
+  ('cc_reconciliation','CC Statement Reconciliation')
 ON CONFLICT (slug) DO NOTHING;
 
 -- Vendor / Supplier Invoices — bills OTHER companies send to us (rent,
