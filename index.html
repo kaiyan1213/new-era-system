@@ -9699,9 +9699,16 @@ async function processCCFile(file) {
         const amt = parseFloat(t.amount || 0);
         if (amt <= 0) return false;
         const desc = (t.description || '').toUpperCase();
-        // Filter obvious payment/transfer lines only
-        if (desc.includes('PAYMENT RECEIVED') || desc.includes('DUITNOW TO') ||
-            desc.includes('TRANSFER / TOP-UP THANK YOU')) return false;
+        // Payment/repayment/transfer lines slip through occasionally when
+        // the AI extraction doesn't flag is_credit correctly — this is a
+        // second, description-based safety net. Broadened to match every
+        // phrasing the backend prompt itself is told to exclude (was only
+        // catching "DUITNOW TO" + one exact "TRANSFER / TOP-UP THANK YOU"
+        // phrasing, missing plain "TRANSFER FROM" and other DUITNOW wording
+        // like "DUITNOW FROM"/"DUITNOW PAYMENT").
+        if (desc.includes('PAYMENT RECEIVED') || desc.includes('DUITNOW') ||
+            desc.includes('TRANSFER FROM') || desc.includes('TRANSFER TO') ||
+            desc.includes('TOP-UP THANK YOU') || desc.includes('TOPUP THANK YOU')) return false;
         return true;
       })
       .map(t => ({ ...t, year: defaultYear, month: defaultMonth }));
