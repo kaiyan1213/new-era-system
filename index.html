@@ -9932,10 +9932,15 @@ async function handleCCBulkCategoryChange(selectEl) {
 function updateCCSummary() {
   document.getElementById('ccCount').textContent = ccTransactions.length;
   const rawTotal = r2(ccTransactions.reduce((s,t) => s + t.amount, 0));
-  // If statement balance exists and is less than our total, use statement balance as the
-  // display total — the difference is CR refunds that the bank already netted off
-  const total = (ccStatementBalance !== null && ccStatementBalance < rawTotal) ? ccStatementBalance : rawTotal;
-  document.getElementById('ccTotal').textContent = `RM ${fmtNum(total)}`;
+  // Always show the live sum of whatever's currently in the itemized list
+  // below — this used to fall back to the bank's fixed statement balance
+  // whenever the itemized sum exceeded it (meant to hint "these should
+  // converge"), but that silently froze the number: deleting a row never
+  // moved it below the statement balance, so "Total" looked stuck no
+  // matter what got removed. The Statement Balance is already shown right
+  // next to this for comparison, with its own note explaining any gap —
+  // no need for this field to also pretend to be that number.
+  document.getElementById('ccTotal').textContent = `RM ${fmtNum(rawTotal)}`;
 
   const balanceWrap = document.getElementById('ccBalanceWrap');
   const balanceNote = document.getElementById('ccBalanceNote');
