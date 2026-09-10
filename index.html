@@ -5348,6 +5348,9 @@ function renderStaffList() {
     other: { label: 'Other', color: '#a3a3a3' },
   };
   const getStaffType = (s) => {
+    // Proxy Manager badge wins even if a leftover (0%-share) Manager Pool
+    // link exists — Proxy Managers are explicitly NOT pool participants.
+    if (s.position === 'proxy_manager') return POSITION_LABELS.proxy_manager;
     if (managerStaffIds.has(s.id)) return { label: 'Manager', color: 'var(--accent)' };
     if (s.staff_type === 'excluded') return { label: '📁 Data Only', color: '#6b7280' };
     if (s.staff_type === 'admin') return POSITION_LABELS[s.position] || POSITION_LABELS.admin;
