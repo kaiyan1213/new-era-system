@@ -1147,6 +1147,10 @@
           <span style="color:var(--muted)">Revenue (DM+TM+Outsider+Pool)</span>
           <span style="font-family:var(--mono);color:var(--green);font-weight:600" id="plNeRev">—</span>
         </div>
+        <div id="plNeProxyMgrRow" style="display:none;justify-content:space-between;font-size:12px;margin-bottom:4px">
+          <span style="color:var(--muted)">Proxy Manager Income</span>
+          <span style="font-family:var(--mono);color:var(--green);font-weight:600" id="plNeProxyMgr">—</span>
+        </div>
         <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
           <span style="color:var(--muted)">Net Profit</span>
           <span style="font-family:var(--mono);font-weight:600" id="plNeNet">—</span>
@@ -1157,6 +1161,10 @@
         <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
           <span style="color:var(--muted)">Revenue (DM+TM+Shared)</span>
           <span style="font-family:var(--mono);color:var(--green);font-weight:600" id="plAcRev">—</span>
+        </div>
+        <div id="plAcProxyMgrRow" style="display:none;justify-content:space-between;font-size:12px;margin-bottom:4px">
+          <span style="color:var(--muted)">Proxy Manager Income</span>
+          <span style="font-family:var(--mono);color:var(--green);font-weight:600" id="plAcProxyMgr">—</span>
         </div>
         <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
           <span style="color:var(--muted)">Net Profit</span>
@@ -8630,6 +8638,11 @@ async function loadPL() {
     // income (total_net_payable minus whatever order revenue this proxy
     // already contributed) without double-counting the order portion.
     const proxyOrderRevenue = {};
+    // Proxy Managers' own-proxy income that exceeds their flat salary —
+    // tracked SEPARATELY from revBucket (not folded into "Revenue") so it
+    // shows as its own distinct line on the NE/AC company cards, but still
+    // added into Net Profit since it's real money for that team.
+    const proxyManagerIncomeByTeam = { NE: 0, AC: 0 };
 
     for (const bd of breakdowns) {
       if (excludedProxyIds.has(bd.proxy_id)) continue; // excluded/data-only account — never touches P&L
@@ -8858,22 +8871,21 @@ async function loadPL() {
       }
       // A Proxy Manager's own Coway proxy usually earns more than their
       // flat salary — the excess belongs to the company (it's what gets
-      // invoiced back from them in Payroll), not to them. That excess is
-      // real revenue for whichever team (AC/NE) they belong to, so credit
-      // it into the SAME bucket their salary cost just landed in —
-      // otherwise this bucket only ever shows their cost with nothing
-      // offsetting it, understating that team's true profit. Only the
-      // non-order portion (passive income + allowances) is credited here;
-      // any order-based commission from their own proxy was already
-      // bucketed above via proxyOrderRevenue, so it's subtracted out to
-      // avoid double-counting.
+      // invoiced back from them in Payroll), not to them. Tracked as its
+      // own separate "Proxy Manager Income" figure (NOT folded into the
+      // team's Revenue line) so it's shown distinctly, per owner request —
+      // but still added into that team's Net Profit below since it's real
+      // money for the company. Only the non-order portion (passive income
+      // + allowances) counts here; any order-based commission from their
+      // own proxy was already bucketed above via proxyOrderRevenue, so
+      // it's subtracted out to avoid double-counting.
       if ((staff?.position || '').toLowerCase() === 'proxy_manager' && staff?.own_proxy_id) {
         const ownProxyIncome = p.own_proxy_offset || 0;
         const alreadyBucketed = proxyOrderRevenue[staff.own_proxy_id] || 0;
         const nonOrderIncome = r2(ownProxyIncome - alreadyBucketed);
         if (nonOrderIncome !== 0) {
-          revBucket[sharedBucket] = r2((revBucket[sharedBucket] || 0) + nonOrderIncome);
-          addTooltipDetail(sharedBucket, 'Proxy Manager Own Proxy Income', staffName, nonOrderIncome);
+          const teamKey = team === 'Alpha C' ? 'AC' : 'NE';
+          proxyManagerIncomeByTeam[teamKey] = r2(proxyManagerIncomeByTeam[teamKey] + nonOrderIncome);
         }
       }
     });
@@ -8969,8 +8981,10 @@ async function loadPL() {
     const acRevFromBuckets = r2(AC_BUCKETS.reduce((s,b) => s + (revBucket[b] || 0), 0));
     const neCost = r2(NE_BUCKETS.reduce((s,b) => s + costByBucket8[b], 0));
     const acCost = r2(AC_BUCKETS.reduce((s,b) => s + costByBucket8[b], 0));
-    const neNet = r2(neRevFromBuckets - neCost);
-    const acNet = r2(acRevFromBuckets - acCost);
+    // Proxy Manager Income is shown as its own line (not folded into
+    // Revenue above) but still counts toward each team's real Net Profit.
+    const neNet = r2(neRevFromBuckets - neCost + proxyManagerIncomeByTeam.NE);
+    const acNet = r2(acRevFromBuckets - acCost + proxyManagerIncomeByTeam.AC);
 
     // Headline: total payslip (NE + AC combined, actual money received).
     // Per proxy/year/month, prefer the proxy_invoices figure when one
@@ -9051,6 +9065,19 @@ async function loadPL() {
     const acNetEl = document.getElementById('plAcNet');
     if (neRevEl) neRevEl.textContent = fmt(neRevFromBuckets);
     if (acRevEl) acRevEl.textContent = fmt(acRevFromBuckets);
+    // Proxy Manager Income — shown as its own row, only when there's
+    // actually a Proxy Manager on that team this period (hidden otherwise
+    // to avoid an always-"RM 0.00" row cluttering the card).
+    const neProxyMgrRow = document.getElementById('plNeProxyMgrRow');
+    const acProxyMgrRow = document.getElementById('plAcProxyMgrRow');
+    if (neProxyMgrRow) {
+      neProxyMgrRow.style.display = proxyManagerIncomeByTeam.NE !== 0 ? 'flex' : 'none';
+      document.getElementById('plNeProxyMgr').textContent = fmt(proxyManagerIncomeByTeam.NE);
+    }
+    if (acProxyMgrRow) {
+      acProxyMgrRow.style.display = proxyManagerIncomeByTeam.AC !== 0 ? 'flex' : 'none';
+      document.getElementById('plAcProxyMgr').textContent = fmt(proxyManagerIncomeByTeam.AC);
+    }
     if (neNetEl) { neNetEl.textContent = fmt(neNet); neNetEl.style.color = neNet>=0?'var(--green)':'var(--red)'; }
     if (acNetEl) { acNetEl.textContent = fmt(acNet); acNetEl.style.color = acNet>=0?'var(--green)':'var(--red)'; }
 
