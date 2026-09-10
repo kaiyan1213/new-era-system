@@ -8625,6 +8625,11 @@ async function loadPL() {
     // DM/TM: revenue = payslip amount × proportion
     // Outsider cost tracked per staff_name for tooltip
     const outsiderCostByStaff = {}; // display_name -> com_from_payslip total
+    // Sum of order-level commission already bucketed above, per proxy_id —
+    // used below to credit a Proxy Manager's own-proxy PASSIVE/allowance
+    // income (total_net_payable minus whatever order revenue this proxy
+    // already contributed) without double-counting the order portion.
+    const proxyOrderRevenue = {};
 
     for (const bd of breakdowns) {
       if (excludedProxyIds.has(bd.proxy_id)) continue; // excluded/data-only account — never touches P&L
@@ -8645,6 +8650,7 @@ async function loadPL() {
           // This is most accurate — reflects real channel revenue without passive income distortion
           if (com > 0) {
             revBucket[bucket] = r2((revBucket[bucket] || 0) + com);
+            proxyOrderRevenue[bd.proxy_id] = r2((proxyOrderRevenue[bd.proxy_id] || 0) + com);
             if (bucket === 'Outsider') {
               const sName = assign?.staff_name || (assign?.staff_id ? plStaffMap[assign.staff_id]?.name : null) || '(unassigned)';
               outsiderCostByStaff[sName] = (outsiderCostByStaff[sName] || 0) + com;
@@ -8670,7 +8676,7 @@ async function loadPL() {
     let payFilter = `year=eq.${year}`;
     if (month) payFilter += `&month=eq.${month}`;
     const payrollRows = await sb('nec_payroll', { filter: payFilter, select: 'staff_id,month,commission_earned,base_salary,bonus,claim_amount,deductions,epf_employee,commission_type,record_type,own_proxy_offset' });
-    const allStaff = await sb('nec_staff', { select: 'id,name,staff_type,channel,company_team,bank_directory_id,position' });
+    const allStaff = await sb('nec_staff', { select: 'id,name,staff_type,channel,company_team,bank_directory_id,position,own_proxy_id' });
     const staffMap = {};
     allStaff.forEach(s => staffMap[s.id] = s);
     // Shared staff split
@@ -8849,6 +8855,26 @@ async function loadPL() {
         const roleLabel = pos.includes('editor') ? 'Editor Salary' : pos.includes('content') ? 'Content Creator Salary' : pos.includes('proxy') ? 'Proxy Manager Salary' : pos.includes('other') ? 'Other Salary' : 'Admin Salary';
         addCost(sharedBucket, roleLabel, outlay);
         addTooltipDetail(sharedBucket, roleLabel, staffName, outlay);
+      }
+      // A Proxy Manager's own Coway proxy usually earns more than their
+      // flat salary — the excess belongs to the company (it's what gets
+      // invoiced back from them in Payroll), not to them. That excess is
+      // real revenue for whichever team (AC/NE) they belong to, so credit
+      // it into the SAME bucket their salary cost just landed in —
+      // otherwise this bucket only ever shows their cost with nothing
+      // offsetting it, understating that team's true profit. Only the
+      // non-order portion (passive income + allowances) is credited here;
+      // any order-based commission from their own proxy was already
+      // bucketed above via proxyOrderRevenue, so it's subtracted out to
+      // avoid double-counting.
+      if ((staff?.position || '').toLowerCase() === 'proxy_manager' && staff?.own_proxy_id) {
+        const ownProxyIncome = p.own_proxy_offset || 0;
+        const alreadyBucketed = proxyOrderRevenue[staff.own_proxy_id] || 0;
+        const nonOrderIncome = r2(ownProxyIncome - alreadyBucketed);
+        if (nonOrderIncome !== 0) {
+          revBucket[sharedBucket] = r2((revBucket[sharedBucket] || 0) + nonOrderIncome);
+          addTooltipDetail(sharedBucket, 'Proxy Manager Own Proxy Income', staffName, nonOrderIncome);
+        }
       }
     });
 
