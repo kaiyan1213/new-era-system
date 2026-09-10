@@ -5076,7 +5076,11 @@ async function autoGenerateAdminPayroll(year, month) {
     const candidates = staffList.filter(s =>
       s.staff_type === 'admin' &&
       parseFloat(s.base_salary || 0) > 0 &&
-      !managerStaffIds.has(s.id) &&
+      // Proxy Managers are exempt from the Manager Pool exclusion — a
+      // leftover 0%-share nec_managers row (kept around only because
+      // nec_manager_adjustments history can't be deleted) must not hide
+      // them from their own fixed-salary Payroll record.
+      (s.position === 'proxy_manager' || !managerStaffIds.has(s.id)) &&
       !existingIds.has(s.id)
     );
     for (const s of candidates) {
@@ -6948,7 +6952,9 @@ async function openPayrollEntryModal() {
 
   // Sort staff same as payroll table: NE-DM/TM/Admin/Editor/Content → AC-DM/TM/Admin/Content → Shared → Outsider → Manager
   const getStaffSortKey = (s) => {
-    const isManager = managerStaffIds.has(s.id);
+    // Proxy Managers sort/display as themselves even if a leftover
+    // (0%-share) Manager Pool link exists — see getStaffType() above.
+    const isManager = s.position !== 'proxy_manager' && managerStaffIds.has(s.id);
     if (isManager) return [11, s.name];
     const team = s.company_team || 'New Era';
     const ch = (s.channel || '').toUpperCase();
@@ -6960,7 +6966,7 @@ async function openPayrollEntryModal() {
   };
 
   const getStaffLabel = (s) => {
-    const isManager = managerStaffIds.has(s.id);
+    const isManager = s.position !== 'proxy_manager' && managerStaffIds.has(s.id);
     if (isManager) return 'Manager';
     const team = s.company_team || 'New Era';
     const ch = s.channel || '';
