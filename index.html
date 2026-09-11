@@ -608,7 +608,7 @@
         <div class="page-sub">All proxies grouped by manager — IC, relationship, HP code, monthly payment status</div>
       </div>
       <div style="display:flex;gap:8px">
-        <input type="text" id="directorySearch" placeholder="🔍 Search name / IC / HP code..." oninput="filterDirectoryTable()" style="min-width:240px">
+        <input type="text" id="directorySearch" placeholder="🔍 Search name / IC / HP code / INV number..." oninput="filterDirectoryTable()" style="min-width:260px">
         <select id="dirYear" onchange="loadDirectory()">
           <option value="2025">2025</option>
           <option value="2026" selected>2026</option>
@@ -4079,13 +4079,13 @@ async function loadDirectory() {
               : `<button class="btn btn-green btn-sm" onclick="openRecordPicPaymentModal('${inv.id}')">Mark Paid</button>`;
 
         return `
-          <tr data-search="${(p.name + ' ' + (p.ic_number||'') + ' ' + (p.coway_id||'')).toLowerCase()}">
+          <tr data-search="${(p.name + ' ' + (p.ic_number||'') + ' ' + (p.coway_id||'') + ' ' + (inv?.invoice_number||'')).toLowerCase()}">
             <td><div class="td-name">${p.name}</div><div class="td-muted">${p.ic_number || '—'}</div></td>
             <td class="td-muted">${p.relationship || '—'}</td>
             <td class="td-mono">${p.coway_id || '—'}</td>
             <td class="td-muted">${p.direct || '—'}</td>
             <td class="td-mono">${payslip}</td>
-            <td class="td-mono" style="color:var(--accent)">${invoiced}</td>
+            <td class="td-mono" style="color:var(--accent)">${invoiced}${inv?.invoice_number ? `<div class="td-muted" style="font-size:10px;font-family:var(--mono)">${inv.invoice_number}</div>` : ''}</td>
             <td class="td-mono" style="color:${picAmt > 0 ? 'var(--red)' : 'var(--muted)'}">${inv ? fmt(picAmt) : '—'}</td>
             <td>${paymentCell}</td>
             <td>${picPaymentCell}</td>
