@@ -8761,44 +8761,47 @@ async function loadPL() {
       const staffRec = allStaff.find(s => s.id === p.staff_id) || {};
       const staffName = staffRec.name || p.staff_name || 'Unknown';
 
-      // 1. Manager → clean split:
-      //    TM commission (com_from_payslip) → NE-TM
+      // 1. Manager → clean split (per-category, no cross-bucket leakage):
+      //    TM commission (com_from_payslip, real order-level TM sales) → NE-TM ONLY
       //    Outsider commission (total_com) → Outsider (already in breakdown loop, skip here)
-      //    ALL other costs (claim/bonus/salary/deductions) → NE-Shared (listed clearly)
-      //    Manager Pool = revenue only (no cost shown there)
+      //    ALL manager-pool money (bonus/salary/deductions/NE claim) → Manager Pool bucket
+      //    AC-categorized claim → AC-Shared (already correctly isolated from NE)
       if (p.record_type === 'manager') {
         if (comm === 0 && sal === 0 && bon === 0 && claim === 0) return;
         const sid = p.staff_id;
         const mgrTmEarned = r2(tmEarnedByStaff[sid] || 0);
 
-        // TM commission → NE-TM
+        // Real per-order TM commission → NE-TM (this is Jess's actual TM
+        // sales output this period, not pool-sharing money, so it belongs
+        // here and only here)
         const adjSplit = mgrAdjByStaff[p.staff_id] || null;
         if (mgrTmEarned > 0) {
           addCost('NE-TM', 'Staff Commission (TM)', mgrTmEarned);
           addTooltipDetail('NE-TM', 'Staff Commission (TM)', staffName, mgrTmEarned);
         }
 
-        // Bonus + salary → NE-Shared
+        // Bonus + salary (manager pool payout) → Manager Pool bucket, never NE-Shared/NE-TM
         const nonClaimCost = r2(bon + sal - ded - epf);
         if (nonClaimCost !== 0) {
-          addCost('NE-Shared', 'Manager Expenses', nonClaimCost);
-          addTooltipDetail('NE-Shared', 'Manager Expenses', staffName, nonClaimCost);
+          addCost('Manager Pool', 'Manager Expenses', nonClaimCost);
+          addTooltipDetail('Manager Pool', 'Manager Expenses', staffName, nonClaimCost);
         }
 
-        // Claim: split by category. NE portion → NE-TM if has TM, else NE-Shared. AC → AC-Shared.
+        // Claim: NE portion → Manager Pool bucket (never NE-TM/NE-Shared).
+        // AC portion stays in AC-Shared — Manager Pool bucket only feeds
+        // NE totals (see NE_BUCKETS), so an AC claim must stay AC-side or
+        // it would silently vanish from Alpha C's P&L.
         if (adjSplit) {
           const neAmt = r2(adjSplit.ne);
           const acAmt = r2(adjSplit.ac);
           if (neAmt !== 0) {
-            const claimBucket = mgrTmEarned > 0 ? 'NE-TM' : 'NE-Shared';
-            addCost(claimBucket, 'Staff Claim', neAmt);
-            addTooltipDetail(claimBucket, 'Staff Claim', staffName, neAmt);
+            addCost('Manager Pool', 'Manager Claim (NE)', neAmt);
+            addTooltipDetail('Manager Pool', 'Manager Claim (NE)', staffName, neAmt);
           }
           if (acAmt !== 0) { addCost('AC-Shared', 'Manager Claim (AC)', acAmt); addTooltipDetail('AC-Shared', 'Manager Claim (AC)', staffName, acAmt); }
         } else if (claim !== 0) {
-          const claimBucket = mgrTmEarned > 0 ? 'NE-TM' : 'NE-Shared';
-          addCost(claimBucket, 'Staff Claim', claim);
-          addTooltipDetail(claimBucket, 'Staff Claim', staffName, claim);
+          addCost('Manager Pool', 'Manager Claim (NE)', claim);
+          addTooltipDetail('Manager Pool', 'Manager Claim (NE)', staffName, claim);
         }
         return;
       }
@@ -9167,7 +9170,7 @@ async function loadPL() {
           <span style="color:var(--muted)">Pool Revenue (from manager payslips)</span>
           <span style="font-family:var(--mono);color:var(--green);font-weight:600">RM ${fmtNum(rev)}</span>
         </div>
-        <div style="font-size:10px;color:var(--muted);margin-bottom:6px">Manager commission splits paid via this pool. Individual costs listed in NE-Shared.</div>` :
+        <div style="font-size:10px;color:var(--muted);margin-bottom:6px">Manager commission splits paid via this pool (bonus/salary/claim). TM order commission is booked separately under NE-TM.</div>` :
         (!isShared ? `
         <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px">
           <span style="color:var(--muted)">Revenue</span>
@@ -9188,14 +9191,13 @@ async function loadPL() {
         <div style="font-size:12px;font-weight:700;color:${color};margin-bottom:2px">${label}</div>
         ${!isShared && !isManager ? `<div style="font-size:10px;color:var(--muted);margin-bottom:8px">${pct}% of total revenue</div>` : '<div style="margin-bottom:8px"></div>'}
         ${revSection}
-        ${!isManager ? `
         <div style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Costs</div>
         <div style="display:flex;flex-direction:column;gap:1px;margin-bottom:4px">${costRows}</div>
         <div style="display:flex;justify-content:space-between;font-size:11px;border-top:1px solid var(--border);padding-top:4px;margin-top:4px">
           <span style="color:var(--muted)">Total Cost</span>
           <span style="font-family:var(--mono);color:var(--red);font-weight:600">RM ${fmtNum(isOutsider ? displayCost : cost)}</span>
         </div>
-        ${netSection}` : ''}
+        ${netSection}
       </div>`;
     }).join('');
 
