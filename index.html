@@ -8664,7 +8664,22 @@ async function loadPL() {
           if (!o.order_no) return;
           const assignKey = `${String(bd.proxy_id)}|${String(o.order_no)}`;
           const assign = plAssignMap[assignKey];
-          const bucket = assignToBucket(assign?.commission_algo, assign?.team, assign?.channel);
+          // For DM/TM orders, revenue must land in the SAME bucket as that
+          // staff's cost (which already uses liveTeamForStaff — a
+          // staff-level majority vote / profile fallback, not a per-order
+          // tag). A DM/TM staff belongs to one company; if a couple of
+          // their orders happen to be tagged with a different/blank team
+          // (e.g. ran through a differently-tagged proxy), the whole
+          // staff's revenue should still follow the staff, not scatter
+          // across NE/AC buckets — otherwise a team's order count/revenue
+          // undercounts vs. what's actually confirmed for that staff on
+          // the Auto Commission page, while the matching cost still lands
+          // as one lump in the majority bucket.
+          let effTeam = assign?.team;
+          if (assign?.staff_id && (assign?.commission_algo === 'dm' || assign?.commission_algo === 'tm')) {
+            effTeam = liveTeamForStaff(assign.staff_id, assign?.team || plStaffMap[assign.staff_id]?.company_team || 'New Era');
+          }
+          const bucket = assignToBucket(assign?.commission_algo, effTeam, assign?.channel);
           const com = parseFloat(o.total_com || 0);
 
           // ALL buckets: revenue = total_com directly (actual Coway commission paid)
@@ -8748,6 +8763,21 @@ async function loadPL() {
     // 4. Sales TM staff → NE-TM (commission + claim)
     // 5. Shared admin staff → NE-Shared / AC-Shared split
     // 6. Non-sales admin (Samantha, etc.) → NE-Shared
+    //
+    // A pool manager normally has ONE payroll row (record_type='manager')
+    // that bundles their personal order commission + pool settlement
+    // together — for that normal case, mgrTmEarned (order-level TM
+    // commission, tracked independently via nec_order_assignments) is the
+    // ONLY place their real TM sales commission ever gets counted, so it
+    // correctly belongs in NE-TM. But some managers (e.g. Jess) ALSO get a
+    // separate record_type='staff' row for their own personal TM
+    // commission (see task: "Restore Jess's clobbered TM payroll + clean
+    // manager row") — in that case the staff row's own commission_earned
+    // ALREADY is that same TM commission, so also adding mgrTmEarned on
+    // the manager row double-counts the identical underlying orders.
+    // staffIdsWithStaffRow lets the manager branch below detect this and
+    // skip its own mgrTmEarned booking when a staff row already covers it.
+    const staffIdsWithStaffRow = new Set(payrollRows.filter(r => r.record_type === 'staff').map(r => r.staff_id));
     payrollRows.forEach(p => {
       const comm = parseFloat(p.commission_earned || 0);
       const sal = parseFloat(p.base_salary || 0);
@@ -8772,11 +8802,17 @@ async function loadPL() {
       if (p.record_type === 'manager') {
         if (comm === 0 && sal === 0 && bon === 0 && claim === 0) return;
         const sid = p.staff_id;
-        const mgrTmEarned = r2(tmEarnedByStaff[sid] || 0);
+        // Skip when this manager ALSO has a separate staff row this period
+        // (e.g. Jess) — her staff row's own commission_earned already IS
+        // this same TM order commission, so booking it again here via
+        // order-level tracking would double it in NE-TM's "Staff
+        // Commission (TM)" line (two entries under her name, same orders).
+        const mgrTmEarned = staffIdsWithStaffRow.has(sid) ? 0 : r2(tmEarnedByStaff[sid] || 0);
 
         // Real per-order TM commission → NE-TM (this is the manager's actual
         // TM sales output this period, not pool-sharing money, so it belongs
-        // here and only here)
+        // here and only here) — only when there's no separate staff row
+        // already covering it (see mgrTmEarned above).
         const adjSplit = mgrAdjByStaff[p.staff_id] || null;
         if (mgrTmEarned > 0) {
           addCost('NE-TM', 'Staff Commission (TM)', mgrTmEarned);
@@ -9125,7 +9161,14 @@ async function loadPL() {
           if (!o.order_no) return;
           const assignKey = `${String(bd.proxy_id)}|${String(o.order_no)}`;
           const assign = plAssignMap[assignKey];
-          const bk = assignToBucket(assign?.commission_algo, assign?.team, assign?.channel);
+          // Same staff-level team resolution as the revenue loop above —
+          // keeps the displayed order count consistent with the dollar
+          // figure (both must agree with what's shown on Auto Commission).
+          let effTeam = assign?.team;
+          if (assign?.staff_id && (assign?.commission_algo === 'dm' || assign?.commission_algo === 'tm')) {
+            effTeam = liveTeamForStaff(assign.staff_id, assign?.team || plStaffMap[assign.staff_id]?.company_team || 'New Era');
+          }
+          const bk = assignToBucket(assign?.commission_algo, effTeam, assign?.channel);
           orderCountByBucket[bk] = (orderCountByBucket[bk] || 0) + 1;
         });
       } catch(e) {}
