@@ -7465,6 +7465,14 @@ async function confirmManagerToPayroll(managerId) {
     await logAudit('UPDATE', 'nec_payroll', `Confirmed ${m.name}'s manager settlement for ${MONTHS[month]} ${year} into Payroll — Com ${fmt(t.comTotal)} (Manager Comm ${fmt(t.commTotal)} + Manager Invoice ${fmt(t.invoiceAmt)} + Outsider ${fmt(t.outsiderAmt)}) + Claim ${fmt(t.claimTotal)} + Mistake ${fmt(t.mistakeTotal)} − Acc Below ${fmt(t.accBelowAmt)} = Total RM${t.total.toFixed(2)} (Payroll-side claim, if any, left untouched)`);
     showToast(`${m.name} confirmed to Payroll ✓`);
     loadMgrAdjustments();
+    // Refresh the Payroll tab's own data too — if it's already open in this
+    // same session (or gets switched to right after), it must reflect this
+    // manager settlement immediately rather than showing whatever it last
+    // fetched before Confirm was clicked. Every other function that writes
+    // to nec_payroll already does this; this one didn't, which is exactly
+    // the kind of gap that makes a just-confirmed row look like it "didn't
+    // save" even though it's sitting correctly in the database.
+    if (document.getElementById('payrollTableBody')) loadPayroll();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
