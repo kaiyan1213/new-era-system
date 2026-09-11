@@ -1144,7 +1144,7 @@
       <div style="background:var(--surface);border:1px solid #2563eb;border-radius:8px;padding:14px;border-left:4px solid #2563eb">
         <div style="font-size:11px;font-weight:700;color:#2563eb;text-transform:uppercase;margin-bottom:8px">🏢 New Era Company</div>
         <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
-          <span style="color:var(--muted)">Revenue (DM+TM+Outsider+Pool)</span>
+          <span style="color:var(--muted)">Revenue (DM+TM+Outsider)</span>
           <span style="font-family:var(--mono);color:var(--green);font-weight:600" id="plNeRev">—</span>
         </div>
         <div id="plNeProxyMgrRow" style="display:none;justify-content:space-between;font-size:12px;margin-bottom:4px">
@@ -8764,15 +8764,18 @@ async function loadPL() {
       // 1. Manager → clean split (per-category, no cross-bucket leakage):
       //    TM commission (com_from_payslip, real order-level TM sales) → NE-TM ONLY
       //    Outsider commission (total_com) → Outsider (already in breakdown loop, skip here)
-      //    ALL manager-pool money (bonus/salary/deductions/NE claim) → Manager Pool bucket
-      //    AC-categorized claim → AC-Shared (already correctly isolated from NE)
+      //    ALL other manager-pool money (bonus/salary/deductions/NE claim) → NE-Shared,
+      //    NEVER NE-TM — NE-TM must only ever contain real TM-order money.
+      //    Manager Pool bucket/card is not tracked in P&L (pool contribution
+      //    roughly nets against these same payouts, so it's excluded from
+      //    both Revenue and Cost per business decision — see NE_BUCKETS).
       if (p.record_type === 'manager') {
         if (comm === 0 && sal === 0 && bon === 0 && claim === 0) return;
         const sid = p.staff_id;
         const mgrTmEarned = r2(tmEarnedByStaff[sid] || 0);
 
-        // Real per-order TM commission → NE-TM (this is Jess's actual TM
-        // sales output this period, not pool-sharing money, so it belongs
+        // Real per-order TM commission → NE-TM (this is the manager's actual
+        // TM sales output this period, not pool-sharing money, so it belongs
         // here and only here)
         const adjSplit = mgrAdjByStaff[p.staff_id] || null;
         if (mgrTmEarned > 0) {
@@ -8780,28 +8783,27 @@ async function loadPL() {
           addTooltipDetail('NE-TM', 'Staff Commission (TM)', staffName, mgrTmEarned);
         }
 
-        // Bonus + salary (manager pool payout) → Manager Pool bucket, never NE-Shared/NE-TM
+        // Bonus + salary → NE-Shared (never NE-TM)
         const nonClaimCost = r2(bon + sal - ded - epf);
         if (nonClaimCost !== 0) {
-          addCost('Manager Pool', 'Manager Expenses', nonClaimCost);
-          addTooltipDetail('Manager Pool', 'Manager Expenses', staffName, nonClaimCost);
+          addCost('NE-Shared', 'Manager Expenses', nonClaimCost);
+          addTooltipDetail('NE-Shared', 'Manager Expenses', staffName, nonClaimCost);
         }
 
-        // Claim: NE portion → Manager Pool bucket (never NE-TM/NE-Shared).
-        // AC portion stays in AC-Shared — Manager Pool bucket only feeds
-        // NE totals (see NE_BUCKETS), so an AC claim must stay AC-side or
-        // it would silently vanish from Alpha C's P&L.
+        // Claim: NE portion → NE-Shared always (never conditionally NE-TM —
+        // that was the bug causing manager-pool claim to pollute NE-TM's
+        // "Staff Claim" figure). AC portion → AC-Shared.
         if (adjSplit) {
           const neAmt = r2(adjSplit.ne);
           const acAmt = r2(adjSplit.ac);
           if (neAmt !== 0) {
-            addCost('Manager Pool', 'Manager Claim (NE)', neAmt);
-            addTooltipDetail('Manager Pool', 'Manager Claim (NE)', staffName, neAmt);
+            addCost('NE-Shared', 'Manager Claim (NE)', neAmt);
+            addTooltipDetail('NE-Shared', 'Manager Claim (NE)', staffName, neAmt);
           }
           if (acAmt !== 0) { addCost('AC-Shared', 'Manager Claim (AC)', acAmt); addTooltipDetail('AC-Shared', 'Manager Claim (AC)', staffName, acAmt); }
         } else if (claim !== 0) {
-          addCost('Manager Pool', 'Manager Claim (NE)', claim);
-          addTooltipDetail('Manager Pool', 'Manager Claim (NE)', staffName, claim);
+          addCost('NE-Shared', 'Manager Claim (NE)', claim);
+          addTooltipDetail('NE-Shared', 'Manager Claim (NE)', staffName, claim);
         }
         return;
       }
@@ -8983,10 +8985,15 @@ async function loadPL() {
     const costByBucket8 = {};
     BUCKETS8.forEach(b => { costByBucket8[b] = r2(Object.values(costCat[b] || {}).reduce((s,v) => s+v, 0)); });
 
-    const NE_BUCKETS = ['NE-DM','NE-TM','NE-Shared','Outsider','Manager Pool'];
+    // Manager Pool deliberately excluded from NE_BUCKETS — pool
+    // contribution (revenue) and manager payouts (cost) roughly cancel
+    // each other out and aren't part of New Era's real DM/TM/Outsider
+    // business, so per business decision this bucket doesn't factor into
+    // either the "By Team" cards or the NE Company Revenue/Net figures.
+    const NE_BUCKETS = ['NE-DM','NE-TM','NE-Shared','Outsider'];
     const AC_BUCKETS = ['AC-DM','AC-TM','AC-Shared'];
 
-    // NE Total Revenue = NE payslip (proxies under NE staff) + Manager Pool + Outsider
+    // NE Total Revenue = NE payslip (proxies under NE staff) + Outsider
     // Use total_com from revBucket for buckets, payslip for headline
     const neRevFromBuckets = r2(NE_BUCKETS.reduce((s,b) => s + (revBucket[b] || 0), 0));
     const acRevFromBuckets = r2(AC_BUCKETS.reduce((s,b) => s + (revBucket[b] || 0), 0));
@@ -9105,7 +9112,9 @@ async function loadPL() {
     };
 
     // Order: NE-DM, NE-TM, NE-Shared, AC-DM, AC-TM, AC-Shared, Outsider, Manager Pool
-    const DISPLAY_ORDER = ['NE-DM','NE-TM','NE-Shared','AC-DM','AC-TM','AC-Shared','Outsider','Manager Pool'];
+    // Manager Pool card removed from display per business decision (not
+    // tracked in P&L — see NE_BUCKETS comment above).
+    const DISPLAY_ORDER = ['NE-DM','NE-TM','NE-Shared','AC-DM','AC-TM','AC-Shared','Outsider'];
 
     // Count orders per bucket using plAssignMap (same logic as revenue)
     const orderCountByBucket = {};
