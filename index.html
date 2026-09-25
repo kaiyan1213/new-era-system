@@ -1087,6 +1087,7 @@
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost" onclick="openCCStatementModal()">📤 Upload Credit Card Statement</button>
+        <button class="btn btn-ghost" onclick="openPMPIModal()">+ Add Proxy Manager PI</button>
         <button class="btn btn-primary" onclick="openCostEntryModal()">Add Cost Entry</button>
       </div>
     </div>
@@ -1171,6 +1172,20 @@
           <span style="font-family:var(--mono);font-weight:600" id="plAcNet">—</span>
         </div>
       </div>
+    </div>
+
+    <!-- Proxy Manager PI entries — 100% company profit, folded into the
+         "Proxy Manager Income" line on the NE/AC cards above -->
+    <div class="table-wrap" style="margin-bottom:20px">
+      <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">Proxy Manager PI (this period)</div>
+      <table>
+        <thead>
+          <tr><th>Staff</th><th>Team</th><th>Amount</th><th>Notes</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="pmPiTableBody">
+          <tr><td colspan="5"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+        </tbody>
+      </table>
     </div>
 
     <!-- By Team cards -->
@@ -2559,6 +2574,56 @@
     <div class="form-actions">
       <button class="btn btn-ghost" onclick="closeModal('modalCostEntry')">Cancel</button>
       <button class="btn btn-primary" onclick="saveCostEntry()">Save Cost</button>
+    </div>
+  </div>
+</div>
+
+<!-- Proxy Manager PI Modal — 100% company profit, not split/shared -->
+<div class="modal-bg hidden" id="modalProxyManagerPI">
+  <div class="modal">
+    <div class="modal-title" id="pmPiModalTitle">Add Proxy Manager PI</div>
+    <input type="hidden" id="pmPiEditId" value="">
+    <div class="form-grid">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Year</label>
+          <select id="pmPiYear" class="form-input"><option value="2025">2025</option><option value="2026" selected>2026</option></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Month</label>
+          <select id="pmPiMonth" class="form-input">
+            <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
+            <option value="4">Apr</option><option value="5">May</option><option value="6">Jun</option>
+            <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
+            <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Proxy Manager</label>
+          <select id="pmPiStaffId" class="form-input" onchange="pmPiSyncTeamFromStaff()"></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Team</label>
+          <select id="pmPiTeam" class="form-input">
+            <option value="New Era">New Era</option>
+            <option value="Alpha C">Alpha C</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Amount (RM)</label>
+        <input type="number" id="pmPiAmount" class="form-input" placeholder="0.00" step="0.01">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes (optional)</label>
+        <input type="text" id="pmPiNotes" class="form-input" placeholder="e.g. Paid in on the 25th">
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalProxyManagerPI')">Cancel</button>
+      <button class="btn btn-primary" onclick="savePMPIEntry()">Save</button>
     </div>
   </div>
 </div>
@@ -8939,6 +9004,25 @@ async function loadPL() {
       }
     });
 
+    // ── PROXY MANAGER PI ── money certain proxy managers pay into the
+    // company on a fixed schedule (e.g. 25th of each month) — 100% company
+    // profit, not shared/split with anyone (unlike the pool managers' PI
+    // in nec_pi_records/nec_pi_sharing, which IS split among the 4 pool
+    // managers). Folded into the same proxyManagerIncomeByTeam line shown
+    // on the NE/AC Company summary cards as "Proxy Manager Income".
+    const pmPiFilter = month ? `year=eq.${year}&month=eq.${month}` : `year=eq.${year}`;
+    const pmPiRows = await sb('nec_proxy_manager_pi', { filter: pmPiFilter, select: 'team,amount' }).catch(() => []);
+    pmPiRows.forEach(r => {
+      const amt = parseFloat(r.amount || 0);
+      if (amt === 0) return;
+      const teamKey = r.team === 'Alpha C' ? 'AC' : 'NE';
+      proxyManagerIncomeByTeam[teamKey] = r2(proxyManagerIncomeByTeam[teamKey] + amt);
+    });
+    // Populate the "Proxy Manager PI (this period)" list table (separate
+    // fetch inside loadProxyManagerPI since it needs id+staff name+notes
+    // for display/delete, not just team+amount like the sum above).
+    loadProxyManagerPI(year, month);
+
     // ── CC/MANUAL COSTS ──
     // Determine which CC card belongs to AC (Jenny CIMB = KY Alliance)
     // All others = NE
@@ -9370,6 +9454,133 @@ async function saveCostEntry() {
     await logAudit('CREATE', 'nec_pl_costs', `Cost: ${body.category} — ${body.channel} — RM${body.amount} (${MONTHS[body.month]} ${body.year})`);
     loadPL();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ──────────────────────────────────────────────────────────────
+// Proxy Manager PI — money certain proxy managers (Lim Ze Hao, Elysa Lee
+// Xing Wan, Wong Li Wen, etc) pay INTO the company on a fixed schedule
+// (e.g. around the 25th). 100% company profit, never split/shared — see
+// the nec_proxy_manager_pi table comment in SETUP_SQL for how this differs
+// from the pool managers' PI (nec_pi_records/nec_pi_sharing).
+// ──────────────────────────────────────────────────────────────
+let pmPiStaffOptions = [];
+
+async function openPMPIModal(editId) {
+  if (!pmPiStaffOptions.length) {
+    pmPiStaffOptions = await sb('nec_staff', { select: 'id,name,company_team', filter: 'order=name.asc' }).catch(() => []);
+  }
+  const sel = document.getElementById('pmPiStaffId');
+  sel.innerHTML = pmPiStaffOptions.map(s => `<option value="${s.id}" data-team="${s.company_team || ''}">${s.name}</option>`).join('');
+  document.getElementById('pmPiEditId').value = '';
+  document.getElementById('pmPiModalTitle').textContent = 'Add Proxy Manager PI';
+  const now = new Date();
+  document.getElementById('pmPiMonth').value = now.getMonth() + 1;
+  document.getElementById('pmPiYear').value = now.getFullYear();
+  document.getElementById('pmPiAmount').value = '';
+  document.getElementById('pmPiNotes').value = '';
+
+  if (editId) {
+    const rows = await sb('nec_proxy_manager_pi', { filter: `id=eq.${editId}` }).catch(() => []);
+    const row = rows[0];
+    if (row) {
+      document.getElementById('pmPiEditId').value = row.id;
+      document.getElementById('pmPiModalTitle').textContent = 'Edit Proxy Manager PI';
+      document.getElementById('pmPiYear').value = row.year;
+      document.getElementById('pmPiMonth').value = row.month;
+      if (row.staff_id) sel.value = row.staff_id;
+      document.getElementById('pmPiTeam').value = row.team || 'New Era';
+      document.getElementById('pmPiAmount').value = row.amount;
+      document.getElementById('pmPiNotes').value = row.notes || '';
+    }
+  } else {
+    pmPiSyncTeamFromStaff();
+  }
+  openModal('modalProxyManagerPI');
+}
+
+// Default the Team select to whichever company_team the selected staff's
+// profile has, so the common case (each of the 3 named people always pays
+// into their own team) needs no manual change — still overridable.
+function pmPiSyncTeamFromStaff() {
+  const sel = document.getElementById('pmPiStaffId');
+  const opt = sel.options[sel.selectedIndex];
+  const team = opt?.dataset.team;
+  if (team === 'Alpha C' || team === 'New Era') document.getElementById('pmPiTeam').value = team;
+}
+
+async function savePMPIEntry() {
+  const editId = document.getElementById('pmPiEditId').value;
+  const staffId = document.getElementById('pmPiStaffId').value;
+  const amount = parseFloat(document.getElementById('pmPiAmount').value);
+  if (!staffId) return showToast('Select a proxy manager', 'error');
+  if (!amount) return showToast('Enter amount', 'error');
+  const body = {
+    staff_id: staffId,
+    team: document.getElementById('pmPiTeam').value,
+    year: parseInt(document.getElementById('pmPiYear').value),
+    month: parseInt(document.getElementById('pmPiMonth').value),
+    amount,
+    notes: document.getElementById('pmPiNotes').value || null,
+  };
+  const staffName = pmPiStaffOptions.find(s => s.id === staffId)?.name || staffId;
+  try {
+    if (editId) {
+      await sb('nec_proxy_manager_pi', { method: 'PATCH', filter: `id=eq.${editId}`, body });
+      await logAudit('UPDATE', 'nec_proxy_manager_pi', `Proxy Manager PI: ${staffName} — RM${amount} (${MONTHS[body.month]} ${body.year})`);
+    } else {
+      await sb('nec_proxy_manager_pi', { method: 'POST', body });
+      await logAudit('CREATE', 'nec_proxy_manager_pi', `Proxy Manager PI: ${staffName} — RM${amount} (${MONTHS[body.month]} ${body.year})`);
+    }
+    closeModal('modalProxyManagerPI');
+    showToast('Proxy Manager PI saved');
+    loadPL();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function deletePMPIEntry(id, label) {
+  if (!confirm(`Delete this Proxy Manager PI entry${label ? ' (' + label + ')' : ''}?`)) return;
+  try {
+    await sbDelete('nec_proxy_manager_pi', `id=eq.${id}`);
+    await logAudit('DELETE', 'nec_proxy_manager_pi', `Deleted Proxy Manager PI${label ? ': ' + label : ''}`);
+    showToast('Deleted');
+    loadPL();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function loadProxyManagerPI(year, month) {
+  const tbody = document.getElementById('pmPiTableBody');
+  if (!tbody) return;
+  try {
+    if (!pmPiStaffOptions.length) {
+      pmPiStaffOptions = await sb('nec_staff', { select: 'id,name,company_team', filter: 'order=name.asc' }).catch(() => []);
+    }
+    const staffNameMap = {};
+    pmPiStaffOptions.forEach(s => { staffNameMap[s.id] = s.name; });
+    const filter = month ? `year=eq.${year}&month=eq.${month}&order=team.asc` : `year=eq.${year}&order=team.asc`;
+    const rows = await sb('nec_proxy_manager_pi', { filter });
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="5"><div class="empty"><div class="empty-text">No Proxy Manager PI entries this period</div></div></td></tr>`;
+      return;
+    }
+    tbody.innerHTML = rows.map(r => {
+      const name = staffNameMap[r.staff_id] || '—';
+      const label = `${name} — ${MONTHS[r.month]} ${r.year}`;
+      return `<tr>
+        <td>${name}</td>
+        <td class="td-muted">${r.team || '—'}</td>
+        <td class="td-mono">RM${parseFloat(r.amount || 0).toFixed(2)}</td>
+        <td class="td-muted">${r.notes || '—'}</td>
+        <td>
+          <div style="display:flex;gap:4px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" onclick="openPMPIModal('${r.id}')">✎ Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="deletePMPIEntry('${r.id}', '${label.replace(/'/g, "\\'")}')">✕ Delete</button>
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="5"><div class="empty"><div class="empty-text">Error loading: ${e.message}</div></div></td></tr>`;
+  }
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -11453,6 +11664,25 @@ CREATE TABLE IF NOT EXISTS nec_pi_sharing (
   UNIQUE(manager_id, year, month)
 );
 
+-- Proxy Manager PI: money certain proxy managers pay INTO the company on a
+-- fixed schedule (e.g. around the 25th of each month) — 100% company
+-- profit, NOT split/shared with anyone (unlike nec_pi_records/nec_pi_sharing,
+-- which pools and splits PI among the 4 pool managers). staff_id references
+-- the specific proxy manager (Lim Ze Hao, Elysa Lee Xing Wan, Wong Li Wen,
+-- etc — not gated on nec_staff.position='proxy_manager', since some of
+-- these people are currently tagged staff_type='sales'). team decides
+-- whether it folds into NE or AC's Proxy Manager Income line in P&L.
+CREATE TABLE IF NOT EXISTS nec_proxy_manager_pi (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  staff_id uuid REFERENCES nec_staff(id),
+  team text NOT NULL, -- 'New Era' or 'Alpha C'
+  year int NOT NULL,
+  month int NOT NULL,
+  amount numeric(10,2) NOT NULL DEFAULT 0,
+  notes text,
+  created_at timestamptz DEFAULT now()
+);
+
 -- Acc Below manual adjustments: per-manager, per-period entries for items
 -- like Claim/Mistake/Gift/Both-Company-Loan-Claim/Alpha-C-Claim/Return-Back
 -- that aren't automated. Positive amount = manager receives this much;
@@ -11772,7 +12002,7 @@ async function saveManagers() {
 async function testConnection() {
   const result = document.getElementById('connTestResult');
   result.textContent = 'Testing...';
-  const tables = ['proxy_accounts','proxy_invoices','proxy_invoice_payments','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_manager_payslips','nec_manager_adjustments','nec_pi_records','nec_pi_sharing','nec_pl_costs','nec_cost_categories','nec_vendor_invoices','nec_credit_cards','nec_cc_statements','nec_cc_payments','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads','nec_order_assignments','monthly_config'];
+  const tables = ['proxy_accounts','proxy_invoices','proxy_invoice_payments','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_manager_payslips','nec_manager_adjustments','nec_pi_records','nec_pi_sharing','nec_proxy_manager_pi','nec_pl_costs','nec_cost_categories','nec_vendor_invoices','nec_credit_cards','nec_cc_statements','nec_cc_payments','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads','nec_order_assignments','monthly_config'];
   const results = [];
   for (const t of tables) {
     try {
