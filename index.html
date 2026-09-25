@@ -9610,15 +9610,16 @@ async function getNextPMPIDocNumber(year, month) {
 
 // Builds a standalone Proxy Manager PI document — an Invoice (manager
 // still owes New Era) when net_amount > 0, or a Payslip (New Era owes the
-// manager) when net_amount <= 0. Same visual pattern as buildPIDocumentHTML
-// but its own line-item wording (PI paid in vs. base salary deduction) and
-// opposite sign convention (documented at the table).
+// manager) when net_amount <= 0. Same visual pattern as buildPIDocumentHTML,
+// but deliberately generic external wording — this document must never
+// name "PI", "Proxy Manager", or show the amount/deduction breakdown that
+// would reveal how the net figure was derived (per business instruction).
+// It reads like an ordinary consulting/service fee invoice or payslip.
 function buildPMPIDocumentHTML(staff, row, bankInfo) {
   const net = parseFloat(row.net_amount ?? (row.amount - row.deduction_amount));
   const isInv = net > 0;
   const amount = Math.abs(net);
   const co = getCompanyInfo(row.year, row.month);
-  const mathNote = `PI paid in: RM ${fmtNum(row.amount)}. Base salary owed for the period: RM ${fmtNum(row.deduction_amount)}.`;
   if (isInv) {
     return `
       <div class="invoice-preview">
@@ -9629,20 +9630,19 @@ function buildPMPIDocumentHTML(staff, row, bankInfo) {
             <div class="inv-address">${co.addressHtml}</div>
           </div>
           <div>
-            <div class="inv-label">INVOICE — Proxy Manager PI</div>
+            <div class="inv-label">INVOICE</div>
             <div class="inv-meta">No: ${row.doc_number}<br>Date: ${MONTH_FULL[row.month]} ${row.year}</div>
           </div>
         </div>
         <div class="inv-divider"></div>
         <div class="inv-bill-to">Bill To</div>
         <div class="inv-bill-name">${staff.name}</div>
-        <div class="inv-bill-sub">Proxy Manager PI Settlement</div>
+        <div class="inv-bill-sub">Consulting Services</div>
         <table class="inv-table">
           <thead><tr><th>Description</th><th>Amount</th></tr></thead>
           <tbody>
             <tr>
-              <td>PI Settlement for ${MONTH_FULL[row.month]} ${row.year}<br>
-              <span style="font-size:11px;color:#888">${mathNote} PI exceeds the base salary owed — the difference is payable to New Era.</span></td>
+              <td>Consulting Fee for ${MONTH_FULL[row.month]} ${row.year}</td>
               <td style="font-weight:700">RM ${fmtNum(amount)}</td>
             </tr>
           </tbody>
@@ -9670,20 +9670,19 @@ function buildPMPIDocumentHTML(staff, row, bankInfo) {
             <div class="inv-address">${co.addressHtml}</div>
           </div>
           <div>
-            <div class="inv-label" style="color:#16a34a">PAYSLIP — Proxy Manager PI</div>
+            <div class="inv-label" style="color:#16a34a">PAYSLIP</div>
             <div class="inv-meta">No: ${row.doc_number}<br>Date: ${MONTH_FULL[row.month]} ${row.year}</div>
           </div>
         </div>
         <div class="inv-divider"></div>
         <div class="inv-bill-to">Pay To</div>
         <div class="inv-bill-name">${staff.name}</div>
-        <div class="inv-bill-sub">Proxy Manager PI Settlement</div>
+        <div class="inv-bill-sub">Consulting Services</div>
         <table class="inv-table">
           <thead><tr><th>Description</th><th>Amount</th></tr></thead>
           <tbody>
             <tr>
-              <td>PI Settlement for ${MONTH_FULL[row.month]} ${row.year}<br>
-              <span style="font-size:11px;color:#888">${mathNote} Base salary owed exceeds the PI paid in — the balance is payable to the manager.</span></td>
+              <td>Service Fee for ${MONTH_FULL[row.month]} ${row.year}</td>
               <td style="font-weight:700">RM ${fmtNum(amount)}</td>
             </tr>
           </tbody>
@@ -9737,7 +9736,7 @@ async function generatePMPIDocument(id, mode) {
 
   const isInv = net > 0;
   const html = buildPMPIDocumentHTML(staff, row, bankInfo);
-  const title = isInv ? 'Proxy Manager PI Invoice' : 'Proxy Manager PI Payslip';
+  const title = isInv ? 'Invoice' : 'Payslip';
 
   if (mode === 'download') {
     try {
