@@ -1180,10 +1180,10 @@
       <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">Proxy Manager PI (this period)</div>
       <table>
         <thead>
-          <tr><th>Staff</th><th>Team</th><th>Amount</th><th>Notes</th><th>Actions</th></tr>
+          <tr><th>Staff</th><th>Team</th><th>PI Amount</th><th>Deduction (Salary)</th><th>Net</th><th>Doc</th><th>Actions</th></tr>
         </thead>
         <tbody id="pmPiTableBody">
-          <tr><td colspan="5"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+          <tr><td colspan="7"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
         </tbody>
       </table>
     </div>
@@ -2602,7 +2602,7 @@
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Proxy Manager</label>
-          <select id="pmPiStaffId" class="form-input" onchange="pmPiSyncTeamFromStaff()"></select>
+          <select id="pmPiStaffId" class="form-input" onchange="pmPiSyncTeamFromStaff();pmPiSyncDeductionFromStaff()"></select>
         </div>
         <div class="form-group">
           <label class="form-label">Team</label>
@@ -2612,10 +2612,17 @@
           </select>
         </div>
       </div>
-      <div class="form-group">
-        <label class="form-label">Amount (RM)</label>
-        <input type="number" id="pmPiAmount" class="form-input" placeholder="0.00" step="0.01">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">PI Amount (RM)</label>
+          <input type="number" id="pmPiAmount" class="form-input" placeholder="0.00" step="0.01" oninput="pmPiSyncNet()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Deduction — Base Salary Owed (RM)</label>
+          <input type="number" id="pmPiDeduction" class="form-input" placeholder="0.00" step="0.01" oninput="pmPiSyncNet()">
+        </div>
       </div>
+      <div style="font-size:12px;color:var(--muted);margin-top:-4px" id="pmPiNetPreview">Net: RM 0.00</div>
       <div class="form-group">
         <label class="form-label">Notes (optional)</label>
         <input type="text" id="pmPiNotes" class="form-input" placeholder="e.g. Paid in on the 25th">
@@ -9005,18 +9012,21 @@ async function loadPL() {
     });
 
     // ── PROXY MANAGER PI ── money certain proxy managers pay into the
-    // company on a fixed schedule (e.g. 25th of each month) — 100% company
-    // profit, not shared/split with anyone (unlike the pool managers' PI
-    // in nec_pi_records/nec_pi_sharing, which IS split among the 4 pool
-    // managers). Folded into the same proxyManagerIncomeByTeam line shown
-    // on the NE/AC Company summary cards as "Proxy Manager Income".
+    // company on a fixed schedule (e.g. 25th of each month), net of the
+    // flat base_salary (RM1500/2000) New Era owes them for the period —
+    // that salary is a real expense, so only the NET (amount −
+    // deduction_amount) is real company profit, not shared/split with
+    // anyone (unlike the pool managers' PI in nec_pi_records/nec_pi_sharing,
+    // which IS split among the 4 pool managers). Folded into the same
+    // proxyManagerIncomeByTeam line shown on the NE/AC Company summary
+    // cards as "Proxy Manager Income".
     const pmPiFilter = month ? `year=eq.${year}&month=eq.${month}` : `year=eq.${year}`;
-    const pmPiRows = await sb('nec_proxy_manager_pi', { filter: pmPiFilter, select: 'team,amount' }).catch(() => []);
+    const pmPiRows = await sb('nec_proxy_manager_pi', { filter: pmPiFilter, select: 'team,amount,deduction_amount' }).catch(() => []);
     pmPiRows.forEach(r => {
-      const amt = parseFloat(r.amount || 0);
-      if (amt === 0) return;
+      const net = parseFloat(r.amount || 0) - parseFloat(r.deduction_amount || 0);
+      if (net === 0) return;
       const teamKey = r.team === 'Alpha C' ? 'AC' : 'NE';
-      proxyManagerIncomeByTeam[teamKey] = r2(proxyManagerIncomeByTeam[teamKey] + amt);
+      proxyManagerIncomeByTeam[teamKey] = r2(proxyManagerIncomeByTeam[teamKey] + net);
     });
     // Populate the "Proxy Manager PI (this period)" list table (separate
     // fetch inside loadProxyManagerPI since it needs id+staff name+notes
@@ -9467,16 +9477,17 @@ let pmPiStaffOptions = [];
 
 async function openPMPIModal(editId) {
   if (!pmPiStaffOptions.length) {
-    pmPiStaffOptions = await sb('nec_staff', { select: 'id,name,company_team', filter: 'order=name.asc' }).catch(() => []);
+    pmPiStaffOptions = await sb('nec_staff', { select: 'id,name,company_team,base_salary', filter: 'order=name.asc' }).catch(() => []);
   }
   const sel = document.getElementById('pmPiStaffId');
-  sel.innerHTML = pmPiStaffOptions.map(s => `<option value="${s.id}" data-team="${s.company_team || ''}">${s.name}</option>`).join('');
+  sel.innerHTML = pmPiStaffOptions.map(s => `<option value="${s.id}" data-team="${s.company_team || ''}" data-salary="${s.base_salary || 0}">${s.name}</option>`).join('');
   document.getElementById('pmPiEditId').value = '';
   document.getElementById('pmPiModalTitle').textContent = 'Add Proxy Manager PI';
   const now = new Date();
   document.getElementById('pmPiMonth').value = now.getMonth() + 1;
   document.getElementById('pmPiYear').value = now.getFullYear();
   document.getElementById('pmPiAmount').value = '';
+  document.getElementById('pmPiDeduction').value = '';
   document.getElementById('pmPiNotes').value = '';
 
   if (editId) {
@@ -9490,11 +9501,14 @@ async function openPMPIModal(editId) {
       if (row.staff_id) sel.value = row.staff_id;
       document.getElementById('pmPiTeam').value = row.team || 'New Era';
       document.getElementById('pmPiAmount').value = row.amount;
+      document.getElementById('pmPiDeduction').value = row.deduction_amount || 0;
       document.getElementById('pmPiNotes').value = row.notes || '';
     }
   } else {
     pmPiSyncTeamFromStaff();
+    pmPiSyncDeductionFromStaff();
   }
+  pmPiSyncNet();
   openModal('modalProxyManagerPI');
 }
 
@@ -9508,10 +9522,34 @@ function pmPiSyncTeamFromStaff() {
   if (team === 'Alpha C' || team === 'New Era') document.getElementById('pmPiTeam').value = team;
 }
 
+// Default the Deduction field to the selected staff's own flat
+// base_salary (RM1500/2000) — the amount New Era owes them each period,
+// which is netted off against the PI they're paying in. Only applied on
+// a fresh Add (or when switching the staff dropdown), never overwrites a
+// value the user already typed/edited or that was loaded for editing.
+function pmPiSyncDeductionFromStaff() {
+  const sel = document.getElementById('pmPiStaffId');
+  const opt = sel.options[sel.selectedIndex];
+  const salary = parseFloat(opt?.dataset.salary || 0);
+  document.getElementById('pmPiDeduction').value = salary || '';
+  pmPiSyncNet();
+}
+
+function pmPiSyncNet() {
+  const amount = parseFloat(document.getElementById('pmPiAmount').value) || 0;
+  const deduction = parseFloat(document.getElementById('pmPiDeduction').value) || 0;
+  const net = amount - deduction;
+  const el = document.getElementById('pmPiNetPreview');
+  if (net > 0) el.innerHTML = `Net: <strong style="color:var(--red)">RM ${net.toFixed(2)} owed to New Era</strong> (Invoice)`;
+  else if (net < 0) el.innerHTML = `Net: <strong style="color:#16a34a">RM ${Math.abs(net).toFixed(2)} owed to manager</strong> (Payslip)`;
+  else el.textContent = 'Net: RM 0.00 — fully offset, no document needed';
+}
+
 async function savePMPIEntry() {
   const editId = document.getElementById('pmPiEditId').value;
   const staffId = document.getElementById('pmPiStaffId').value;
   const amount = parseFloat(document.getElementById('pmPiAmount').value);
+  const deduction = parseFloat(document.getElementById('pmPiDeduction').value) || 0;
   if (!staffId) return showToast('Select a proxy manager', 'error');
   if (!amount) return showToast('Enter amount', 'error');
   const body = {
@@ -9520,6 +9558,7 @@ async function savePMPIEntry() {
     year: parseInt(document.getElementById('pmPiYear').value),
     month: parseInt(document.getElementById('pmPiMonth').value),
     amount,
+    deduction_amount: deduction,
     notes: document.getElementById('pmPiNotes').value || null,
   };
   const staffName = pmPiStaffOptions.find(s => s.id === staffId)?.name || staffId;
@@ -9547,31 +9586,243 @@ async function deletePMPIEntry(id, label) {
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
+// Sequential doc number for Proxy Manager PI documents (NEC-PMPI-YYYY-MM-###)
+// — its own series, separate from nec_pi_sharing's NEC-PI-... numbering.
+// Assigned once on first print/download, then reused (same pattern as
+// getNextPIDocNumber).
+async function getNextPMPIDocNumber(year, month) {
+  try {
+    const records = await sb('nec_proxy_manager_pi', {
+      filter: `year=eq.${year}&month=eq.${month}&doc_number=not.is.null`,
+      select: 'doc_number'
+    });
+    let maxSeq = 0;
+    records.forEach(r => {
+      const m = (r.doc_number || '').match(/-(\d{3})$/);
+      if (m) maxSeq = Math.max(maxSeq, parseInt(m[1]));
+    });
+    const next = maxSeq + 1;
+    return `NEC-PMPI-${year}-${String(month).padStart(2,'0')}-${String(next).padStart(3,'0')}`;
+  } catch(e) {
+    return `NEC-PMPI-${year}-${String(month).padStart(2,'0')}-001`;
+  }
+}
+
+// Builds a standalone Proxy Manager PI document — an Invoice (manager
+// still owes New Era) when net_amount > 0, or a Payslip (New Era owes the
+// manager) when net_amount <= 0. Same visual pattern as buildPIDocumentHTML
+// but its own line-item wording (PI paid in vs. base salary deduction) and
+// opposite sign convention (documented at the table).
+function buildPMPIDocumentHTML(staff, row, bankInfo) {
+  const net = parseFloat(row.net_amount ?? (row.amount - row.deduction_amount));
+  const isInv = net > 0;
+  const amount = Math.abs(net);
+  const co = getCompanyInfo(row.year, row.month);
+  const mathNote = `PI paid in: RM ${fmtNum(row.amount)}. Base salary owed for the period: RM ${fmtNum(row.deduction_amount)}.`;
+  if (isInv) {
+    return `
+      <div class="invoice-preview">
+        <div class="inv-header">
+          <div>
+            <div class="inv-company-name">${co.name}</div>
+            <div class="inv-reg">${co.reg}</div>
+            <div class="inv-address">${co.addressHtml}</div>
+          </div>
+          <div>
+            <div class="inv-label">INVOICE — Proxy Manager PI</div>
+            <div class="inv-meta">No: ${row.doc_number}<br>Date: ${MONTH_FULL[row.month]} ${row.year}</div>
+          </div>
+        </div>
+        <div class="inv-divider"></div>
+        <div class="inv-bill-to">Bill To</div>
+        <div class="inv-bill-name">${staff.name}</div>
+        <div class="inv-bill-sub">Proxy Manager PI Settlement</div>
+        <table class="inv-table">
+          <thead><tr><th>Description</th><th>Amount</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>PI Settlement for ${MONTH_FULL[row.month]} ${row.year}<br>
+              <span style="font-size:11px;color:#888">${mathNote} PI exceeds the base salary owed — the difference is payable to New Era.</span></td>
+              <td style="font-weight:700">RM ${fmtNum(amount)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="inv-total-row">
+          <div class="inv-total-box">
+            <div class="inv-total-label">Total Amount Due to New Era</div>
+            <div class="inv-total-amount">RM ${fmtNum(amount)}</div>
+          </div>
+        </div>
+        <div class="inv-footer">
+          <strong>Payment Information</strong><br>
+          Bank: ${co.bankName}<br>
+          Account Name: ${co.bankAccountName}<br>
+          Account No: ${co.bankAccountNo}
+        </div>
+      </div>`;
+  }
+  return `
+      <div class="invoice-preview">
+        <div class="inv-header">
+          <div>
+            <div class="inv-company-name">${co.name}</div>
+            <div class="inv-reg">${co.reg}</div>
+            <div class="inv-address">${co.addressHtml}</div>
+          </div>
+          <div>
+            <div class="inv-label" style="color:#16a34a">PAYSLIP — Proxy Manager PI</div>
+            <div class="inv-meta">No: ${row.doc_number}<br>Date: ${MONTH_FULL[row.month]} ${row.year}</div>
+          </div>
+        </div>
+        <div class="inv-divider"></div>
+        <div class="inv-bill-to">Pay To</div>
+        <div class="inv-bill-name">${staff.name}</div>
+        <div class="inv-bill-sub">Proxy Manager PI Settlement</div>
+        <table class="inv-table">
+          <thead><tr><th>Description</th><th>Amount</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>PI Settlement for ${MONTH_FULL[row.month]} ${row.year}<br>
+              <span style="font-size:11px;color:#888">${mathNote} Base salary owed exceeds the PI paid in — the balance is payable to the manager.</span></td>
+              <td style="font-weight:700">RM ${fmtNum(amount)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="inv-total-row">
+          <div class="inv-total-box">
+            <div class="inv-total-label">Total Pay</div>
+            <div class="inv-total-amount" style="color:#16a34a">RM ${fmtNum(amount)}</div>
+          </div>
+        </div>
+        <div class="inv-footer">
+          ${bankInfo && (bankInfo.bank_name || bankInfo.bank_account) ? `
+          <strong>Payment Information</strong><br>
+          Bank: ${bankInfo.bank_name || '—'}<br>
+          Account Name: ${bankInfo.name || staff.name}<br>
+          Account No: ${bankInfo.bank_account || '—'}${bankInfo.ic_number ? `<br>IC: ${bankInfo.ic_number}` : ''}
+          ` : `Payment will be credited to this manager's registered bank account — no bank details on file yet (add them in Bank Details).`}
+        </div>
+      </div>`;
+}
+
+async function generatePMPIDocument(id, mode) {
+  const rows = await sb('nec_proxy_manager_pi', { filter: `id=eq.${id}` }).catch(() => []);
+  const row = rows[0];
+  if (!row) return showToast('Proxy Manager PI record not found', 'error');
+  const net = parseFloat(row.net_amount ?? (row.amount - row.deduction_amount));
+  if (net === 0) return showToast('Net is RM0 — nothing to settle, no document needed', 'error');
+  if (!pmPiStaffOptions.length) {
+    pmPiStaffOptions = await sb('nec_staff', { select: 'id,name,company_team,base_salary', filter: 'order=name.asc' }).catch(() => []);
+  }
+  const staff = pmPiStaffOptions.find(s => s.id === row.staff_id) || { name: 'Unknown' };
+
+  if (!row.doc_number) {
+    try {
+      const num = await getNextPMPIDocNumber(row.year, row.month);
+      await sb('nec_proxy_manager_pi', { method: 'PATCH', filter: `id=eq.${row.id}`, body: { doc_number: num } });
+      row.doc_number = num;
+      await logAudit('UPDATE', 'nec_proxy_manager_pi', `Assigned Proxy Manager PI document number ${num} for ${staff.name} — ${MONTHS[row.month]} ${row.year}`);
+    } catch(e) { console.error('Failed to assign Proxy Manager PI doc number:', e); }
+  }
+
+  let bankInfo = null;
+  try {
+    const staffRows = await sb('nec_staff', { filter: `id=eq.${row.staff_id}`, select: 'bank_directory_id' });
+    const bdId = staffRows[0]?.bank_directory_id;
+    if (bdId) {
+      const bd = await sb('nec_bank_directory', { filter: `id=eq.${bdId}`, select: 'name,ic_number,bank_name,bank_account' });
+      if (bd.length) bankInfo = bd[0];
+    }
+  } catch(e) { /* fall back to the generic line */ }
+
+  const isInv = net > 0;
+  const html = buildPMPIDocumentHTML(staff, row, bankInfo);
+  const title = isInv ? 'Proxy Manager PI Invoice' : 'Proxy Manager PI Payslip';
+
+  if (mode === 'download') {
+    try {
+      showToast('Generating PDF…');
+      await downloadHtmlDocAsPDF(html, `${staff.name} - ${title}${row.doc_number ? ' ' + row.doc_number : ''} - ${MONTHS[row.month]} ${row.year}.pdf`);
+    } catch(e) { showToast('Error generating PDF: ' + e.message, 'error'); }
+    loadProxyManagerPI(row.year, row.month);
+    return;
+  }
+
+  const win = window.open('', '_blank', 'width=700,height=800');
+  win.document.write(`<html><head><title>${title} - ${staff.name} - ${MONTHS[row.month]} ${row.year}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <style>body{margin:40px;background:#f5f5f5;font-family:Inter,sans-serif}
+    ${INVOICE_PRINT_STYLE}
+    @media print{body{margin:0;background:#fff}.invoice-preview{box-shadow:none}}
+    </style></head><body>${html}
+    <div class="no-print" style="text-align:center;margin-top:20px">
+      <button onclick="window.print()" style="padding:10px 24px;background:#6366f1;color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer">Print / Save PDF</button>
+    </div>
+    </body></html>`);
+  win.document.close();
+  loadProxyManagerPI(row.year, row.month);
+}
+
+// Mark a Proxy Manager PI settlement as paid/unpaid — mirrors
+// markPISharingPaid's UX for the pool managers' PI settlement table.
+async function markPMPIPaid(id) {
+  const today = new Date().toISOString().slice(0,10);
+  const input = prompt('Payment date (YYYY-MM-DD), or clear the field to mark unpaid:', today);
+  if (input === null) return;
+  const trimmed = input.trim();
+  if (trimmed && !/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return showToast('Invalid date format — use YYYY-MM-DD', 'error');
+  }
+  try {
+    await sb('nec_proxy_manager_pi', { method: 'PATCH', filter: `id=eq.${id}`, body: { payment_date: trimmed || null } });
+    await logAudit('UPDATE', 'nec_proxy_manager_pi', `${trimmed ? `Marked Proxy Manager PI ${id} as paid (payment date: ${trimmed})` : `Marked Proxy Manager PI ${id} as unpaid`}`);
+    showToast(trimmed ? 'Marked as paid' : 'Marked as unpaid');
+    const year = parseInt(document.getElementById('plYear').value);
+    const monthRaw = document.getElementById('plMonth').value;
+    loadProxyManagerPI(year, monthRaw ? parseInt(monthRaw) : null);
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
 async function loadProxyManagerPI(year, month) {
   const tbody = document.getElementById('pmPiTableBody');
   if (!tbody) return;
   try {
     if (!pmPiStaffOptions.length) {
-      pmPiStaffOptions = await sb('nec_staff', { select: 'id,name,company_team', filter: 'order=name.asc' }).catch(() => []);
+      pmPiStaffOptions = await sb('nec_staff', { select: 'id,name,company_team,base_salary', filter: 'order=name.asc' }).catch(() => []);
     }
     const staffNameMap = {};
     pmPiStaffOptions.forEach(s => { staffNameMap[s.id] = s.name; });
     const filter = month ? `year=eq.${year}&month=eq.${month}&order=team.asc` : `year=eq.${year}&order=team.asc`;
     const rows = await sb('nec_proxy_manager_pi', { filter });
     if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="5"><div class="empty"><div class="empty-text">No Proxy Manager PI entries this period</div></div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-text">No Proxy Manager PI entries this period</div></div></td></tr>`;
       return;
     }
     tbody.innerHTML = rows.map(r => {
       const name = staffNameMap[r.staff_id] || '—';
       const label = `${name} — ${MONTHS[r.month]} ${r.year}`;
+      const net = parseFloat(r.net_amount ?? (r.amount - r.deduction_amount));
+      const netColor = net > 0 ? 'var(--red)' : (net < 0 ? '#16a34a' : 'var(--muted)');
+      const netLabel = net > 0 ? 'owes NE' : (net < 0 ? 'NE owes' : 'settled');
+      const docCell = net === 0
+        ? `<span class="td-muted">—</span>`
+        : (r.doc_number
+            ? `<div class="td-mono" style="font-size:11px">${r.doc_number}</div><div style="font-size:10px;color:${r.payment_date ? '#16a34a' : 'var(--muted)'}">${r.payment_date ? 'Paid ' + r.payment_date : 'Unpaid'}</div>`
+            : `<span class="td-muted" style="font-size:11px">Not generated</span>`);
       return `<tr>
         <td>${name}</td>
         <td class="td-muted">${r.team || '—'}</td>
         <td class="td-mono">RM${parseFloat(r.amount || 0).toFixed(2)}</td>
-        <td class="td-muted">${r.notes || '—'}</td>
+        <td class="td-mono">RM${parseFloat(r.deduction_amount || 0).toFixed(2)}</td>
+        <td class="td-mono" style="color:${netColor}">RM${Math.abs(net).toFixed(2)}<div style="font-size:10px;color:var(--muted)">${netLabel}</div></td>
+        <td>${docCell}</td>
         <td>
           <div style="display:flex;gap:4px;flex-wrap:wrap">
+            ${net !== 0 ? `
+            <button class="btn btn-ghost btn-sm" onclick="generatePMPIDocument('${r.id}','print')">🖨️</button>
+            <button class="btn btn-ghost btn-sm" onclick="generatePMPIDocument('${r.id}','download')">⬇️</button>
+            <button class="btn btn-ghost btn-sm" onclick="markPMPIPaid('${r.id}')">${r.payment_date ? '✓ Paid' : 'Mark Paid'}</button>
+            ` : ''}
             <button class="btn btn-ghost btn-sm" onclick="openPMPIModal('${r.id}')">✎ Edit</button>
             <button class="btn btn-danger btn-sm" onclick="deletePMPIEntry('${r.id}', '${label.replace(/'/g, "\\'")}')">✕ Delete</button>
           </div>
@@ -9579,7 +9830,7 @@ async function loadProxyManagerPI(year, month) {
       </tr>`;
     }).join('');
   } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="5"><div class="empty"><div class="empty-text">Error loading: ${e.message}</div></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-text">Error loading: ${e.message}</div></div></td></tr>`;
   }
 }
 
@@ -11672,6 +11923,16 @@ CREATE TABLE IF NOT EXISTS nec_pi_sharing (
 -- etc — not gated on nec_staff.position='proxy_manager', since some of
 -- these people are currently tagged staff_type='sales'). team decides
 -- whether it folds into NE or AC's Proxy Manager Income line in P&L.
+-- deduction_amount is the manager's own flat base_salary (RM1500/2000)
+-- that New Era owes them each period — offset against the PI so only the
+-- net difference changes hands. Defaults to nec_staff.base_salary at entry
+-- time but stored as its own column so it stays correct even if the
+-- staff's base_salary changes later. net_amount = amount - deduction_amount:
+-- positive means the manager still owes New Era (Invoice); zero/negative
+-- means New Era owes the manager (Payslip) — opposite sign convention from
+-- nec_pi_sharing's net_amount, documented in code. doc_number is a real
+-- sequential NEC-PMPI-YYYY-MM-### number, its own series separate from
+-- nec_pi_sharing's NEC-PI-... series.
 CREATE TABLE IF NOT EXISTS nec_proxy_manager_pi (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   staff_id uuid REFERENCES nec_staff(id),
@@ -11679,6 +11940,10 @@ CREATE TABLE IF NOT EXISTS nec_proxy_manager_pi (
   year int NOT NULL,
   month int NOT NULL,
   amount numeric(10,2) NOT NULL DEFAULT 0,
+  deduction_amount numeric(10,2) NOT NULL DEFAULT 0,
+  net_amount numeric(10,2) GENERATED ALWAYS AS (amount - deduction_amount) STORED,
+  doc_number text,
+  payment_date date,
   notes text,
   created_at timestamptz DEFAULT now()
 );
