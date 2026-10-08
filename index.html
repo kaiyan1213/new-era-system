@@ -4945,7 +4945,7 @@ async function deletePicPayment(paymentId, invoiceId) {
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
-function generateUnpaidList() {
+async function generateUnpaidList() {
   const groups = {};
   MANAGER_ORDER.forEach(m => groups[m] = { lines: [], outstanding: 0 });
   groups['Unassigned'] = { lines: [], outstanding: 0 };
@@ -4977,6 +4977,20 @@ function generateUnpaidList() {
     grandTotal = r2(grandTotal + outstanding);
   });
 
+  // Other (non-proxy) invoices for the selected period that haven't been paid.
+  const otherGroup = { lines: [], outstanding: 0 };
+  try {
+    const y = parseInt(document.getElementById('dirYear').value);
+    const mo = parseInt(document.getElementById('dirMonth').value);
+    const customInvs = await sb('nec_custom_invoices', { filter: `year=eq.${y}&month=eq.${mo}&payment_date=is.null&order=recipient_name.asc` });
+    customInvs.forEach(c => {
+      const amt = r2(parseFloat(c.amount || 0));
+      otherGroup.lines.push(`${c.recipient_name}${c.invoice_number ? ' (' + c.invoice_number + ')' : ''} — RM${amt.toFixed(2)}`);
+      otherGroup.outstanding += amt;
+      grandTotal = r2(grandTotal + amt);
+    });
+  } catch(e) { console.error('Unpaid list: custom invoices failed', e); }
+
   let text = '';
   [...MANAGER_ORDER, 'Unassigned'].forEach(m => {
     if (!groups[m].lines.length) return;
@@ -4984,6 +4998,11 @@ function generateUnpaidList() {
     groups[m].lines.forEach(line => { text += `- ${line}\n`; });
     text += `\n`;
   });
+  if (otherGroup.lines.length) {
+    text += `Other Invoices — RM${r2(otherGroup.outstanding).toFixed(2)} outstanding:\n`;
+    otherGroup.lines.forEach(line => { text += `- ${line}\n`; });
+    text += `\n`;
+  }
 
   if (!text) {
     text = 'Everyone has paid for this month. 🎉';
