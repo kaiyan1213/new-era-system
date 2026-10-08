@@ -4071,8 +4071,9 @@ async function loadCustomInvoices() {
       <td class="td-mono">${MONTHS[r.month]} ${r.year}</td>
       <td class="td-muted">${r.description || '—'}</td>
       <td class="td-mono" style="color:var(--accent)">${fmt(r.amount)}</td>
-      <td class="td-mono">${r.invoice_number || '—'}<div class="td-muted" style="font-size:10px">${r.status || ''}</div></td>
+      <td class="td-mono">${r.invoice_number || '—'}<div style="font-size:10px;color:${r.payment_date ? '#16a34a' : 'var(--muted)'}">${r.payment_date ? 'Paid ' + r.payment_date : 'Unpaid'}</div></td>
       <td><div style="display:flex;gap:4px">
+        <button class="btn btn-ghost btn-sm" onclick="markCustomInvoicePaid('${r.id}')">${r.payment_date ? '✓ Paid' : 'Mark Paid'}</button>
         <button class="btn btn-ghost btn-sm" onclick="previewCustomInvoice('${r.id}')">Preview</button>
         <button class="btn btn-danger btn-sm" onclick="deleteCustomInvoice('${r.id}')">✕</button>
       </div></td>
@@ -4087,6 +4088,22 @@ async function previewCustomInvoice(id) {
     const [inv] = await sb('nec_custom_invoices', { filter: `id=eq.${id}` });
     showToast('Generating PDF…');
     await downloadHtmlDocAsPDF(buildCustomInvoiceHTML(inv), `${inv.recipient_name.replace(/[/\\?%*:|"<>]/g, '-')} - ${inv.invoice_number || 'DRAFT'}.pdf`);
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// Mark a custom invoice paid/unpaid (date prompt; clear the field to unmark).
+async function markCustomInvoicePaid(id) {
+  const today = new Date().toISOString().slice(0,10);
+  const input = prompt('Payment date (YYYY-MM-DD), or clear the field to mark unpaid:', today);
+  if (input === null) return;
+  const trimmed = input.trim();
+  if (trimmed && !/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return showToast('Invalid date format — use YYYY-MM-DD', 'error');
+  try {
+    await sb('nec_custom_invoices', { method: 'PATCH', filter: `id=eq.${id}`, body: { payment_date: trimmed || null, status: trimmed ? 'paid' : 'issued' } });
+    await logAudit('UPDATE', 'nec_custom_invoices', trimmed ? `Marked custom invoice ${id} paid (${trimmed})` : `Marked custom invoice ${id} unpaid`);
+    showToast(trimmed ? 'Marked as paid' : 'Marked as unpaid');
+    loadDirectory();
+    loadCustomInvoices();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
@@ -4376,7 +4393,35 @@ async function loadDirectory() {
         </div>`;
     }).join('');
 
-    container.innerHTML = summaryBoxHtml + (sections || `<div class="empty"><div class="empty-text">No proxies found. Add proxies with a Manager assigned.</div></div>`);
+    // Other (non-proxy) invoices for this period — shown here too so
+    // you can see who still hasn't paid.
+    const customInvs = await sb('nec_custom_invoices', { filter: `year=eq.${year}&month=eq.${month}&order=recipient_name.asc` }).catch(() => []);
+    let customHtml = '';
+    if (customInvs.length) {
+      const unpaidTotal = customInvs.filter(c => !c.payment_date).reduce((s,c) => s + parseFloat(c.amount||0), 0);
+      customHtml = `
+        <div class="table-wrap" data-mgr-block="Other Invoices" style="margin-bottom:20px">
+          <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+            <span>Other Invoices (non-proxy)</span>
+            <span style="font-size:11px;font-weight:400;color:${unpaidTotal > 0 ? 'var(--red)' : 'var(--muted)'}">Outstanding: ${fmt(unpaidTotal)}</span>
+          </div>
+          <table>
+            <thead><tr><th>Recipient</th><th>Description</th><th>Invoice No</th><th>Amount</th><th>Payment</th></tr></thead>
+            <tbody>${customInvs.map(c => `
+              <tr data-search="${((c.recipient_name||'') + ' ' + (c.recipient_id||'') + ' ' + (c.invoice_number||'')).toLowerCase()}">
+                <td><div class="td-name">${c.recipient_name}</div><div class="td-muted">${c.recipient_id || '—'}</div></td>
+                <td class="td-muted">${c.description || '—'}</td>
+                <td class="td-mono">${c.invoice_number || '—'}</td>
+                <td class="td-mono" style="color:var(--accent)">${fmt(c.amount)}</td>
+                <td>${c.payment_date
+                  ? `<span class="badge badge-paid" style="cursor:pointer" onclick="markCustomInvoicePaid('${c.id}')">${c.payment_date}</span>`
+                  : `<button class="btn btn-green btn-sm" onclick="markCustomInvoicePaid('${c.id}')">Mark Paid</button>`}</td>
+              </tr>`).join('')}</tbody>
+          </table>
+        </div>`;
+    }
+
+    container.innerHTML = summaryBoxHtml + (sections || `<div class="empty"><div class="empty-text">No proxies found. Add proxies with a Manager assigned.</div></div>`) + customHtml;
     filterDirectoryTable(); // re-apply any active search after re-render
   } catch(e) {
     console.error(e);
@@ -12104,6 +12149,7 @@ CREATE TABLE IF NOT EXISTS nec_custom_invoices (
   amount numeric(10,2) NOT NULL DEFAULT 0,
   invoice_number text,
   status text DEFAULT 'draft',
+  payment_date date, -- set once the recipient has paid
   notes text,
   created_at timestamptz DEFAULT now()
 );
