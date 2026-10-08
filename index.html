@@ -598,6 +598,19 @@
         </tbody>
       </table>
     </div>
+
+    <!-- Other (non-proxy) invoices — "Invoice To: Other" in New Invoice Entry -->
+    <div class="table-wrap" style="margin-top:20px">
+      <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">Other Invoices (non-proxy)</div>
+      <table>
+        <thead>
+          <tr><th>Recipient</th><th>Month</th><th>Description</th><th>Amount</th><th>Invoice No</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="customInvoiceTableBody">
+          <tr><td colspan="6"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <!-- ========== DIRECTORY PAGE ========== -->
@@ -1888,6 +1901,34 @@
         </div>
       </div>
       <div class="form-group">
+        <label class="form-label">Invoice To</label>
+        <select id="invTarget" class="form-input" onchange="toggleInvoiceTarget()">
+          <option value="proxy">Proxy Account</option>
+          <option value="other">Other (anyone — not a proxy)</option>
+        </select>
+      </div>
+      <div id="invOtherBlock" style="display:none">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Recipient Name</label>
+            <input type="text" id="invRecipient" class="form-input" placeholder="Name / company">
+          </div>
+          <div class="form-group">
+            <label class="form-label">IC / Reg No (optional)</label>
+            <input type="text" id="invRecipientId" class="form-input" placeholder="Optional">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Description</label>
+          <input type="text" id="invDesc" class="form-input" placeholder="e.g. Digital Marketing Services">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Amount (RM)</label>
+          <input type="number" id="invOtherAmount" class="form-input" placeholder="0.00" step="0.01">
+        </div>
+      </div>
+      <div id="invProxyBlock">
+      <div class="form-group">
         <label class="form-label">Proxy Account</label>
         <select id="invProxy" class="form-input" onchange="loadYTDForProxy()">
           <option value="">Select proxy...</option>
@@ -1922,6 +1963,7 @@
           <span style="color:var(--muted)">Proxy YTD profit (after this)</span>
           <span style="font-family:var(--mono);font-weight:700" id="profitYTD">RM 0.00</span>
         </div>
+      </div>
       </div>
       <div class="form-row">
         <div class="form-group">
@@ -3519,6 +3561,7 @@ async function loadInvoices() {
   let filter = `year=eq.${year}`;
   if (month) filter += `&month=eq.${month}`;
 
+  loadCustomInvoices();
   try {
     await loadProxies();
     const invoices = await sb('proxy_invoices', {
@@ -3772,8 +3815,19 @@ async function openNewInvoiceModal() {
   const sel = document.getElementById('invProxy');
   sel.innerHTML = '<option value="">Select proxy...</option>' +
     proxyList.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+  document.getElementById('invTarget').value = 'proxy';
+  ['invRecipient','invRecipientId','invDesc','invOtherAmount'].forEach(id => { document.getElementById(id).value = ''; });
+  toggleInvoiceTarget();
   openModal('modalNewInvoice');
   await refreshInvoiceNumber();
+}
+
+// Switches the New Invoice modal between a proxy-account invoice (Coway
+// payslip / YTD tracking) and a plain invoice to anyone else.
+function toggleInvoiceTarget() {
+  const other = document.getElementById('invTarget').value === 'other';
+  document.getElementById('invOtherBlock').style.display = other ? 'block' : 'none';
+  document.getElementById('invProxyBlock').style.display = other ? 'none' : 'block';
 }
 
 // Returns the next sequential invoice number for a given year/month, e.g. NEC-2026-06-001
@@ -3783,6 +3837,12 @@ async function getNextInvoiceNumber(year, month) {
       filter: `year=eq.${year}&month=eq.${month}`,
       select: 'invoice_number'
     });
+    // Custom (non-proxy) invoices share this same number series.
+    const customRecs = await sb('nec_custom_invoices', {
+      filter: `year=eq.${year}&month=eq.${month}`,
+      select: 'invoice_number'
+    }).catch(() => []);
+    records.push(...customRecs);
     let maxSeq = 0;
     records.forEach(r => {
       const m = (r.invoice_number || '').match(/-(\d{3})$/);
@@ -3899,6 +3959,7 @@ function updateProfit() {
 }
 
 async function saveInvoice() {
+  if (document.getElementById('invTarget').value === 'other') return saveCustomInvoice();
   const body = {
     proxy_id: document.getElementById('invProxy').value,
     year: parseInt(document.getElementById('invYear').value),
@@ -3920,6 +3981,121 @@ async function saveInvoice() {
     await logAudit('CREATE', 'proxy_invoices', `Invoice ${body.invoice_number || 'draft'} for ${proxyName} — ${MONTHS[body.month]} ${body.year} — RM${body.invoice_amount}`);
     loadInvoices();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ── Custom invoices: bill anyone, not just a proxy account. Stored in
+// nec_custom_invoices so they never touch proxy YTD limits, Directory
+// payment tracking, or P&L revenue.
+async function saveCustomInvoice() {
+  const body = {
+    recipient_name: document.getElementById('invRecipient').value.trim(),
+    recipient_id: document.getElementById('invRecipientId').value.trim() || null,
+    description: document.getElementById('invDesc').value.trim() || null,
+    year: parseInt(document.getElementById('invYear').value),
+    month: parseInt(document.getElementById('invMonth').value),
+    amount: parseFloat(document.getElementById('invOtherAmount').value),
+    invoice_number: document.getElementById('invNumber').value,
+    status: document.getElementById('invStatus').value,
+    notes: document.getElementById('invNotes').value || null,
+  };
+  if (!body.recipient_name) return showToast('Enter recipient name', 'error');
+  if (!body.amount) return showToast('Enter amount', 'error');
+  try {
+    await sb('nec_custom_invoices', { method: 'POST', body });
+    closeModal('modalNewInvoice');
+    showToast('Invoice saved');
+    await logAudit('CREATE', 'nec_custom_invoices', `Invoice ${body.invoice_number || 'draft'} for ${body.recipient_name} — ${MONTHS[body.month]} ${body.year} — RM${body.amount}`);
+    loadInvoices();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+function buildCustomInvoiceHTML(inv) {
+  const co = getCompanyInfo(inv.year, inv.month);
+  const desc = inv.description || 'Services';
+  return `
+      <div class="invoice-preview">
+        <div class="inv-header">
+          <div>
+            <div class="inv-company-name">${co.name}</div>
+            <div class="inv-reg">${co.reg}</div>
+            <div class="inv-address">${co.addressHtml}</div>
+          </div>
+          <div>
+            <div class="inv-label">INVOICE</div>
+            <div class="inv-meta">No: ${inv.invoice_number || 'DRAFT'}<br>Date: ${MONTH_FULL[inv.month]} ${inv.year}</div>
+          </div>
+        </div>
+        <div class="inv-divider"></div>
+        <div class="inv-bill-to">Bill To</div>
+        <div class="inv-bill-name">${inv.recipient_name}</div>
+        ${inv.recipient_id ? `<div class="inv-bill-sub">${inv.recipient_id}</div>` : ''}
+        <table class="inv-table">
+          <thead><tr><th>Description</th><th>Amount</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>${desc}${inv.notes ? `<br><span style="font-size:11px;color:#888">${inv.notes}</span>` : ''}</td>
+              <td style="font-weight:700">RM ${fmtNum(inv.amount)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="inv-total-row">
+          <div class="inv-total-box">
+            <div class="inv-total-label">Total Amount Due</div>
+            <div class="inv-total-amount">RM ${fmtNum(inv.amount)}</div>
+          </div>
+        </div>
+        <div class="inv-footer">
+          <strong>Payment Information</strong><br>
+          Bank: ${co.bankName}<br>
+          Account Name: ${co.bankAccountName}<br>
+          Account No: ${co.bankAccountNo}
+        </div>
+      </div>`;
+}
+
+async function loadCustomInvoices() {
+  const tbody = document.getElementById('customInvoiceTableBody');
+  if (!tbody) return;
+  const year = document.getElementById('filterYear').value;
+  const month = document.getElementById('filterMonth').value;
+  let filter = `year=eq.${year}&order=month.asc`;
+  if (month) filter += `&month=eq.${month}`;
+  try {
+    const rows = await sb('nec_custom_invoices', { filter });
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="6"><div class="empty"><div class="empty-text">No other invoices for this filter</div></div></td></tr>`;
+      return;
+    }
+    tbody.innerHTML = rows.map(r => `<tr>
+      <td><div class="td-name">${r.recipient_name}</div><div class="td-muted">${r.recipient_id || '—'}</div></td>
+      <td class="td-mono">${MONTHS[r.month]} ${r.year}</td>
+      <td class="td-muted">${r.description || '—'}</td>
+      <td class="td-mono" style="color:var(--accent)">${fmt(r.amount)}</td>
+      <td class="td-mono">${r.invoice_number || '—'}<div class="td-muted" style="font-size:10px">${r.status || ''}</div></td>
+      <td><div style="display:flex;gap:4px">
+        <button class="btn btn-ghost btn-sm" onclick="previewCustomInvoice('${r.id}')">Preview</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteCustomInvoice('${r.id}')">✕</button>
+      </div></td>
+    </tr>`).join('');
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty"><div class="empty-text">Error loading: ${e.message}</div></div></td></tr>`;
+  }
+}
+
+async function previewCustomInvoice(id) {
+  try {
+    const [inv] = await sb('nec_custom_invoices', { filter: `id=eq.${id}` });
+    showToast('Generating PDF…');
+    await downloadHtmlDocAsPDF(buildCustomInvoiceHTML(inv), `${inv.recipient_name.replace(/[/\\?%*:|"<>]/g, '-')} - ${inv.invoice_number || 'DRAFT'}.pdf`);
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteCustomInvoice(id) {
+  if (!confirm('Delete this invoice?')) return;
+  await sbDelete('nec_custom_invoices', `id=eq.${id}`);
+  showToast('Deleted');
+  await logAudit('DELETE', 'nec_custom_invoices', `Deleted custom invoice id: ${id}`);
+  loadCustomInvoices();
 }
 
 async function deleteInvoice(id) {
@@ -11914,6 +12090,24 @@ CREATE TABLE IF NOT EXISTS nec_pi_sharing (
   UNIQUE(manager_id, year, month)
 );
 
+-- General-purpose invoices to ANY recipient (not tied to a proxy account).
+-- Separate from proxy_invoices so it never affects proxy YTD limits,
+-- Directory payment tracking, or P&L revenue. Shares the NEC-YYYY-MM-###
+-- number series with proxy_invoices.
+CREATE TABLE IF NOT EXISTS nec_custom_invoices (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  recipient_name text NOT NULL,
+  recipient_id text,
+  description text,
+  year int NOT NULL,
+  month int NOT NULL,
+  amount numeric(10,2) NOT NULL DEFAULT 0,
+  invoice_number text,
+  status text DEFAULT 'draft',
+  notes text,
+  created_at timestamptz DEFAULT now()
+);
+
 -- Proxy Manager PI: money certain proxy managers pay INTO the company on a
 -- fixed schedule (e.g. around the 25th of each month) — 100% company
 -- profit, NOT split/shared with anyone (unlike nec_pi_records/nec_pi_sharing,
@@ -12266,7 +12460,7 @@ async function saveManagers() {
 async function testConnection() {
   const result = document.getElementById('connTestResult');
   result.textContent = 'Testing...';
-  const tables = ['proxy_accounts','proxy_invoices','proxy_invoice_payments','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_manager_payslips','nec_manager_adjustments','nec_pi_records','nec_pi_sharing','nec_proxy_manager_pi','nec_pl_costs','nec_cost_categories','nec_vendor_invoices','nec_credit_cards','nec_cc_statements','nec_cc_payments','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads','nec_order_assignments','monthly_config'];
+  const tables = ['proxy_accounts','proxy_invoices','proxy_invoice_payments','nec_staff','nec_payroll','nec_managers','nec_manager_sharing','nec_manager_payslips','nec_manager_adjustments','nec_pi_records','nec_pi_sharing','nec_proxy_manager_pi','nec_custom_invoices','nec_pl_costs','nec_cost_categories','nec_vendor_invoices','nec_credit_cards','nec_cc_statements','nec_cc_payments','nec_audit_log','nec_payslip_breakdown','nec_bank_directory','staff_leads','nec_order_assignments','monthly_config'];
   const results = [];
   for (const t of tables) {
     try {
