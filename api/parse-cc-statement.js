@@ -138,15 +138,17 @@ Respond with ONLY a raw JSON object (no markdown, no code fences), with these ke
    - is_credit must be TRUE only if the amount has "CR" suffix, or is explicitly a DUITNOW TO / PAYMENT RECEIVED line
    - NEVER set is_credit: true just because the description contains words like "BILL", "SUBSCRIPTION", "SERVICE"
 2. "cr_amounts": array of numeric amounts (MYR) that appeared with "CR" suffix (refunds/credits/payments)
-3. "cards": array with ONE entry per distinct card number section found in the statement — this is the SOURCE OF TRUTH for balances, never a hand-summed total. Each entry: {"card_last4": "9529", "statement_balance": 13435.64, "previous_balance": 24421.39}. If the statement only covers one card, this array still has exactly one entry (card_last4 can be null if no card number is printed). Read each card's own statement_balance/previous_balance directly from that card's own section — do NOT add multiple cards' balances together anywhere.
+3. "cards": array with ONE entry per distinct card number section found in the statement — this is the SOURCE OF TRUTH for balances, never a hand-summed total. Each entry: {"card_last4": "9529", "statement_balance": 13435.64, "previous_balance": 24421.39, "statement_date": "2026-09-24", "due_date": "2026-10-14"}. If the statement only covers one card, this array still has exactly one entry (card_last4 can be null if no card number is printed). Read each card's own statement_balance/previous_balance directly from that card's own section — do NOT add multiple cards' balances together anywhere.
+   - statement_date: the printed "Statement Date" (a.k.a. "Tarikh Penyata") of this statement, as YYYY-MM-DD. null if not printed.
+   - due_date: the printed "Payment Due Date" (a.k.a. "Tarikh Akhir Pembayaran" / "Due Date"), as YYYY-MM-DD. null if not printed. Both dates are printed in the statement header/summary box — read them exactly as printed, do NOT guess or compute them. Combined multi-card PDFs normally share the same two dates across all cards.
 4. "statement_balance": DEPRECATED but still required for backward compatibility — set this to the SUM of every entry's statement_balance in "cards" (so old clients still see a combined total), never a number you invent separately.
 5. "previous_balance": DEPRECATED but still required — set this to the SUM of every entry's previous_balance in "cards".
 
 Format (single-card example):
-{"transactions":[{"date":"15/06","description":"FACEBK *ADS8X7Y2Z","amount":450.00,"is_credit":false,"category":"${categorySlugs[0]}","channel":"SHARED","company_team":null,"card_last4":null}],"cr_amounts":[56.45,3.15],"cards":[{"card_last4":null,"statement_balance":44543.40,"previous_balance":30361.46}],"statement_balance":44543.40,"previous_balance":30361.46}
+{"transactions":[{"date":"15/06","description":"FACEBK *ADS8X7Y2Z","amount":450.00,"is_credit":false,"category":"${categorySlugs[0]}","channel":"SHARED","company_team":null,"card_last4":null}],"cr_amounts":[56.45,3.15],"cards":[{"card_last4":null,"statement_balance":44543.40,"previous_balance":30361.46,"statement_date":"2026-06-24","due_date":"2026-07-14"}],"statement_balance":44543.40,"previous_balance":30361.46}
 
 Format (multi-card example — two cards under one PDF, balances kept separate):
-{"transactions":[{"date":"15/07","description":"FACEBK *4RHZ6WMRF2","amount":539.56,"is_credit":false,"category":"${categorySlugs[0]}","channel":"DM","company_team":null,"card_last4":"9529"},{"date":"17/07","description":"FACEBK *TF5UTUZV72","amount":2928.83,"is_credit":false,"category":"${categorySlugs[0]}","channel":"DM","company_team":null,"card_last4":"7293"}],"cr_amounts":[],"cards":[{"card_last4":"9529","statement_balance":13435.64,"previous_balance":24421.39},{"card_last4":"7293","statement_balance":2953.83,"previous_balance":0}],"statement_balance":16389.47,"previous_balance":24421.39}
+{"transactions":[{"date":"15/07","description":"FACEBK *4RHZ6WMRF2","amount":539.56,"is_credit":false,"category":"${categorySlugs[0]}","channel":"DM","company_team":null,"card_last4":"9529"},{"date":"17/07","description":"FACEBK *TF5UTUZV72","amount":2928.83,"is_credit":false,"category":"${categorySlugs[0]}","channel":"DM","company_team":null,"card_last4":"7293"}],"cr_amounts":[],"cards":[{"card_last4":"9529","statement_balance":13435.64,"previous_balance":24421.39,"statement_date":"2026-07-24","due_date":"2026-08-14"},{"card_last4":"7293","statement_balance":2953.83,"previous_balance":0,"statement_date":"2026-07-24","due_date":"2026-08-14"}],"statement_balance":16389.47,"previous_balance":24421.39}
 
 Statement text:
 ${trimmedText}`;
@@ -220,11 +222,13 @@ ${trimmedText}`;
             .map(c => ({
               card_last4: (typeof c.card_last4 === 'string' && c.card_last4.trim()) ? c.card_last4.trim().slice(-4) : null,
               statement_balance: c.statement_balance,
-              previous_balance: (typeof c.previous_balance === 'number') ? c.previous_balance : null
+              previous_balance: (typeof c.previous_balance === 'number') ? c.previous_balance : null,
+              statement_date: /^\d{4}-\d{2}-\d{2}$/.test(c.statement_date || '') ? c.statement_date : null,
+              due_date: /^\d{4}-\d{2}-\d{2}$/.test(c.due_date || '') ? c.due_date : null
             }));
         }
         if (claudeCards.length === 0 && claudeStatementBalance !== null) {
-          claudeCards = [{ card_last4: null, statement_balance: claudeStatementBalance, previous_balance: claudePreviousBalance }];
+          claudeCards = [{ card_last4: null, statement_balance: claudeStatementBalance, previous_balance: claudePreviousBalance, statement_date: null, due_date: null }];
         }
       } else if (Array.isArray(parsed)) {
         transactions = parsed; // old format fallback
