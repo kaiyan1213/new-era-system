@@ -9223,7 +9223,13 @@ async function loadPL() {
 
       // 6. Other admin (Samantha, etc.) → NE-Shared or AC-Shared
       const sharedBucket = team === 'Alpha C' ? 'AC-Shared' : 'NE-Shared';
-      const outlay = r2(comm + sal + bon + claim - ded - epf);
+      // A Proxy Manager's flat base salary (RM1500/2000) is NOT booked as a
+      // P&L cost here — it's settled by offsetting against the PI they pay in
+      // on the 25th each month (Proxy Manager PI "Deduction"; only the net
+      // counts toward Proxy Manager Income below). Booking it here too would
+      // double-count the same money.
+      const isProxyMgrStaff = (staff?.position || '').toLowerCase() === 'proxy_manager';
+      const outlay = r2(comm + (isProxyMgrStaff ? 0 : sal) + bon + claim - ded - epf);
       if (outlay !== 0) {
         const pos = (staff?.position || staff?.staff_type || '').toLowerCase();
         const roleLabel = pos.includes('editor') ? 'Editor Salary' : pos.includes('content') ? 'Content Creator Salary' : pos.includes('proxy') ? 'Proxy Manager Salary' : pos.includes('other') ? 'Other Salary' : 'Admin Salary';
@@ -10661,34 +10667,16 @@ async function processCCFile(file) {
     // group's own statement_balance, never against a combined figure, so
     // a multi-card statement's CR/rebate cleanup for one card can never
     // remove a transaction that actually belongs to the other card.
-    ccCardGroups.forEach((g, idx) => {
-      if (g.statement_balance === null) return;
-      const groupTxnIndices = allTxns.map((t,i) => t._groupIdx === idx ? i : -1).filter(i => i >= 0);
-      const txnTotalCents = groupTxnIndices.reduce((s,i) => s + Math.round(allTxns[i].amount * 100), 0);
-      const targetCents = Math.round(g.statement_balance * 100);
-      if (txnTotalCents <= targetCents) return;
-      const excessCents = txnTotalCents - targetCents;
-      // 0/1 knapsack: find subset of THIS GROUP's transactions summing to excessCents
-      const cands = groupTxnIndices.map(i => [Math.round(allTxns[i].amount * 100), i]).filter(([c]) => c <= excessCents);
-      const dp = Array(excessCents + 1).fill(false);
-      const parent = Array(excessCents + 1).fill(null);
-      dp[0] = true;
-      for (let k = 0; k < cands.length; k++) {
-        const c = cands[k][0];
-        for (let s = excessCents; s >= c; s--) {
-          if (!dp[s] && dp[s - c]) { dp[s] = true; parent[s] = { k, prevSum: s - c }; }
-        }
-      }
-      if (dp[excessCents]) {
-        const removeOrigIndices = new Set();
-        let s = excessCents;
-        while (s > 0 && parent[s]) {
-          removeOrigIndices.add(cands[parent[s].k][1]);
-          s = parent[s].prevSum;
-        }
-        allTxns = allTxns.filter((_,i) => !removeOrigIndices.has(i));
-      }
-    });
+    // NOTE: the old "knapsack" step that silently DELETED real transactions
+    // until a card's itemized total matched its Statement Balance was
+    // removed. The bank's Statement Balance = previous balance + charges −
+    // payments, so whenever the owner pays more than the carried-over
+    // balance (e.g. a RM5,000 prepayment), balance < charges and that step
+    // threw away genuine purchases just to force a match — leaving the
+    // review list not matching the real statement. Every itemized charge
+    // is now kept as-is; any leftover gap is handled by the explicit "Ads
+    // Fee Offset" entry (shown per card before saving) so the P&L still
+    // ties to the bank Statement Balance.
 
     ccTransactions = allTxns;
 
@@ -10821,9 +10809,9 @@ async function handleCCBulkCategoryChange(selectEl) {
 function updateCCSummary() {
   document.getElementById('ccCount').textContent = ccTransactions.length;
   const rawTotal = r2(ccTransactions.reduce((s,t) => s + t.amount, 0));
-  // If statement balance exists and is less than our total, use statement balance as the
-  // display total — the difference is CR refunds that the bank already netted off
-  const total = (ccStatementBalance !== null && ccStatementBalance < rawTotal) ? ccStatementBalance : rawTotal;
+  // Show the real itemized total (not clamped to the statement balance) —
+  // any gap vs. the bank balance is surfaced in the Ads Fee Offset note.
+  const total = rawTotal;
   document.getElementById('ccTotal').textContent = `RM ${fmtNum(total)}`;
 
   const balanceWrap = document.getElementById('ccBalanceWrap');
