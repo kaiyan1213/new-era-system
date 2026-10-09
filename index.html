@@ -10996,8 +10996,14 @@ async function loadCCTracker() {
     monthSel.value = String(new Date().getMonth() + 1);
     monthSel.dataset.init = '1';
   }
-  const year = parseInt(document.getElementById('cctYear').value);
-  const month = parseInt(monthSel.value);
+  // The month selector is the DUE month (what you need to pay this month).
+  // nec_cc_statements rows stay keyed by STATEMENT month, so viewing
+  // October loads the September statements (statement date in Sep, due
+  // date in Oct).
+  const selYear = parseInt(document.getElementById('cctYear').value);
+  const selMonth = parseInt(monthSel.value);
+  const year = selMonth === 1 ? selYear - 1 : selYear;
+  const month = selMonth === 1 ? 12 : selMonth - 1;
   await loadCreditCards(true); // always fresh on this page — card list rarely changes but should reflect adds immediately
   try {
     ccStatements = await sb('nec_cc_statements', { filter: `year=eq.${year}&month=eq.${month}` });
@@ -11019,8 +11025,12 @@ function dayToDateStr(year, month, day) {
 }
 
 function renderCCTracker() {
-  const year = parseInt(document.getElementById('cctYear').value);
-  const month = parseInt(document.getElementById('cctMonth').value);
+  // Selector = due month; `year`/`month` below = the statement month the
+  // rows are keyed by (previous month), used by all the row handlers.
+  const dueYear = parseInt(document.getElementById('cctYear').value);
+  const dueMonth = parseInt(document.getElementById('cctMonth').value);
+  const year = dueMonth === 1 ? dueYear - 1 : dueYear;
+  const month = dueMonth === 1 ? 12 : dueMonth - 1;
   const tbody = document.getElementById('cctTableBody');
   if (!ccCards.length) {
     tbody.innerHTML = `<tr><td colspan="9"><div class="empty"><div class="empty-icon">💳</div><div class="empty-text">No cards yet. Click "+ Add Card" above.</div></div></td></tr>`;
@@ -11039,9 +11049,7 @@ function renderCCTracker() {
     totalStatement += statementAmt; totalPayment += paymentAmt; totalBalance += balance;
 
     const statementDate = s.statement_date || dayToDateStr(year, month, card.statement_day);
-    // Due date normally falls in the month AFTER the statement period
-    const dueMonth = month === 12 ? 1 : month + 1;
-    const dueYear = month === 12 ? year + 1 : year;
+    // Due date falls in the selected (due) month
     const dueDate = s.due_date || dayToDateStr(dueYear, dueMonth, card.due_day);
 
     const isPaid = !!s.is_paid;
