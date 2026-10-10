@@ -5396,11 +5396,12 @@ async function autoGenerateAdminPayroll(year, month) {
     const candidates = staffList.filter(s =>
       s.staff_type === 'admin' &&
       parseFloat(s.base_salary || 0) > 0 &&
-      // Proxy Managers are exempt from the Manager Pool exclusion — a
-      // leftover 0%-share nec_managers row (kept around only because
-      // nec_manager_adjustments history can't be deleted) must not hide
-      // them from their own fixed-salary Payroll record.
-      (s.position === 'proxy_manager' || !managerStaffIds.has(s.id)) &&
+      // Proxy Managers (RM1500/2000 flat) are NOT auto-given a monthly
+      // Payroll row any more — their salary is only paid out on the 25th
+      // via the Proxy Manager PI offset, and the 10th is just their
+      // normal proxy invoice. So they're excluded here entirely.
+      s.position !== 'proxy_manager' &&
+      !managerStaffIds.has(s.id) &&
       !existingIds.has(s.id)
     );
     for (const s of candidates) {
