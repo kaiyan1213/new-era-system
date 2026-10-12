@@ -1187,6 +1187,19 @@
       </div>
     </div>
 
+    <!-- Proxy Manager Income per person (own-proxy Coway money + PI net) -->
+    <div class="table-wrap" style="margin-bottom:20px">
+      <div style="background:var(--surface2);padding:10px 14px;font-weight:700;border-bottom:1px solid var(--border)">Proxy Manager Income (this period)</div>
+      <table>
+        <thead>
+          <tr><th>Proxy Manager</th><th>Team</th><th>Own Proxy Coway Payslip</th><th>Order Part (in Team Revenue)</th><th>Other Income (Passive etc.)</th><th>PI Net</th><th>Total Income</th></tr>
+        </thead>
+        <tbody id="pmIncomeTableBody">
+          <tr><td colspan="7"><div class="empty"><div class="empty-text">Loading...</div></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+
     <!-- Proxy Manager PI entries — 100% company profit, folded into the
          "Proxy Manager Income" line on the NE/AC cards above -->
     <div class="table-wrap" style="margin-bottom:20px">
@@ -8973,6 +8986,7 @@ async function loadPL() {
     // shows as its own distinct line on the NE/AC company cards, but still
     // added into Net Profit since it's real money for that team.
     const proxyManagerIncomeByTeam = { NE: 0, AC: 0 };
+    const pmIncomeDetail = {}; // staff_id → per-person Proxy Manager income breakdown
 
     for (const bd of breakdowns) {
       if (excludedProxyIds.has(bd.proxy_id)) continue; // excluded/data-only account — never touches P&L
@@ -9112,6 +9126,24 @@ async function loadPL() {
       if (staff?.staff_type === 'excluded') return; // data-only account — never a P&L cost either
       const staffRec = allStaff.find(s => s.id === p.staff_id) || {};
       const staffName = staffRec.name || p.staff_name || 'Unknown';
+
+      // Proxy Manager's own-proxy Coway money → "Proxy Manager Income".
+      // Tracked HERE (before any branch can return early) so it works no
+      // matter which team bucket the person's commission lands in.
+      // Only the non-order part counts (order commission is already in
+      // the team revenue via proxyOrderRevenue).
+      if (p.record_type !== 'manager' && (staff?.position || '').toLowerCase() === 'proxy_manager' && staff?.own_proxy_id) {
+        const ownProxyIncome = parseFloat(p.own_proxy_offset || 0);
+        const alreadyBucketed = proxyOrderRevenue[staff.own_proxy_id] || 0;
+        const nonOrderIncome = r2(ownProxyIncome - alreadyBucketed);
+        const pmTeam = (staff.company_team === 'Alpha C') ? 'Alpha C' : 'New Era';
+        const d = pmIncomeDetail[p.staff_id] || (pmIncomeDetail[p.staff_id] = { name: staffName, team: pmTeam, coway: 0, orders: 0, other: 0, pi: 0 });
+        d.coway = r2(d.coway + ownProxyIncome); d.orders = r2(d.orders + alreadyBucketed); d.other = r2(d.other + nonOrderIncome);
+        if (nonOrderIncome !== 0) {
+          const teamKey = pmTeam === 'Alpha C' ? 'AC' : 'NE';
+          proxyManagerIncomeByTeam[teamKey] = r2(proxyManagerIncomeByTeam[teamKey] + nonOrderIncome);
+        }
+      }
 
       // 1. Manager → clean split (per-category, no cross-bucket leakage):
       //    TM commission (com_from_payslip, real order-level TM sales) → NE-TM ONLY
@@ -9256,15 +9288,8 @@ async function loadPL() {
       // + allowances) counts here; any order-based commission from their
       // own proxy was already bucketed above via proxyOrderRevenue, so
       // it's subtracted out to avoid double-counting.
-      if ((staff?.position || '').toLowerCase() === 'proxy_manager' && staff?.own_proxy_id) {
-        const ownProxyIncome = p.own_proxy_offset || 0;
-        const alreadyBucketed = proxyOrderRevenue[staff.own_proxy_id] || 0;
-        const nonOrderIncome = r2(ownProxyIncome - alreadyBucketed);
-        if (nonOrderIncome !== 0) {
-          const teamKey = team === 'Alpha C' ? 'AC' : 'NE';
-          proxyManagerIncomeByTeam[teamKey] = r2(proxyManagerIncomeByTeam[teamKey] + nonOrderIncome);
-        }
-      }
+      // (Proxy Manager own-proxy income is now tracked at the top of this
+      // loop, before the DM/TM branch can return early.)
     });
 
     // ── PROXY MANAGER PI ── money certain proxy managers pay into the
@@ -9277,10 +9302,15 @@ async function loadPL() {
     // proxyManagerIncomeByTeam line shown on the NE/AC Company summary
     // cards as "Proxy Manager Income".
     const pmPiFilter = month ? `year=eq.${year}&month=eq.${month}` : `year=eq.${year}`;
-    const pmPiRows = await sb('nec_proxy_manager_pi', { filter: pmPiFilter, select: 'team,amount,deduction_amount' }).catch(() => []);
+    const pmPiRows = await sb('nec_proxy_manager_pi', { filter: pmPiFilter, select: 'staff_id,team,amount,deduction_amount' }).catch(() => []);
     pmPiRows.forEach(r => {
       const net = parseFloat(r.amount || 0) - parseFloat(r.deduction_amount || 0);
       if (net === 0) return;
+      {
+        const sObj = allStaff.find(x => x.id === r.staff_id);
+        const d = pmIncomeDetail[r.staff_id] || (pmIncomeDetail[r.staff_id] = { name: sObj?.name || '?', team: r.team === 'Alpha C' ? 'Alpha C' : 'New Era', coway: 0, orders: 0, other: 0, pi: 0 });
+        d.pi = r2(d.pi + net);
+      }
       const teamKey = r.team === 'Alpha C' ? 'AC' : 'NE';
       proxyManagerIncomeByTeam[teamKey] = r2(proxyManagerIncomeByTeam[teamKey] + net);
     });
@@ -9288,6 +9318,24 @@ async function loadPL() {
     // fetch inside loadProxyManagerPI since it needs id+staff name+notes
     // for display/delete, not just team+amount like the sum above).
     loadProxyManagerPI(year, month);
+
+    // Per-person Proxy Manager Income table
+    {
+      const pmTb = document.getElementById('pmIncomeTableBody');
+      if (pmTb) {
+        const rows = Object.values(pmIncomeDetail).sort((a, b) => a.team.localeCompare(b.team) || a.name.localeCompare(b.name));
+        if (!rows.length) {
+          pmTb.innerHTML = '<tr><td colspan="7"><div class="empty"><div class="empty-text">No Proxy Manager income this period</div></div></td></tr>';
+        } else {
+          let tot = { coway: 0, orders: 0, other: 0, pi: 0 };
+          pmTb.innerHTML = rows.map(d => {
+            const total = r2(d.other + d.pi);
+            tot.coway += d.coway; tot.orders += d.orders; tot.other += d.other; tot.pi += d.pi;
+            return `<tr><td>${d.name}</td><td>${d.team}</td><td class="td-mono">${fmt(d.coway)}</td><td class="td-mono">${fmt(d.orders)}</td><td class="td-mono">${fmt(d.other)}</td><td class="td-mono">${fmt(d.pi)}</td><td class="td-mono" style="color:var(--green);font-weight:700">${fmt(total)}</td></tr>`;
+          }).join('') + `<tr style="font-weight:700;border-top:2px solid var(--border)"><td colspan="2">Total</td><td class="td-mono">${fmt(r2(tot.coway))}</td><td class="td-mono">${fmt(r2(tot.orders))}</td><td class="td-mono">${fmt(r2(tot.other))}</td><td class="td-mono">${fmt(r2(tot.pi))}</td><td class="td-mono" style="color:var(--green)">${fmt(r2(tot.other + tot.pi))}</td></tr>`;
+        }
+      }
+    }
 
     // ── CC/MANUAL COSTS ──
     // Determine which CC card belongs to AC (Jenny CIMB = KY Alliance)
