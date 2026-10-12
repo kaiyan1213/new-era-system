@@ -6640,12 +6640,21 @@ async function getOwnProxyPayslipAmount(ownProxyId, year, month) {
   } catch(e) { return 0; }
 }
 
+// Base salary that belongs in a monthly Payroll record. Proxy Managers'
+// flat RM1500/2000 is never paid through Payroll — it's only settled on the
+// 25th via the Proxy Manager PI offset — so it's always 0 here, even though
+// nec_staff.base_salary keeps the figure (the PI Deduction defaults to it).
+function payrollBaseSalary(staff) {
+  if ((staff?.position || '').toLowerCase() === 'proxy_manager') return 0;
+  return parseFloat(staff?.base_salary || 0);
+}
+
 async function saveAutoCommissionRow(idx) {
   const row = autoCommissionData[idx];
   if (!row) return;
   let epfEmployee = 0, epfEmployer = 0;
   if (row.staff.epf_applicable) {
-    const epf = calcEpf(row.staff.base_salary || 0);
+    const epf = calcEpf(payrollBaseSalary(row.staff));
     epfEmployee = epf.employee;
     epfEmployer = epf.employer;
   }
@@ -6655,7 +6664,7 @@ async function saveAutoCommissionRow(idx) {
   // negative, they already received more than they earned and owe New
   // Era the difference back instead.
   const ownProxyOffset = await getOwnProxyPayslipAmount(row.staff.own_proxy_id, row.year, row.month);
-  const netPay = r2(row.commission + (row.staff.base_salary || 0) - epfEmployee - ownProxyOffset);
+  const netPay = r2(row.commission + payrollBaseSalary(row.staff) - epfEmployee - ownProxyOffset);
   const settlementType = ownProxyOffset > 0 ? (netPay >= 0 ? 'payslip' : 'invoice') : null;
   // A row can mix DM/TM + Outsider orders, but nec_payroll only has one
   // commission_type slot — tag it 'outsider' when every matched order
@@ -6670,7 +6679,7 @@ async function saveAutoCommissionRow(idx) {
     orders_count: row.orders.length,
     commission_earned: row.commission,
     commission_type: allOutsider ? 'outsider' : 'tiered',
-    base_salary: row.staff.base_salary || 0,
+    base_salary: payrollBaseSalary(row.staff),
     bonus: 0,
     deductions: 0,
     epf_employee: epfEmployee,
@@ -6796,7 +6805,7 @@ async function generateStaffPayslip(idx, mode) {
   const row = autoCommissionData[idx];
   if (!row) return;
   const { staff, orders, commission, year, month } = row;
-  const baseSalary = parseFloat(staff.base_salary || 0);
+  const baseSalary = payrollBaseSalary(staff);
   let epfEmployee = 0, epfEmployer = 0;
   if (staff.epf_applicable) {
     const epf = calcEpf(baseSalary);
@@ -7330,7 +7339,7 @@ async function openPayrollEntryModal() {
   sel.innerHTML = '<option value="">Select staff...</option>' +
     groups.filter(g => buckets[g.key]?.length).map(g =>
       `<optgroup label="${g.label}">${buckets[g.key].map(s =>
-        `<option value="${s.id}" data-type="${s.staff_type}" data-comm="${s.commission_per_order}" data-salary="${s.base_salary}" data-epf="${s.epf_applicable ? '1' : '0'}">${s.name}</option>`
+        `<option value="${s.id}" data-type="${s.staff_type}" data-comm="${s.commission_per_order}" data-salary="${payrollBaseSalary(s)}" data-epf="${s.epf_applicable ? '1' : '0'}">${s.name}</option>`
       ).join('')}</optgroup>`
     ).join('');
   openModal('modalPayrollEntry');
