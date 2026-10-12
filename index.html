@@ -9476,7 +9476,10 @@ async function loadPL() {
       };
     });
     const totalPayslip = r2(Object.values(periodPayslipByProxy).reduce((s,v) => s + v.payslip, 0));
-    const passiveTotal = r2(Object.values(periodPayslipByProxy).reduce((s,v) => s + v.passive, 0));
+    // Proxy Managers' own proxies are reported under "Proxy Manager Income"
+    // instead, so they're left out of the Passive figure + hover list.
+    const pmOwnProxyIds = new Set(allStaff.filter(s => (s.position || '').toLowerCase() === 'proxy_manager' && s.own_proxy_id).map(s => s.own_proxy_id));
+    const passiveTotal = r2(Object.values(periodPayslipByProxy).filter(v => !pmOwnProxyIds.has(v.proxyId)).reduce((s,v) => s + v.passive, 0));
     // Per-proxy breakdown of the Passive figure above, for the "Passive:"
     // hover tooltip — same plain-title-attribute pattern used for the cost
     // breakdown tooltips elsewhere on this page (see tooltipDetails/ttLines
@@ -9486,6 +9489,7 @@ async function loadPL() {
     const passiveByProxy = {};
     Object.values(periodPayslipByProxy).forEach(v => {
       if (Math.abs(v.passive) < 0.005) return;
+      if (pmOwnProxyIds.has(v.proxyId)) return;
       const name = proxyNameById[v.proxyId] || 'Unknown';
       passiveByProxy[name] = r2((passiveByProxy[name] || 0) + v.passive);
     });
