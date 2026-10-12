@@ -9207,6 +9207,16 @@ async function loadPL() {
           addCost('NE-Shared', 'Admin Salary', salaryOut);
           addTooltipDetail('NE-Shared', 'Admin Salary', staffName, salaryOut);
         }
+        // Claim on this row (e.g. Proxy Manager Lim Ze Hao, Alpha C) was
+        // silently dropped here — book it to the person's OWN company's
+        // Shared bucket (Alpha C → AC-Shared, otherwise NE-Shared).
+        // Skipped if a manager-type row exists for the same person, since
+        // that path already books the claim from manager adjustments.
+        if (claim > 0 && !payrollRows.some(x => x.staff_id === p.staff_id && x.record_type === 'manager')) {
+          const claimBucket = staff?.company_team === 'Alpha C' ? 'AC-Shared' : 'NE-Shared';
+          addCost(claimBucket, 'Staff Claim', claim);
+          addTooltipDetail(claimBucket, 'Staff Claim', staffName, claim);
+        }
         return;
       }
 
