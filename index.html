@@ -7056,7 +7056,15 @@ function buildStaffInvoiceHTML(staff, r) {
 function buildStaffPayslipHTML(staff, r, bankInfo) {
   const totalPay = parseFloat(r.total_pay || 0);
   const isOutsider = r.commission_type === 'outsider';
+  // When the staff's pay was netted against their OWN proxy's Coway money
+  // (own_proxy_offset), the payslip must not show salary/bonus lines that
+  // add up to something different from the Total Pay (e.g. 3,000 + 1,000
+  // = 2,103.76) — it just shows the net amount actually paid out as one
+  // Basic Salary line. The itemized working stays in the internal Calc.
   const rows = getPayslipLineItems(r);
+  // Own-proxy Coway money netted off shows as a plain deduction line, so
+  // Base Salary stays the same every month and the lines add up to Total.
+  if (parseFloat(r.own_proxy_offset || 0) > 0) rows.push({ label: 'Deduction (Coway Money)', amount: -parseFloat(r.own_proxy_offset) });
   const co = getCompanyInfo(r.year, r.month);
   const rowsHtml = rows.map(row => `
             <tr>
