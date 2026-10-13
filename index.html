@@ -13124,7 +13124,7 @@ async function confirmBulkSave() {
       // existed) is simply removed instead of overwritten.
       const existing = await sb('proxy_invoices', {
         filter: `proxy_id=eq.${p.proxy_id}&year=eq.${year}&month=eq.${month}`,
-        select: 'id,invoice_number,status,payment_date'
+        select: 'id,invoice_number,status,payment_date,coway_payslip_amount,invoice_amount'
       });
       await sbDelete('nec_payslip_breakdown', `proxy_id=eq.${p.proxy_id}&year=eq.${year}&month=eq.${month}`);
 
@@ -13132,8 +13132,13 @@ async function confirmBulkSave() {
         if (existing.length > 0) await sbDelete('proxy_invoices', `id=eq.${existing[0].id}`);
         updated++;
       } else {
-        let invoiceNumber, prevStatus = 'draft', prevPaymentDate = null;
+        let invoiceNumber, prevStatus = 'draft', prevPaymentDate = null, prevPicShare = 0;
         if (existing.length > 0) {
+          // A fixed PIC share (e.g. RM6,000 = Coway payslip − invoice, a
+          // round hundreds amount set via Edit Invoice) must survive a
+          // re-upload — otherwise it silently resets to payslip ±%.
+          const diff = Math.round((parseFloat(existing[0].coway_payslip_amount || 0) - parseFloat(existing[0].invoice_amount || 0)) * 100) / 100;
+          if (diff >= 100 && Math.abs(diff % 100) < 0.005) prevPicShare = diff;
           // Reuse the existing invoice number so other invoices' sequence numbers
           // for this month don't shift around. Also preserve paid/payment_date —
           // re-importing to fix a parser bug shouldn't undo a "Mark Paid" that
@@ -13149,9 +13154,11 @@ async function confirmBulkSave() {
           created++;
         }
 
-        const invoiceAmount = Math.round(p.total_net_payable * (1 + deductPct/100) * 100) / 100;
+        const invoiceAmount = prevPicShare > 0
+          ? Math.round((p.total_net_payable - prevPicShare) * 100) / 100
+          : Math.round(p.total_net_payable * (1 + deductPct/100) * 100) / 100;
         // deductPct < 0 => deduct (invoice < payslip amount); deductPct > 0 => add on top
-        const adjLabel = deductPct === 0 ? '±0%' : (deductPct > 0 ? `+${deductPct}%` : `${deductPct}%`);
+        const adjLabel = prevPicShare > 0 ? `PIC share RM${prevPicShare.toFixed(2)} kept` : (deductPct === 0 ? '±0%' : (deductPct > 0 ? `+${deductPct}%` : `${deductPct}%`));
         await sb('proxy_invoices', {
           method: 'POST',
           body: {
