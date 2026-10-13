@@ -7064,7 +7064,7 @@ function buildStaffPayslipHTML(staff, r, bankInfo) {
   const rows = getPayslipLineItems(r);
   // Own-proxy Coway money netted off shows as a plain deduction line, so
   // Base Salary stays the same every month and the lines add up to Total.
-  if (parseFloat(r.own_proxy_offset || 0) > 0) rows.push({ label: 'Deduction (Coway Money)', amount: -parseFloat(r.own_proxy_offset) });
+  if (parseFloat(r.own_proxy_offset || 0) > 0) rows.push({ label: 'Deduction', amount: -parseFloat(r.own_proxy_offset) });
   const co = getCompanyInfo(r.year, r.month);
   const rowsHtml = rows.map(row => `
             <tr>
