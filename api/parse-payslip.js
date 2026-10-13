@@ -378,7 +378,24 @@ function parseCowayPayslip(text) {
       if (leadingTotal !== null) {
         passive_and_tbc_total = r2(passive_and_tbc_total + leadingTotal);
         if (sec.name.includes('Overidding')) {
-          overriding_1st_install_total = r2(overriding_1st_install_total + leadingTotal);
+          // The section can span several pages, each with its own subtotal
+          // (e.g. TAN WEI YAN: 163.75 up front, then 3,604.50 after a page
+          // break). Cross-check against the sum of this section's own line
+          // items; if the leading subtotal alone falls short, use the sum
+          // of ALL standalone subtotals found in the section when that
+          // matches the line items.
+          let rowSum = 0;
+          const standalone = [];
+          for (const l of sLines) {
+            const rm = l.match(/^(\d{1,2})\s+([\d,]+)\s+([\d,]+\.\d{2})$/);
+            if (rm) { rowSum = r2(rowSum + pn(rm[3])); continue; }
+            const sm = l.match(/^([\d,]+\.\d{2})$/);
+            if (sm) standalone.push(pn(sm[1]));
+          }
+          const allSum = r2(standalone.reduce((s, v) => s + v, 0));
+          let useTotal = leadingTotal;
+          if (rowSum > 0 && Math.abs(leadingTotal - rowSum) > 0.02 && Math.abs(allSum - rowSum) <= 0.02) useTotal = allSum;
+          overriding_1st_install_total = r2(overriding_1st_install_total + useTotal);
         }
       }
       continue;
