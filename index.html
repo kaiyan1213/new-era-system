@@ -5042,8 +5042,11 @@ function copyUnpaidList() {
 // per-document from that period rather than a single global switch:
 // August 2026 and earlier keep printing the old Enterprise letterhead
 // exactly as those documents were originally issued (reprinting a past
-// month must never silently rewrite history), while September 2026
-// onward always uses the new Sdn Bhd letterhead.
+// month must never silently rewrite history). The Sdn Bhd bank account
+// wasn't open until Oct 2026, so all money through October 2026 still
+// went into the Enterprise account and the books treat it as Enterprise:
+// October 2026 and earlier print the Enterprise letterhead; November 2026
+// onward uses the Sdn Bhd letterhead + its own bank account.
 const ENTERPRISE_INFO = {
   name: 'NEW ERA CONSULTING ENTERPRISE',
   reg: '202503018811 (MA0326725-T)',
@@ -5058,17 +5061,15 @@ const SDN_BHD_INFO = {
   reg: '202601033669 (1695764-D)',
   addressHtml: 'No 10, Jalan SS 2/61,<br>SS 2, 47300 Petaling Jaya,<br>Selangor',
   addressLines: ['No 10, Jalan SS 2/61, SS 2,', '47300 Petaling Jaya, Selangor'],
-  // TODO: the Sdn Bhd's own bank account isn't open yet (per Kai Yan,
-  // 21 Aug 2026) — still pointing at the old Enterprise account as a
-  // placeholder so invoices/payslips keep working meanwhile. Update
-  // these three fields once the new account exists.
+  // Sdn Bhd's own bank account (provided by Kai Yan, Oct 2026). Bank
+  // name assumed Public Bank (same as Enterprise) — correct if different.
   bankName: 'Public Bank Berhad',
-  bankAccountName: 'New Era Consulting Enterprise',
-  bankAccountNo: '3243542608'
+  bankAccountName: 'New Era Consulting (M) Sdn. Bhd.',
+  bankAccountNo: '3252023922'
 };
 function getCompanyInfo(year, month) {
   const y = parseInt(year), m = parseInt(month);
-  const isSdnBhd = y > 2026 || (y === 2026 && m >= 9);
+  const isSdnBhd = y > 2026 || (y === 2026 && m >= 11);
   return isSdnBhd ? SDN_BHD_INFO : ENTERPRISE_INFO;
 }
 
