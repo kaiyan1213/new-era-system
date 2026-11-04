@@ -5068,6 +5068,8 @@ const SDN_BHD_INFO = {
   bankAccountNo: '3252023922'
 };
 function getCompanyInfo(year, month) {
+  // Per Kai Yan: every document for Oct 2026 and earlier stays Enterprise;
+  // documents for Nov 2026 onward use the Sdn Bhd letterhead + bank account.
   const y = parseInt(year), m = parseInt(month);
   const isSdnBhd = y > 2026 || (y === 2026 && m >= 11);
   return isSdnBhd ? SDN_BHD_INFO : ENTERPRISE_INFO;
