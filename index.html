@@ -6125,7 +6125,14 @@ async function previewAutoCommission() {
     // Proxy Managers always get a row (even with 0 matched orders): their
     // own proxy's Coway payslip must be netted/saved into Payroll every
     // month (own_proxy_offset → P&L "Proxy Manager Income"), orders or not.
-    const isProxyMgrWithOwnProxy = s => (s.position || '').toLowerCase() === 'proxy_manager' && !!s.own_proxy_id;
+    // Same for Outsider-position staff (e.g. SHIRLEY WEE CHUI SHAN) who
+    // have their own proxy: it may carry only passive income this month
+    // (0 orders), but its payslip still has to be netted in Payroll.
+    const periodBreakdownProxyIds = new Set(breakdowns.map(b => b.proxy_id));
+    const isProxyMgrWithOwnProxy = s => !!s.own_proxy_id && (
+      (s.position || '').toLowerCase() === 'proxy_manager' ||
+      ((s.position || '').toLowerCase() === 'outsider' && periodBreakdownProxyIds.has(s.own_proxy_id))
+    );
     const reportIds = new Set([...leadMatchedStaff, ...extraMatchedStaff].map(s => s.id));
     const proxyMgrStaff = staffList.filter(s => isProxyMgrWithOwnProxy(s) && !reportIds.has(s.id));
     const reportStaff = [...leadMatchedStaff, ...extraMatchedStaff, ...proxyMgrStaff].sort((a, b) => {
