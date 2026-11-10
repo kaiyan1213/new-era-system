@@ -5990,10 +5990,19 @@ async function previewAutoCommission() {
     // name against whichever staff tracked that customer in 收单追踪 — an
     // extra order_date window only filtered out legitimate matches.
     const monthLabel = `${year}-${String(month).padStart(2,'0')}`;
-    const leads = await sb('staff_leads', {
-      filter: `month_year=eq.${monthLabel}`,
-      select: 'staff_name,customer_name,product_model,install_date,order_date,team'
+    // A payslip for month M mostly lists orders that were sold/logged in
+    // 收单追踪 in month M-1 (Coway pays on the 10th for what installed
+    // since). Data check Nov 2026: 0 of 408 payslip orders matched leads
+    // tagged 2026-11, 192 matched leads tagged 2026-10. So also pull the
+    // previous month's leads, but rank same-month leads first.
+    const prevY = month === 1 ? year - 1 : year;
+    const prevM = month === 1 ? 12 : month - 1;
+    const prevLabel = `${prevY}-${String(prevM).padStart(2,'0')}`;
+    const leadsRaw = await sb('staff_leads', {
+      filter: `month_year=in.(${monthLabel},${prevLabel})`,
+      select: 'staff_name,customer_name,product_model,install_date,order_date,team,month_year'
     });
+    const leads = [...leadsRaw].sort((a, b) => (b.month_year === monthLabel ? 1 : 0) - (a.month_year === monthLabel ? 1 : 0));
     const leadsByNormName = {};
     leads.forEach(l => {
       const cands = nameCandidates(l.customer_name);
