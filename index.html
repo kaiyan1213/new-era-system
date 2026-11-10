@@ -7900,10 +7900,13 @@ async function parseMgrPayslip() {
       throw new Error(err.error || 'API error');
     }
     const { data } = await response.json();
-    mgrPayslipParsed = { ...data, filename: file.name };
+    // Pool "Allowance" = Allowance section + any "Commission Adjustment"
+    // incentive lines (e.g. SHI Glow Up Incentive) — all incentives count.
+    const mgrAllowanceTotal = Math.round(((data.allowance_total || 0) + (data.adjustment_incentive_total || 0)) * 100) / 100;
+    mgrPayslipParsed = { ...data, filename: file.name, allowance_total: mgrAllowanceTotal };
     document.getElementById('mpOverriding').textContent = `RM ${fmtNum(data.overriding_1st_install_total || 0)}`;
-    document.getElementById('mpAllowance').textContent = `RM ${fmtNum(data.allowance_total || 0)}`;
-    document.getElementById('mpPoolContrib').textContent = `RM ${fmtNum((data.overriding_1st_install_total || 0) + (data.allowance_total || 0))}`;
+    document.getElementById('mpAllowance').textContent = `RM ${fmtNum(mgrAllowanceTotal)}` + ((data.adjustment_incentive_total || 0) > 0 ? ` (incl. incentive RM ${fmtNum(data.adjustment_incentive_total)})` : '');
+    document.getElementById('mpPoolContrib').textContent = `RM ${fmtNum((data.overriding_1st_install_total || 0) + mgrAllowanceTotal)}`;
     document.getElementById('mpResult').style.display = 'block';
     document.getElementById('mpParseBtn').classList.add('hidden');
     document.getElementById('mpSaveBtn').classList.remove('hidden');
