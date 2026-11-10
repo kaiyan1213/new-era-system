@@ -6050,7 +6050,12 @@ async function previewAutoCommission() {
           // nec_order_assignments/P&L.
           staff = { id: `__company__${manualAssign.staff_name}`, name: manualAssign.staff_name, isCompanySales: true };
         }
-      } else {
+      }
+      // An assignment row can exist WITHOUT a staff (saved by Breakdown/
+      // bulk payslip upload only to store team/algo/cost — e.g. all 408
+      // Nov 2026 rows). That must not block the 收单追踪 name match, so
+      // fall through to it whenever no staff was resolved above.
+      if (!staff) {
         const claims = leadsByNormName[po.norm_name];
         if (claims && claims.length) {
           // Prefer a claim whose staff_name actually resolves to a mapped
