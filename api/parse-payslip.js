@@ -584,6 +584,34 @@ function parseCowayPayslip(text) {
     ? r2(total_net_payable - new_orders_total - allowanceTotal)
     : passive_and_tbc_total;  // fallback if no total found
 
+  // ── 4b. "Commission Adjustment" incentives ─────────────────────────────
+  // A separate block (e.g. "SHI Glow Up Incentive (Sep-26)  600.00") that
+  // pdf-parse emits as: [item amounts] / "Amount" / "Orde rNoDescription" /
+  // [descriptions] / [subtotal] / "Commission Adjustment". Any line item
+  // whose description contains "Incentive" counts. Reported separately
+  // (NOT folded into allowances, so per-order allowance split and passive
+  // reconciliation are untouched); the Manager Payslip upload adds it to
+  // the pool's Allowance figure.
+  const adjustment_incentives = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (normWs(lines[i]) !== 'Commission Adjustment') continue;
+    let j = i - 1;
+    // subtotal line directly above the header
+    if (j >= 0 && /^[\d,]+\.\d{2}$/.test(lines[j])) j--;
+    const descs = [];
+    while (j >= 0 && !/^Orde\s*rNo/i.test(lines[j]) && !/^Description$/i.test(lines[j]) && descs.length < 20) {
+      descs.unshift(lines[j]); j--;
+    }
+    j--; // skip the "Orde rNoDescription" header line
+    if (j >= 0 && /^Amount$/i.test(lines[j])) j--;
+    const amts = [];
+    while (j >= 0 && /^-?[\d,]+\.\d{2}$/.test(lines[j])) { amts.unshift(pn(lines[j])); j--; }
+    descs.forEach((d, k) => {
+      if (/incentive/i.test(d) && k < amts.length) adjustment_incentives.push({ description: d, amount: amts[k] });
+    });
+  }
+  const adjustment_incentive_total = r2(adjustment_incentives.reduce((s, a) => s + a.amount, 0));
+
   // ── 5. Summary ─────────────────────────────────────────────
   const new_orders_count = bonusOrders.length;
   const verify_total = r2(new_orders_total + allowanceTotal + passive_derived);
@@ -598,6 +626,8 @@ function parseCowayPayslip(text) {
     passive_and_tbc_total: passive_derived,
     tbc_total,
     overriding_1st_install_total,
+    adjustment_incentive_total,
+    adjustment_incentives,
     allowances,
     new_orders: new_orders_detail,
     _verify_total: verify_total,
