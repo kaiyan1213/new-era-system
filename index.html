@@ -6122,7 +6122,13 @@ async function previewAutoCommission() {
         pos.includes('editor') ? 3 : pos.includes('content') ? 4 : 2;
       return [teamBase + roleOff, s.name];
     };
-    const reportStaff = [...leadMatchedStaff, ...extraMatchedStaff].sort((a, b) => {
+    // Proxy Managers always get a row (even with 0 matched orders): their
+    // own proxy's Coway payslip must be netted/saved into Payroll every
+    // month (own_proxy_offset → P&L "Proxy Manager Income"), orders or not.
+    const isProxyMgrWithOwnProxy = s => (s.position || '').toLowerCase() === 'proxy_manager' && !!s.own_proxy_id;
+    const reportIds = new Set([...leadMatchedStaff, ...extraMatchedStaff].map(s => s.id));
+    const proxyMgrStaff = staffList.filter(s => isProxyMgrWithOwnProxy(s) && !reportIds.has(s.id));
+    const reportStaff = [...leadMatchedStaff, ...extraMatchedStaff, ...proxyMgrStaff].sort((a, b) => {
       const [ka, na] = staffSortKey(a);
       const [kb, nb] = staffSortKey(b);
       return ka !== kb ? ka - kb : na.localeCompare(nb);
@@ -6198,7 +6204,7 @@ async function previewAutoCommission() {
       // Staff with zero matched orders this period have nothing to review
       // or save here — showing them just adds noise to a list that's
       // meant to be scanned for who still needs action.
-      .filter(row => row.orders.length > 0);
+      .filter(row => row.orders.length > 0 || isProxyMgrWithOwnProxy(row.staff));
 
     if (!autoCommissionData.length) {
       container.innerHTML = reportStaff.length
